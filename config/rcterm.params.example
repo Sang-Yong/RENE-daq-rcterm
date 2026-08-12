@@ -1,0 +1,52 @@
+# =====================================================================
+#  rcterm parameter file
+#    사용 : rcterm --params config/rcterm.params
+#    형식 : '옵션이름(-- 없이) = 값'   /  값 없는 플래그는 이름만
+#    '#' 뒤는 주석
+#    커맨드라인으로 동일 옵션을 다시 주면 이 파일보다 이긴다.
+# =====================================================================
+
+# ---- 런 정보 (rc.py GUI 입력항에 1:1 대원) ----
+shift      = SangYong
+runtype    = physics          # physics | calibration | test
+desc       = RENE cup continuous data taking
+config     = /home/frontend/DAQ/DAQ_cup/test_wj.config
+
+# ---- 타이밍 ----
+split-time = 1                # 서브런 분할 [분] -> TCB 에 -p 60 으로 전달
+run-length = 24               # 런 1개 길이 [시간]
+max-runs   = 0                # 0 = 무한.
+                              # rcsupervisor 가 관리할 때는 감시자가
+                              # --max-runs 1 로 강제하므로 이 값은 무시된다.
+
+# ---- 런 카타로그 (sqlite3) ----
+dbfile     = /Data/runcatalog.db
+# no-db                       # DB 를 쓰지 않으려면 이 플래그 + run 지정
+# run        = 1000
+
+# ---- 사이트 (단일 PC) ----
+daqserver  = localhost
+daqport    = 7809
+onldaqdir  = /home/frontend/DAQ/DAQ_cup/install
+rawdatadir = /Data
+# bindir     = /home/frontend/DAQ/DAQ_cup/install/bin   # executedaq.sh 직하
+# exescript  = executedaq.sh
+
+# ---- merger 종류 ----
+#  FADCMERGER / SADCMERGER 처럼 이름에 종류가 들어 있으면 자동 인식된다.
+#  이름이 그냥 'MERGER' 이고 ADC 종류가 2개 이상이면 아래를 사용.
+# merger-type = f
+
+# ---- 온라인 모니타 / 출력 ----
+update     = 1.0              # 화면 갱신 주기 [초]
+log        = /Data/LOG/rcterm.log
+heartbeat  = /Data/LOG/rcterm.hb        # rcsupervisor 가 읽는 상태 파일
+rootout    = /Data/LOG/rcterm_mon.root  # 모니타링 TTree
+# quiet                       # 한 줄씩 로그 (감시자가 자동으로 붙인다)
+
+# ---- 타임아웃 ----
+# boot-timeout  = 90
+# state-timeout = 60
+
+# ---- 설진본이 구버전이라 tcb 가 -p 를 모를 때만 해제 ----
+# no-tcb-split

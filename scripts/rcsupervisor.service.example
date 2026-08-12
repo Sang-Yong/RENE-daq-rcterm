@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------
+#  systemd unit 샘플 : 재부파후에도 자동으로 DAQ 를 이어가고 싶을 때
+#
+#  설치 :
+#    sudo cp rcsupervisor.service.example /etc/systemd/system/rcsupervisor.service
+#    sudo vi /etc/systemd/system/rcsupervisor.service    # 경로/사용자 수정
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now rcsupervisor
+#    journalctl -u rcsupervisor -f
+#
+#  주의 : ROOT 환경이 필수이다. thisroot.sh 를 거치는 래턴 스크립트를
+#         ExecStart 로 지정하는 편이 안전하다.
+# ---------------------------------------------------------------------
+[Unit]
+Description=RENE/CUPDAQ run control supervisor (rcsupervisor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=frontend
+Group=frontend
+WorkingDirectory=/home/frontend/DAQ/RENE-daq-rcterm
+
+# ROOT 환경을 주입하는 래턴 스크립트 사용을 권장
+#   /home/frontend/DAQ/run_supervisor.sh 예시:
+#     #!/bin/bash
+#     source /opt/root/bin/thisroot.sh
+#     exec /home/frontend/DAQ/RENE-daq-rcterm/install/bin/rcsupervisor \
+#          --params /home/frontend/DAQ/RENE-daq-rcterm/config/rcsupervisor.params
+ExecStart=/home/frontend/DAQ/run_supervisor.sh
+
+# 정상 종료를 위해 SIGTERM 을 보내고 런 마감을 기다린다
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=600
+
+Restart=on-failure
+RestartSec=60
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

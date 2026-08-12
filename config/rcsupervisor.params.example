@@ -1,0 +1,44 @@
+# =====================================================================
+#  rcsupervisor parameter file
+#    사용 : rcsupervisor --params config/rcsupervisor.params
+#
+#  이 프로그램은 rcterm 을 자식으로 띄우고,
+#    - run-length 마다 런을 정상 종료시키고 새 run 번호로 다시 띄운다
+#    - check-period 마다 이상 여부를 진단하여 이상이면 복관한다
+# =====================================================================
+
+# ---- 자식 프로그램 ----
+rcterm        = /home/frontend/DAQ/RENE-daq-rcterm/install/bin/rcterm
+rcterm-params = /home/frontend/DAQ/RENE-daq-rcterm/config/rcterm.params
+
+# ---- 런 로테이션 ----
+run-length    = 24            # 런 교지 주기 [시간]
+margin        = 30            # rcterm 자체 타이머에 줄 여유 [분]
+                              #  -> rcterm 은 24.5h 로 띄고, 24h 지점에
+                              #     감시자가 SIGTERM 을 보내 마간을 지시한다.
+max-cycles    = 0             # 0 = 무한 반복
+
+# ---- 에러 감시 ----
+check-period  = 600           # 진단 주기 [초]  (10분)
+stale-limit   = 300           # heartbeat 가 이 시간 이상 안 바리면 이상
+boot-grace    = 300           # 기동 구간은 진단 유예 [초]
+stall-grace   = 1800          # 이벤트가 이 시간 동안 증가 안하면 이상 [초]
+# no-stall-check              # 저리드 런이라 오랫동안 0 Hz 가 정상이면 해제
+# no-socket-check             # TCB 직접 조회를 생략하고 heartbeat 만 볼 때
+
+# ---- 복관 동작 ----
+grace         = 180           # SIGTERM 후 정상종료 대기 [초]
+settle        = 10            # 정리 후 대기 [초]
+backoff       = 30            # 실패 후 대기 [초]
+max-consec-fail = 5           # 연속 실패 한계 (초과시 감시자도 종료)
+
+# ---- 경로 / 사이트 ----
+heartbeat     = /Data/LOG/rcterm.hb       # rcterm.params 와 반드시 동일하게!
+log           = /Data/LOG/rcsupervisor.log
+bindir        = /home/frontend/DAQ/DAQ_cup/install/bin   # 정리용
+daqserver     = localhost
+daqport       = 7809
+
+# ---- DB 를 사용하지 않을 때만 ----
+# no-db
+# run         = 1000          # 감시자가 사이클당 +1 시킨다
