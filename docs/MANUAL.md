@@ -147,7 +147,7 @@ tmp 에 쓴 뒤 `rename()` 하므로 부분적으로 읽힐 일이 없다.
 
 ```
 time=1786554086          # epoch. 이 값이 오래되면 rcterm 이 멈춘 것
-time pid=12345
+pid=12345                # 이 파일을 쓴 rcterm 프로세스의 PID
 phase=running            # booting|booted|configured|running|ending|ended|error|failed|notrunning
 run=123
 subrun=45
@@ -263,7 +263,7 @@ rcterm --params config/rcterm.params --max-runs 1 --run-length 8760 --split-time
 scripts/killdaq.sh -n            # 드라이런 : 목록만 보기
 
 # heartbeat 나이
-date +%s; grep '^time=' /Data/LOG rcterm.hb
+date +%s; grep '^time=' /Data/LOG/rcterm.hb
 
 # 감시자 로그
 tail -f /Data/LOG/rcsupervisor.log

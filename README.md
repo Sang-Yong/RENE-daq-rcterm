@@ -370,6 +370,7 @@ a reader never observes a partially written file.
 
 ```
 time=1786554086       # wall clock of this sample; if stale, rcterm is stuck
+pid=12345             # PID of the rcterm process that wrote this file
 phase=running         # booting|booted|configured|running|ending|ended|error|failed|notrunning
 run=123
 subrun=45
@@ -535,8 +536,10 @@ fault. Improvement: expose it as an option.
 
 **9.7 The heartbeat file has no locking.** The `rename()` write is atomic, which
 is enough for a single reader, but nothing prevents two `rcterm` instances from
-sharing one path and confusing the supervisor. Improvement: a PID file plus
-`flock`, and have the supervisor verify the PID it is watching.
+sharing one path and confusing the supervisor. The heartbeat already carries a
+`pid=` field, yet `rcsupervisor` never parses or verifies it. Improvement: have
+the supervisor compare `pid=` against the child PID it actually forked, and add
+`flock` so a second writer cannot claim the same path.
 
 **9.8 No automated tests.** Config parsing, merger-kind resolution and bitmask
 decoding are pure functions and easy to test. Improvement: add a `tests/` target

@@ -360,6 +360,7 @@ SIGTERM은 **`rcterm` PID 하나에만** 보내며, **프로세스 그룹에는 
 
 ```
 time=1786554086       # 이 샘플의 벽시계 시각. 낡으면 rcterm 이 멈춘 것
+pid=12345             # 이 파일을 쓴 rcterm 프로세스의 PID
 phase=running         # booting|booted|configured|running|ending|ended|error|failed|notrunning
 run=123
 subrun=45
@@ -516,8 +517,10 @@ rcsupervisor --params config/rcsupervisor.params -- --rootout /Data/LOG/mon.root
 
 **9.7 heartbeat 파일에 락이 없습니다.** `rename()` 기록은 원자적이므로 단일 독자에는
 충분하지만, 두 `rcterm` 인스턴스가 같은 경로를 공유하는 것을 막지 못해 감시자가
-혼란에 빠질 수 있습니다. 개선안: PID 파일 + `flock`, 그리고 감시자가 감시 대상 PID를
-검증하도록 보강.
+혼란에 빠질 수 있습니다. heartbeat에는 이미 `pid=` 필드가 기록되고 있으나
+`rcsupervisor`는 이를 파싱하거나 검증하지 않습니다. 개선안: 감시자가 `pid=`를 자신이
+fork한 자식 PID와 대조하도록 하고, 다른 프로세스가 같은 경로를 차지하지 못하도록
+`flock`을 추가.
 
 **9.8 자동화 테스트가 없습니다.** config 파싱, 머저 종류 판정, 비트마스크 해석은 모두
 순수 함수여서 테스트하기 쉽습니다. 개선안: 골든 `SERVER` 블록과 기대 부팅 명령을 담은
