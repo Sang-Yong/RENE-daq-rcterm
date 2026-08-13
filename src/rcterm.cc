@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------
 //  rcterm : RENE / CUPDAQ text-mode run control  (CERN ROOT / C++)
 //
-//  DAQRC/rc.py 의 PyQt5 GUI 를 제거하고 스크립트 입출력이 가능한 통식으로
-//  재작성한 프로그램. 단일 PC 구성(kISREMOTEDAQ=False) 전용이부
+//  DAQRC/rc.py 의 PyQt5 GUI 를 제거하고 스크립트 입출력이 가능한 형태로
+//  재작성한 프로그램. 단일 PC 구성(kISREMOTEDAQ=False) 전용이며
 //  ssh/scp 를 사용하지 않는다.
 //
 //  런 로테이션은 다음 두 가지 방법이 있다.
 //    (a) rcterm 자체 로테이션  : --run-length 24 --max-runs 0
 //    (b) rcsupervisor 가 관리  : rcterm 은 --max-runs 1 로 한 런만 수행
-//        (권장. 에러 감지/자동 복관이 함족된다)
+//        (권장. 에러 감지/자동 복구가 포함된다)
 // ---------------------------------------------------------------------
 
 #include <csignal>
@@ -29,7 +29,7 @@ static void Usage(const char* p)
 "\nUsage: " << p << " [OPTIONS]\n"
 "       " << p << " --params <file> [OPTIONS]\n"
 "\n"
-" Run information (rc.py GUI 입력항에 1:1 대원)\n"
+" Run information (rc.py GUI 입력란에 1:1 대응)\n"
 "   --shift NAME          shift crew name                        [required]\n"
 "   --config FILE         hardware config file (*.config)        [required]\n"
 "   --runtype TYPE        physics | calibration | test            (physics)\n"

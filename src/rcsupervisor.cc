@@ -5,7 +5,7 @@
 //   1) rcterm 을 자식 프로세스로 실행 (--max-runs 1 로 한 런만 수행)
 //   2) --run-length (기본 24h) 이 지나면 rcterm 에 SIGTERM 을 봐서
 //      현재 런을 정상적으로 마감(ENDRUN->EXIT, DB 기록)하게 하고,
-//      자식이 버지면 새 run 번호로 다시 실행한다.
+//      24시간이 다 지나면  새 run 번호로 다시 실행한다.
 //   3) --check-period (기본 600s = 10분) 마다 상태를 진단하여
 //      보기에 이상하면 DAQ 를 정리한 뒤 새 run 으로 재기동한다.
 //
@@ -516,7 +516,7 @@ int main(int argc, char** argv)
       }
       ++cycle;
 
-      // 새 런 번호 : DB 를 쓰면 rcterm 이 INSERT 로 횝득,
+      // 새 런 번호 : DB 를 쓰면 rcterm 이 INSERT 로 획득,
       //             --no-db 면 감시자가 직접 증가시킨다.
       const int runNoDB = c.startRun + (cycle - 1);
 

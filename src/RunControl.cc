@@ -77,7 +77,7 @@ std::string LowerOf(const std::string& s)
 // ---------------------------------------------------------------------
 //  이름에서 ADC 종류를 판정한다.
 //  rc.py 는 name[0].lower() 를 사용하므로 'MERGER' -> 'm' (MADC) 로
-//  오인하는 버긎가 있다. 여기에서는 부분벇본 검색을 사용하여
+//  오인하는 버그가 있다. 여기에서는 부분문자열 검색을 사용하여
 //  FADCMERGER -> FADC, SADCMERGER -> SADC 로 정확하게 분리한다.
 //  검사 순서가 중요: AMOREADC 를 AADC 보다 음직 먼지 본다.
 // ---------------------------------------------------------------------
@@ -343,10 +343,10 @@ bool RunControl::ParseConfigFile()
             return false;
          }
 
-   // 부톥 순서 : MERGER -> ADC -> TCB
+   // 부팅 순서 : MERGER -> ADC -> TCB
    //  merger/TCB 가 서버 역할이므로 TCB 가 마지막이어야 접속이 성립한다.
    //  rc.py 는 dopt 문자열로 정렬하여 AADC 가 있을 때 TCB 가 마지막이 되지
-   //  않는 버긎가 있다. 여기서는 mode 로 명시적으로 강제한다.
+   //  않는 버그가 있다. 여기서는 mode 로 명시적으로 강제한다.
    std::vector<DaqNode> ordered;
    const int order[3] = {onl::kMODE_MERGER, onl::kMODE_ADC, onl::kMODE_TCB};
    for (int p = 0; p < 3; ++p) {
@@ -963,7 +963,7 @@ bool RunControl::RunOneCycle(int run, int cycle)
    Log(buf);
    std::cout << "[INFO] started" << std::endl;
 
-   // ------------------- 모니타 루프 -------------------
+   // ------------------- 모니터 루프 -------------------
    const double runLenSec = fCfg.runLengthHour * 3600.0;
    bool timeUp = false;
 

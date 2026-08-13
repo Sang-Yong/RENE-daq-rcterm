@@ -37,7 +37,7 @@
 | `kQUERYDAQSTATUS` | 10 | 상태 반환 |
 | `kQUERYRUNINFO` | 12 | m2=subrun, m3=start, m4=end |
 | `kQUERYTRGINFO` | 14 | m1=이벤트 수, m2=경과시간[ns] |
-| `kQUERYMONITOR` | 21 | 모니타 가능 여부 |
+| `kQUERYMONITOR` | 21 | 모니터 가능 여부 |
 
 **상태는 정수가 아니라 비트마스크다.** `status & (1 << state)`.
 Down=0, Booted=1, Configured=2, Running=3, RunEnded=4, ProcEnded=5,
@@ -56,10 +56,10 @@ Warning=6, **Error=7**.
 | `rcterm.py` 가 `executenulldaq.sh`(테스트용) 를 호출, split time 미전달 | `executedaq.sh` + `-p` 전달 |
 | `rc.py` : `SplitTimeConfig.setText(int)` → `TypeError` | 해당 없음 (GUI 없음) |
 | `rc.py` : 정렬키가 name 이 아니라 `dopt` 문자열 → AADC 사용시 TCB 가 마지막이 아님 | `MERGER → ADC → TCB` 를 mode 로 명시 강제 |
-| `rc.py` : `name[0].lower()` 로 ADC 종류 판정 → `MERGER` 를 `-m`(MADC) 로 오인 | `FADC/SADC/...` 부분벇본 판정 → `FADCMERGER`/`SADCMERGER` 정확 분리 |
+| `rc.py` : `name[0].lower()` 로 ADC 종류 판정 → `MERGER` 를 `-m`(MADC) 로 오인 | `FADC/SADC/...` 부분문자열 판정 → `FADCMERGER`/`SADCMERGER` 정확 분리 |
 | 주석 `[s] -> [m]` 과 코드(`*60`, 분→초) 모슴 | 분 입력 → 초 변환을 명시 |
 | PyQt5 / pydblite 의존 | 제거 (sqlite3 CLI 로 대진) |
-| `$RAWDATA_DIR/LOG` 이 없으면 DAQ 가 조용히 죽음 | 부톥 전 `mkdir -p` |
+| `$RAWDATA_DIR/LOG` 이 없으면 DAQ 가 조용히 죽음 | 부팅 전 `mkdir -p` |
 
 ---
 
@@ -109,7 +109,7 @@ DAQ->SetOutputSplitTime(option.sptime);
 
 ---
 
-## 4. 런 카타로그 DB 연동
+## 4. 런 카탈로그 DB 연동
 
 `create_runcatalog_db.py` 스키마 :
 
@@ -130,7 +130,7 @@ CREATE TABLE runcatalog (
 `nfadc` 등은 DB 생성 옵션에 따라 없을 수 있어서, `PRAGMA table_info` 로
 컬럼 존재를 먼지 확인한 뒤에만 UPDATE 한다.
 
-카타로그 조회 :
+카탈로그 조회 :
 
 ```bash
 sqlite3 -header -column /Data/runcatalog.db \
@@ -224,11 +224,11 @@ awk -F= '/^daq[0-9]+=/{print $2}' /Data/LOG/rcterm.hb
 dead time 을 0 으로 해야 한다면 런을 나누지 않고 서브런만 사용해야 한다.
 
 ```bash
-# 런 1개, 1분마다 서브런으로 분할 → dead time 없지만 카타로그는 1행
+# 런 1개, 1분마다 서브런으로 분할 → dead time 없지만 카탈로그는 1행
 rcterm --params config/rcterm.params --max-runs 1 --run-length 8760 --split-time 1
 ```
 
-| 방식 | dead time | 카타로그 | 권장 상황 |
+| 방식 | dead time | 카탈로그 | 권장 상황 |
 |---|---|---|---|
 | 24h 로테이션 (기본) | 사이클당 10~40s | 하루 1행 | 일반 운용 |
 | 서브런만 | 0 | 1행에 누적 | dead time 을 절대 못 만드는 경우 |
@@ -240,7 +240,7 @@ rcterm --params config/rcterm.params --max-runs 1 --run-length 8760 --split-time
 | 증상 | 원인 / 처지 |
 |---|---|
 | `not found or not executable : .../executedaq.sh` | `--onldaqdir` / `--bindir` 확인. `install/bin/` 직하여야 함 |
-| `cannot connect to TCB` | 대부분 부톥 실패. `$RAWDATA_DIR/LOG/TCB_*.log` 확인. `--boot-timeout 180` 으로 늘려보기 |
+| `cannot connect to TCB` | 대부분 부팅 실패. `$RAWDATA_DIR/LOG/TCB_*.log` 확인. `--boot-timeout 180` 으로 늘려보기 |
 | `no SERVER line found` | config 의 `SERVER` 라인에 `#` 이 들어있으면 rc.py 와 동일하게 생략된다. 라인 끝 주석도 안 된다 |
 | `cannot determine ADC type from name` | ADC 이름에 `FADC`/`SADC` 등이 포함되어야 함 |
 | `merger has no ADC kind in its name` | `MERGER` → `FADCMERGER` / `SADCMERGER` 로 이름 변경, 또는 `--merger-type` |
@@ -268,7 +268,7 @@ date +%s; grep '^time=' /Data/LOG/rcterm.hb
 # 감시자 로그
 tail -f /Data/LOG/rcsupervisor.log
 
-# 모니타링 TTree
+# 모니터링 TTree
 root -l /Data/LOG/rcterm_mon.root
 root [1] daqmon->Draw("srate[0]:ctime", "", "l")
 root [2] daqnames->GetTitle()

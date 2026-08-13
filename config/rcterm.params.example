@@ -6,7 +6,7 @@
 #    커맨드라인으로 동일 옵션을 다시 주면 이 파일보다 이긴다.
 # =====================================================================
 
-# ---- 런 정보 (rc.py GUI 입력항에 1:1 대원) ----
+# ---- 런 정보 (rc.py GUI 입력란에 1:1 대응) ----
 shift      = SangYong
 runtype    = physics          # physics | calibration | test
 desc       = RENE cup continuous data taking
@@ -19,7 +19,7 @@ max-runs   = 0                # 0 = 무한.
                               # rcsupervisor 가 관리할 때는 감시자가
                               # --max-runs 1 로 강제하므로 이 값은 무시된다.
 
-# ---- 런 카타로그 (sqlite3) ----
+# ---- 런 카탈로그 (sqlite3) ----
 dbfile     = /Data/runcatalog.db
 # no-db                       # DB 를 쓰지 않으려면 이 플래그 + run 지정
 # run        = 1000
@@ -37,16 +37,16 @@ rawdatadir = /Data
 #  이름이 그냥 'MERGER' 이고 ADC 종류가 2개 이상이면 아래를 사용.
 # merger-type = f
 
-# ---- 온라인 모니타 / 출력 ----
+# ---- 온라인 모니터 / 출력 ----
 update     = 1.0              # 화면 갱신 주기 [초]
 log        = /Data/LOG/rcterm.log
 heartbeat  = /Data/LOG/rcterm.hb        # rcsupervisor 가 읽는 상태 파일
-rootout    = /Data/LOG/rcterm_mon.root  # 모니타링 TTree
+rootout    = /Data/LOG/rcterm_mon.root  # 모니터링 TTree
 # quiet                       # 한 줄씩 로그 (감시자가 자동으로 붙인다)
 
 # ---- 타임아웃 ----
 # boot-timeout  = 90
 # state-timeout = 60
 
-# ---- 설진본이 구버전이라 tcb 가 -p 를 모를 때만 해제 ----
+# ---- 설치본이 구버전이라 tcb 가 -p 를 모를 때만 해제 ----
 # no-tcb-split
