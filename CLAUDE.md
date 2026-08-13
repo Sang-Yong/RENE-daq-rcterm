@@ -26,7 +26,12 @@ config의 `SERVER` 라인 파싱 → 노드별 `executedaq.sh` 실행 / TCB 소�
 ## 1. 빌드
 
 ```bash
+<<<<<<< HEAD
+source /usr/local/bin/thisroot.sh
+source /home/frontend/DAQ/DAQ_cup/cupdaq_env.sh
+=======
 source /opt/root/bin/thisroot.sh
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
 ./build.sh                       # → install/bin/{rcterm,rcsupervisor}
 ```
 ROOT 컴포넌트는 **Core, RIO, Tree만**. Gui/Gpad/Graf 불필요(headless ROOT 충분).
@@ -108,6 +113,13 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | **heartbeat 파일** | `pid=` 포함 12줄, `.tmp`→`rename()` 원자적 확인 |
 | **`--params` 로딩** | 동작 확인. 단 **위치 기반** (§5.6) |
 | 라이브 부팅 경로 | LOG/CONFIG 자동생성, config→`CONFIG/000002.config` 복사 확인 |
+<<<<<<< HEAD
+| **실제 ROOT 6.28/04 빌드** | clean build 성공, 에러 0. §4.4 스텁결함 5종 전부 무관함 확인 (2026-08-13) |
+| **rcterm 설정오류 종료코드** | `--config /nonexistent.config` → `exit=1` 실측 확인 |
+| **rcsupervisor 테스트 H(로테이션)** | run=900 clean exit → run=901 재시작 → `exit=0`, SIGTERM 정상 전달, 좀비 없음 |
+| **rcsupervisor 테스트 I(stale 복구)** | 12초에 stale 감지(기대 ~11초) → SIGTERM → clean exit → run=951 재시작. 좀비 없음 |
+=======
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
 
 종료코드가 0/1/2 세 값으로 갈리는 것은 설계상 이상적이다 — supervisor가
 "설정 오류(재시작 무의미)" / "런 실패(재시작 가치 있음)" / "정상"을 구분할 수 있다.
@@ -131,9 +143,13 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 
 | # | 항목 | 방법 |
 |---|---|---|
+<<<<<<< HEAD
+| 1 | **실 하드웨어 실행 — 최대 리스크** | dry-run → 2사이클 단축 → 1회전 관찰 |
+=======
 | 1 | **실제 ROOT 헤더로 빌드** | `./build.sh` — 선행 검증은 전부 스텁 헤더 기반이었음 |
 | 2 | **rcsupervisor 사이클/복구** | §6 테스트 H·I |
 | 3 | **실 하드웨어 실행 — 최대 리스크** | dry-run → 2사이클 단축 → 1회전 관찰 |
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
 
 ### 4.4 스텁 결함 5종 (오해 금지)
 
@@ -183,7 +199,12 @@ run number 변경" 명령이 **없다**. run number는 `executedaq.sh -r`로 프
 
 ### 작업 1 — 실제 ROOT 빌드 검증 ★최우선
 ```bash
+<<<<<<< HEAD
+source /usr/local/bin/thisroot.sh
+source /home/frontend/DAQ/DAQ_cup/cupdaq_env.sh
+=======
 source /opt/root/bin/thisroot.sh
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
 rm -rf build install && ./build.sh 2>&1 | tail -60
 ls -la install/bin/
 install/bin/rcterm --help | head -30
@@ -211,6 +232,22 @@ statebit=3/error=0/status=8/daqtime/totev/ndaq`)을 `.tmp`→`mv`로 쓰고,
 
 실제 옵션명은 `rcsupervisor --help`로 확인할 것(`--rcterm` 경로 지정 옵션 존재 여부 포함).
 
+<<<<<<< HEAD
+### 작업 3 — 한글 텍스트 깨짐 수정 ✅ (2026-08-13 완료)
+동작 무관이나 사용자가 매일 보는 화면이다.
+
+지정된 sed 전부 적용 완료. 원 grep 패턴은 `src config docs README*.md` 전체에서 0건.
+추가로 `docs/MANUAL.md`, `src/RunControl.cc`에도 같은 패턴이 남아있어 함께 수정함
+(모니타→모니터, 카타로그→카탈로그, 부톥→부팅, 부분벇본→부분문자열, 버긎가→버그가).
+`src/rcsupervisor.cc` 한글 주석 54줄 전수 육안 검토 후 `횝득`→`획득` 추가 수정.
+
+**미해결 1건**: `src/rcsupervisor.cc:8` `"자식이 버지면 새 run 번호로 다시 실행한다"` —
+`버지면`이 문법에 맞지 않으나 원래 의도한 단어(죽으면/종료되면 등)를 추측으로 바꾸면
+기술 문서 의미가 왜곡될 위험이 있어 **수정하지 않고 보류**. 사용자 확인 필요.
+
+`README.ko.md`(한글 줄 341개)는 원 grep 패턴 기준으로는 0건이었으나 줄 단위 육안
+전수 검토는 아직 하지 않았다. 필요시 추가 요청할 것.
+=======
 ### 작업 3 — 한글 텍스트 깨짐 수정
 동작 무관이나 사용자가 매일 보는 화면이다.
 ```bash
@@ -226,6 +263,7 @@ grep -rn '대원\|작성답\|벇본\|멈진다\|부톥\|카타로그\|모니타\
 ```
 `rcsupervisor.cc`, `RunControl.cc`, `docs/MANUAL.md`, `README.ko.md`는 아직 전수
 검사되지 않았다. 위 `grep`에 걸리는 것 외에도 문맥상 어색한 한글이 있으면 고칠 것.
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
 
 ### 작업 4 — README/MANUAL에 `--params` 위치 기반 규칙 명시 (§5.6)
 
@@ -299,3 +337,51 @@ run 번호는 부팅 **전에** 발급되므로 부팅 실패 시 `stime/etime/o
 - 장시간 운용은 `tmux` 또는 `nohup ... --quiet &`.
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
 
+<<<<<<< HEAD
+## 11. 세션 기록 (Claude Code)
+
+### 2026-08-13 — §6 작업 1~3 수행
+
+**작업 1 — 실제 ROOT 빌드 검증 ✅**
+- `source /usr/local/bin/thisroot.sh && source cupdaq_env.sh && rm -rf build install && ./build.sh`
+- ROOT 6.28/04, GCC 11.5.0로 clean build 성공. 에러 0, §4.4 스텁결함 5종 관련 문제 전혀
+  없음 — 소스가 실제 ROOT API를 정확히 사용함을 확정.
+- `install/bin/{rcterm,rcsupervisor}` 생성, `--help` 정상. sqlite3 CLI는 이 호스트에
+  미설치 (`--no-db` 필요, 기존에 알려진 사항).
+- 부가 검증: `rcterm --shift T --config /nonexistent.config --no-db --run 1 --dry-run`
+  → `exit=1` 확인.
+
+**작업 2 — rcsupervisor 로테이션/복구 검증 ✅**
+- `/tmp/suptest/fake_rcterm.sh` 작성: `--heartbeat`/`--run` 파싱, 실제 `WriteHeartbeat()`와
+  동일한 12줄 포맷을 `.tmp`→`mv`로 원자적 기록, `trap TERM`으로 clean exit,
+  `FAKE_MODE=stale`이면 3초 후 heartbeat 갱신 중단.
+- **테스트 H(로테이션)**: `FAKE_MODE=good`로 실행 → run=900 clean exit → run=901 재시작 →
+  supervisor `exit=0`. SIGTERM이 자식에 정확히 전달됨을 trace.log로 확인, 좀비 프로세스 없음.
+- **테스트 I(stale 복구)**: `FAKE_MODE=stale`로 실행 → 런 시작 12초 후 stale 감지(기대 ~11초,
+  일치) → SIGTERM → clean exit → run=951로 재시작. 좀비 프로세스 없음.
+  (참고: 최초 시도에 `--max-cycles 1`을 잘못 줘서 재시작 확인 전에 종료됐음 →
+  `--max-cycles 2`로 재실행하여 확인. `exit=124`는 테스트용 `timeout` 래퍼가 세 번째
+  backoff 대기 중 강제 종료시킨 것으로, supervisor 자체 결함 아님.)
+- 실제 옵션명은 `rcsupervisor --help`로 확인 후 사용 (`--rcterm` 존재 확인).
+
+**작업 3 — 한글 텍스트 깨짐 수정 ✅**
+- §6에 명시된 sed 전부 적용 (`src/rcterm.cc`, `config/rcterm.params.example`,
+  `config/SERVER-block.example`). 원 grep 패턴 `src config docs README*.md` 전체 0건.
+- 지정 범위 밖이었던 `docs/MANUAL.md`, `src/RunControl.cc`에도 동일 패턴이 남아있어
+  함께 수정 (모니타→모니터, 카타로그→카탈로그, 부톥→부팅, 부분벇본→부분문자열,
+  버긎가→버그가).
+- `src/rcsupervisor.cc` 한글 주석 54줄을 육안으로 전수 검토 → `횝득`→`획득` 추가 수정.
+- 수정 후 재빌드로 컴파일 문제없음 확인.
+
+**미해결 — 사용자 확인 필요**
+- `src/rcsupervisor.cc:8` `"자식이 버지면 새 run 번호로 다시 실행한다"` — `버지면`이
+  비문이나 의도한 단어(죽으면/종료되면 등)를 추측으로 바꾸면 의미가 왜곡될 위험이 있어
+  **수정 보류**.
+- `README.ko.md`(한글 341줄)는 패턴 grep은 통과했으나 줄 단위 육안 전수 검토는 미실시.
+
+**갱신 안 됨 (다음 세션 대상)**
+- §4.3 잔여 항목: 실 하드웨어 실행 검증 (§6 작업 7, 사용자와 함께 진행 필요) —
+  이번 세션에서 시도하지 않음.
+
+=======
+>>>>>>> 967823e2c503573ecd56ebb2f42251f03aff103e
