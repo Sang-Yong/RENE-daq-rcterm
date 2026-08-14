@@ -173,8 +173,8 @@ awk -F= '/^daq[0-9]+=/{print $2}' /Data/LOG/rcterm.hb
 
 ## 6. 감시자의 진단 기준
 
-`rcsupervisor` 는 `--check-period`(기본 600초) 마다 아래를 살한다.
-쉽게 말해 **단으로 감지하고 단으로 복관한다.**
+`rcsupervisor` 는 `--check-period`(기본 600초) 마다 아래를 살핀다.
+쉽게 말해 **단으로 감지하고 단으로 복구한다.**
 
 | # | 점검 | 이상 판정 |
 |---|---|---|
@@ -186,18 +186,18 @@ awk -F= '/^daq[0-9]+=/{print $2}' /Data/LOG/rcterm.hb
 
 기동 구간(`--boot-grace`, 기본 300초)은 3~5를 유예한다.
 
-### 이상 샜 복관 순서
+### 이상 시 복구 순서
 
 ```
 1) rcterm PID 에만 SIGTERM        → ENDRUN→EXIT, DB 기록하고 정상 종료 시도
-2) --grace (180s) 안에 안 끌나면  → 프로세스 그룹에 SIGKILL
+2) --grace (180s) 안에 안 끝나면  → 프로세스 그룹에 SIGKILL
 3) pkill -f "<bindir>/{tcb,merger,daq}"  → 남은 DAQ 정리
 4) --settle (10s) 대기
 5) --backoff (30s) 대기 후 새 run 번호로 재시작
 ```
 
 **중요 : SIGTERM 은 그룹이 아니라 rcterm 단일 PID 에만 보낸다.**
-그룹에 보내면 `daq/tcb/merger` 가 생자료로 죽어 마지막 파일이 상한다.
+그룹에 보내면 `daq/tcb/merger` 가 쓰기 도중에 죽어 마지막 파일이 상한다.
 
 `--max-consec-fail`(기본 5) 번 연속 실패하면 감시자도 종료한다.
 무한 재시작 루프로 쓰레기 런을 대량 생산하는 상황을 막기 위한 장치다.
@@ -208,7 +208,7 @@ awk -F= '/^daq[0-9]+=/{print $2}' /Data/LOG/rcterm.hb
 
 프로토콜에 "실행 중 run number 변경" 명령이 없다. run number 는
 `executedaq.sh -r <run>` 으로 프로세스 기동 시점에 고정된다. 즉
-런 번호를 바꾸려보면 프로세스를 내렸다 올려야 한다.
+런 번호를 바꾸려면 프로세스를 내렸다 올려야 한다.
 
 ```
 [run N 수집 24h] → ENDRUN → EXIT → cleanup → boot → CONFIG → START → [run N+1]
@@ -235,10 +235,35 @@ rcterm --params config/rcterm.params --max-runs 1 --run-length 8760 --split-time
 
 ---
 
+## 7.5 `--params` 는 위치 기반이다
+
+`--params` 파일의 내용은 **인자 배열에서 `--params` 가 있던 그 자리에 그대로
+펼쳐진다.** 따라서 **뒤에 오는 것이 이긴다.**
+
+```bash
+rcterm --shift A --params f.params      # f.params 의 shift 가 이긴다
+rcterm --params f.params --shift A      # 커맨드라인의 --shift A 가 이긴다
+```
+
+**`--params` 는 항상 맨 앞에 둘 것.** `rcsupervisor` 도 이 규칙에 의존해서
+params 파일 뒤에 자기 설정을 덧붙인다.
+
+```
+rcterm --params <file> --max-runs 1 --run-length 24.016667 --quiet --heartbeat <hb>
+       └ 사용자 설정 ┘ └──────── 감시자가 덮어쓰는 로테이션 설정 ────────┘
+```
+
+그래서 `rcterm.params` 안의 `max-runs` / `run-length` 는 감시자가 관리할 때
+무시된다. 반대로 `heartbeat` 경로는 두 params 파일에서 **반드시 같아야** 한다.
+다르면 감시자가 영원히 stale 로 판정해 무한 재시작한다.
+
+---
+
 ## 8. 문제 해결
 
-| 증상 | 원인 / 처지 |
+| 증상 | 원인 / 조치 |
 |---|---|
+| `a DAQ is already listening on ...:7809` | 이전 런의 `daq/tcb/merger` 가 살아있다. 새 tcb 가 포트를 잡지 못하고 rcterm 이 옛 런에 붙는 것을 막은 것. `scripts/killdaq.sh` 로 정리 후 재시작 |
 | `not found or not executable : .../executedaq.sh` | `--onldaqdir` / `--bindir` 확인. `install/bin/` 직하여야 함 |
 | `cannot connect to TCB` | 대부분 부팅 실패. `$RAWDATA_DIR/LOG/TCB_*.log` 확인. `--boot-timeout 180` 으로 늘려보기 |
 | `no SERVER line found` | config 의 `SERVER` 라인에 `#` 이 들어있으면 rc.py 와 동일하게 생략된다. 라인 끝 주석도 안 된다 |

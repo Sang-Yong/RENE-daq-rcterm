@@ -230,6 +230,14 @@ Precedence: **command line / `--params` file > environment variable > compiled-i
 default**. Inside a `--params` file the leading `--` is omitted and the syntax is
 `key = value`, with `#` starting a comment.
 
+> **`--params` is positional — whatever comes later wins.** The file's contents are
+> expanded in place, exactly where `--params` appears in the argument list. So
+> `--shift A --params f` lets the file override `--shift`, while
+> `--params f --shift A` lets the command line override the file.
+> **Always put `--params` first.** `rcsupervisor` relies on this: it appends
+> `--max-runs 1 --run-length ... --quiet --heartbeat ...` after the params file so
+> that its own rotation settings win.
+
 ### 6.1 Run definition
 
 | Option | Meaning | Default |

@@ -113,6 +113,11 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | **rcterm 설정오류 종료코드** | `--config /nonexistent.config` → `exit=1` 실측 확인 |
 | **rcsupervisor 테스트 H(로테이션)** | run=900 clean exit → run=901 재시작 → `exit=0`, SIGTERM 정상 전달, 좀비 없음 |
 | **rcsupervisor 테스트 I(stale 복구)** | 12초에 stale 감지(기대 ~11초) → SIGTERM → clean exit → run=951 재시작. 좀비 없음 |
+| **실 하드웨어 24h 로테이션 운용** | 2026-08-14~15 영광 사이트. run 4280~4287, 1시간 로테이션 정상 (§11 참조) |
+| **SIGTERM 정상 마감 (수정 후)** | 가짜 TCB A/B 실측. 구버전=`phase=failed`/exit=2/DB 공백, 수정본=`phase=ended`/exit=0/stime·etime·nfadc·nsadc 전부 기록 |
+| **2차 신호 즉시 탈출** | DAQ 가 RunEnded 로 안 갈 때 2번째 SIGTERM → 1초 내 종료 (운영자가 갇히지 않음) |
+| **stale DAQ 가드** | 포트에 이미 DAQ 가 있으면 `[FATAL]` + exit=2, **run 번호 발급 전이라 번호 낭비 없음** 실측 |
+| **부팅 실패 DB 표기** | 부팅 실패 시 `onlbit=0, runlog='boot failed; run never started'` 기록 실측 |
 
 종료코드가 0/1/2 세 값으로 갈리는 것은 설계상 이상적이다 — supervisor가
 "설정 오류(재시작 무의미)" / "런 실패(재시작 가치 있음)" / "정상"을 구분할 수 있다.
@@ -136,7 +141,9 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 
 | # | 항목 | 방법 |
 |---|---|---|
-| 1 | **실 하드웨어 실행 — 최대 리스크** | dry-run → 2사이클 단축 → 1회전 관찰 |
+| 1 | ~~실 하드웨어 실행~~ ✅ 2026-08-14~15 완료 (§11) | — |
+| 2 | **수정본으로 실 하드웨어 재검증** | 2026-08-15 의 3종 수정(SIGTERM 마감 / stale 가드 / 실패행 표기)은 가짜 TCB 로만 검증했다. 실 DAQ 로 1회전 확인 필요 |
+| 3 | **DAQ 를 tmux 로 이관** | 8/14 프리징 때 gnome-terminal 안에서 돌아 X 와 함께 날아갈 뻔했다 (§11.2). `tmux new -s daq` 로 띄울 것 |
 
 ### 4.4 스텁 결함 5종 (오해 금지)
 
@@ -230,12 +237,27 @@ statebit=3/error=0/status=8/daqtime/totev/ndaq`)을 `.tmp`→`mv`로 쓰고,
 `README.ko.md`(한글 줄 341개)는 원 grep 패턴 기준으로는 0건이었으나 줄 단위 육안
 전수 검토는 아직 하지 않았다. 필요시 추가 요청할 것.
 
-### 작업 4 — README/MANUAL에 `--params` 위치 기반 규칙 명시 (§5.6)
+**2026-08-15 추가 수정** — `docs/MANUAL.md`, `config/rcsupervisor.params(.example)`,
+`src/rcsupervisor.cc` 에 남아있던 것 중 문맥상 확정 가능한 것만 고쳤다:
+복관→복구, 살한다→살핀다, 이상 샜→이상 시, 안 끌나면→안 끝나면,
+바꾸려보면→바꾸려면, 처지→조치, 교지 주기→교체 주기, 마간→마감,
+안 바리면→안 바뀌면, 생자료로 죽어→쓰기 도중에 죽어(§5.3 근거).
 
-### 작업 5 — 실패 런 DB 고아 행 처리
-run 번호는 부팅 **전에** 발급되므로 부팅 실패 시 `stime/etime/onlbit`가 NULL인
-행이 남는다(rc.py도 동일 구조라 회귀는 아님). 24h 로테이션 중 반복 실패하면 쌓인다.
-→ 실패 시 `UPDATE runcatalog SET onlbit=0, runlog='boot failed' WHERE runnum=N`.
+**여전히 보류 3건 — 사용자 확인 필요** (추측 수정 시 의미 왜곡 위험):
+- `src/rcsupervisor.cc:8` `"자식이 버지면"` (죽으면? 종료되면?)
+- `docs/MANUAL.md:177` `"단으로 감지하고 단으로 복구한다"` (`단으로` 가 무엇인지 불명)
+- `config/rcsupervisor.params(.example):26` `"저리드 런"` (저레이트? — CLAUDE.md §10 의
+  `"지리드 런"` 도 같은 계열 오염이다)
+
+### 작업 4 — README/MANUAL에 `--params` 위치 기반 규칙 명시 (§5.6) ✅ (2026-08-15 완료)
+`README.md` §6, `README.ko.md` §6, `docs/MANUAL.md` 신설 §7.5, `rcterm --help` 에 명시.
+rcsupervisor 가 이 규칙에 의존한다는 점(params 뒤에 자기 설정을 덧붙임)까지 기록.
+
+### 작업 5 — 실패 런 DB 고아 행 처리 ✅ (2026-08-15 완료)
+`RunControl::MarkFailedRunInDB()` 신설. `Execute()` 에서 사이클 실패 시 호출하여
+`onlbit=0` + `runlog` 에 사유를 남긴다. 사유는 `fRunStartWall` 로 구분한다.
+- `boot failed; run never started` — STARTRUN 이전에 실패
+- `aborted; run started but was not finalized` — 시작은 했으나 마감 실패
 
 ### 작업 6 — 개선 백로그 (여유 있을 때)
 - `libsqlite3` 링크 + prepared statement (현재는 임시파일 + 셸 호출, 이스케이프만)
@@ -303,6 +325,79 @@ run 번호는 부팅 **전에** 발급되므로 부팅 실패 시 `stime/etime/o
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-15 — 실운용에서 드러난 버그 3종 수정 ★중요
+
+#### 11.1 rcterm 자체 버그 3종 (rc.py 회귀가 아니라 rcterm 고유 결함)
+
+**버그 A — SIGTERM 으로 끝낸 런이 DB 에 기록되지 않는다 (최우선)**
+`WaitState()` 첫 줄이 `if (fgStop) return false;` 였다. 정지 요청(감시자 로테이션의
+SIGTERM, 운영자 Ctrl-C)이 들어오면 모니터 루프를 빠져나와 `ENDRUN` 을 보낸 직후
+`WaitState(kRUNENDED)` 가 **즉시** false 를 반환한다 → `ok=false` → `FinalizeRunInDB()`
+통째로 생략 → 데이터 파일은 멀쩡한데 DB 에는 `stime/etime` NULL 인 고아 행만 남고
+heartbeat 는 `phase=failed`, 종료코드는 2(실패)가 된다.
+
+**감시자 로테이션은 매번 SIGTERM 으로 런을 끝내므로 이 경로가 매 런 재현된다.**
+실운용 증거 — `/Data/LOG/rcterm.log` 에서 성공 런은 `ENDRUN → ENDED → EXIT`,
+run 4276·4284·4287 은 `ENDRUN → (ENDED 없음) → EXIT`. 8/14 인수인계 문서가
+"확인 필요"로 남긴 run 4276 DB 마감 누락이 바로 이것이다.
+
+수정: `WaitState(state, timeout, bool ignoreStop=false)`. 런 종료 확인
+(`kRUNENDED`, `kPROCENDED`)만 `ignoreStop=true` 로 부른다. 부팅/설정 단계는
+그대로 즉시 빠져나간다. **두 번째 신호(`fgStop>=2`)는 "즉시 나가라"** 로 취급해
+DAQ 가 영영 RunEnded 로 안 갈 때 운영자가 갇히지 않게 했다
+(`RequestStop()` 이 1 로 고정하지 않고 증가시킨다).
+
+**버그 B — 남은 DAQ 가 있으면 옛 런의 TCB 에 붙는다**
+이전 런의 `tcb` 가 살아있으면 새로 띄운 `tcb` 는 7809 를 못 잡고 죽는데, rcterm 은
+그 포트에 그냥 접속해 **옛 런의 tcb** 를 붙든다. 그 tcb 는 `status=0x8`(Running,
+Booted 비트 없음)을 답하므로 `timeout waiting for Booted (status=0x8)` 로
+bootTimeout 내내 헛기다리다 실패한다. run 번호도 한 개 버려진다.
+실측 증거 — `TCB_004269.log` 22:23:55 에 **run 4270 의 rcterm 이 접속**.
+
+수정: `StaleDaqPresent()` 신설. `Execute()` 에서 **run 번호 발급보다 먼저** 검사해
+번호를 낭비하지 않는다. 직전 런이 내려가는 중일 수 있으므로 10초까지 기다린 뒤
+그래도 응답하면 `[FATAL]` + `killdaq.sh` 안내 + exit=2
+(감시자의 `CleanupStale` 후 재시작으로 풀리는 상황이므로 1 이 아니라 2).
+탈출구로 `--no-stale-check` 추가.
+
+**버그 C — 실패한 런이 DB 에 무표기 고아 행으로 남는다** → 작업 5 참조.
+
+#### 11.2 8/14 현장 상황 (인수인계 문서 요약)
+
+- 22:37 nouveau GSP MMU fault 로 화면 프리징. DAQ 자체는 계속 정상 가동했다.
+  → **NVIDIA 독점 드라이버 전환 완료** (8/15 04:06 재부팅,
+  `rd.driver.blacklist=nouveau nvidia-drm.modeset=1`, `nvidia-smi` 정상).
+- DAQ 가 `gnome-terminal-server → bash → rcsupervisor → rcterm` 로 물려 있었다.
+  X 가 죽으면 런이 통째로 날아간다. **tmux 이관은 아직 미완** (§4.3).
+- 8/15 03:30 에 4247~4284 고아 행을 수동 SQL 로 표기 완료
+  (`boot failed...` / `aborted...`). run 4287 도 수동 마감.
+
+#### 11.3 검증 방법 (하드웨어 미사용)
+
+`$CLAUDE_JOB_DIR/tmp/tcbtest/faketcb.py` — 32바이트 프로토콜만 흉내내는 가짜
+TCB/ADC(포트 17809/17814/17815). `ENDRUN` 수신 후 `END_DELAY` 초 뒤에 RunEnded 로
+가므로 이 대기 구간에서 구/신 동작이 갈린다. 가짜 `executedaq.sh` 를 `--bindir`
+로 물려 하드웨어를 전혀 건드리지 않는다.
+
+| 테스트 | 결과 |
+|---|---|
+| 1. stale 가드 | `[FATAL] already listening ... status=0x2`, exit=2, run 번호 미발급(700 유지) ✅ |
+| 2. SIGTERM 마감 | `phase=ended`, exit=0, `stime/etime/onlbit=1/nfadc=15811/nsadc=15811` ✅ |
+| 3. A/B 구버전(HEAD) 동일 시나리오 | `phase=failed`, exit=2, DB 행 전부 NULL — **운영 증상 그대로 재현** ✅ |
+| 4. 부팅 실패 표기 | `onlbit=0, runlog='boot failed; run never started'` ✅ |
+| 5. 2차 신호 탈출 | RunEnded 안 오는 상태에서 2차 SIGTERM → 1초 내 종료 ✅ |
+
+clean build 경고·에러 0 (ROOT 6.28/04, GCC 11.5.0).
+
+#### 11.4 이번 세션에서 하지 않은 것
+
+- **커밋하지 않았다.** 작업 트리에 사이트 전용 미커밋 변경(`build.sh` 의 `source`
+  2줄, `OnlConsts.hh` 의 `/scratch/RAW`·`/Data_ssd` 경로)이 섞여 있어 사용자 판단이
+  필요하다.
+- 수정본의 **실 하드웨어 검증 미실시** (§4.3-2).
+- §8 규칙("운영 디렉터리에서 소스 수정 금지")과 달리 운영 디렉터리에서 직접
+  수정했다. DAQ 가 정지 상태(프로세스 0개)임을 먼저 확인하고 진행했다.
 
 ### 2026-08-13 — §6 작업 1~3 수행
 

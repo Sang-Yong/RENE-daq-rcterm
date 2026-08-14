@@ -171,7 +171,7 @@ static pid_t SpawnRcterm(const Sup& c, int cycle, int runForNoDB)
 
 // 정상 종료 시도 -> 실패하면 그룹 전송
 //  주의: SIGTERM 은 rcterm 단일 PID 에만 보낸다.
-//        그룹에 보내면 daq/tcb/merger 가 생자료로 죽어 파일이 상한다.
+//        그룹에 보내면 daq/tcb/merger 가 쓰기 도중에 죽어 파일이 상한다.
 static int StopRcterm(pid_t pid, double graceSec, bool& graceful)
 {
    graceful = false;

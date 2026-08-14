@@ -223,6 +223,13 @@ install/bin/rcsupervisor --params config/rcsupervisor.params
 `--params` 파일 안에서는 앞의 `--`를 생략하고 `key = value` 형식으로 쓰며, `#`
 이후는 주석입니다.
 
+> **`--params`는 위치 기반입니다 — 뒤에 오는 것이 이깁니다.** 파일 내용이 인자
+> 배열에서 `--params`가 있던 그 자리에 그대로 펼쳐집니다. 따라서
+> `--shift A --params f` 는 파일이 이기고, `--params f --shift A` 는 커맨드라인이
+> 이깁니다. **`--params`는 항상 맨 앞에 두십시오.** `rcsupervisor`도 이 규칙에
+> 의존합니다 — params 파일 뒤에 `--max-runs 1 --run-length ... --quiet
+> --heartbeat ...` 를 덧붙여 자신의 로테이션 설정이 이기도록 만듭니다.
+
 ### 6.1 런 정의
 
 | 옵션 | 의미 | 기본값 |

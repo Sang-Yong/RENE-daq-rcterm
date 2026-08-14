@@ -48,5 +48,11 @@ rootout    = /Data/LOG/rcterm_mon.root  # 모니터링 TTree
 # boot-timeout  = 90
 # state-timeout = 60
 
+# ---- 부팅 전 안전 점검 ----
+#  기본적으로 부팅 직전에 daqport 를 확인해서, 이전 런의 DAQ 가 아직 살아있으면
+#  [FATAL] 로 멈춘다. (그대로 두면 새 tcb 가 포트를 못 잡고 rcterm 이 옛 런에
+#  붙어버린다.)  이 검사를 끄려면 아래 주석을 해제한다.
+# no-stale-check
+
 # ---- 설치본이 구버전이라 tcb 가 -p 를 모를 때만 해제 ----
 # no-tcb-split
