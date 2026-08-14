@@ -606,13 +606,38 @@ void RunControl::FinalizeRunInDB(int run)
    if (!o.empty()) std::cerr << "[WARN] sqlite3: " << o << std::endl;
 }
 
+// run 번호는 부팅 '전에' 발급되므로, 부팅/런이 실패하면 stime·etime 이 NULL 인
+// 고아 행이 남는다. 로테이션이 반복 실패하면 이런 행만 쌓여 나중에 카탈로그를
+// 읽을 때 실패한 런과 기록이 누락된 정상 런을 구분할 수 없다.
+// 실패 사유를 runlog 에 남겨 둔다.
+void RunControl::MarkFailedRunInDB(int run, const char* why)
+{
+   if (!fCfg.useDB || fCfg.dryRun || run <= 0) return;
+
+   std::ostringstream sql;
+   sql << "UPDATE runcatalog SET ";
+   bool first = true;
+   if (HasColumn("onlbit")) { sql << "onlbit=0"; first = false; }
+   if (HasColumn("runlog")) {
+      if (!first) sql << ",";
+      sql << "runlog='" << SqlEsc(why) << "'";
+      first = false;
+   }
+   if (first) return;
+   sql << " WHERE runnum=" << run << ";\n";
+
+   const std::string o = Trim(RunSQL(sql.str()).Data());
+   if (!o.empty()) std::cerr << "[WARN] sqlite3: " << o << std::endl;
+}
+
 // ================================================================= boot
 bool RunControl::BootRun(int run)
 {
-   fStartTime = 0;
-   fEndTime   = 0;
-   fSubRun    = 0;
-   fStatus    = 0;
+   fStartTime    = 0;
+   fEndTime      = 0;
+   fSubRun       = 0;
+   fStatus       = 0;
+   fRunStartWall = 0;          // 0 = 아직 STARTRUN 전. 실패 사유 구분에 쓴다.
    fStats.clear();
 
    char rc[512];
@@ -691,6 +716,37 @@ bool RunControl::OpenTCB()
    return false;
 }
 
+// 이전 런의 DAQ 가 살아남아 있으면, 새로 띄운 tcb 는 포트를 잡지 못하고 바로
+// 죽는다. 그런데 rcterm 은 그 포트에 그냥 접속하므로 '옛 런의 tcb' 를 붙들고
+// status=0x8(Running) 을 받아 Booted 를 bootTimeout 내내 헛기다리다 실패한다.
+// 실측: 22:23:55 에 run 4270 의 rcterm 이 run 4269 의 TCB 로그에 접속했다.
+// 부팅 전에 포트를 확인해 즉시 중단한다. run 번호 발급 전에 호출하므로
+// 이 경우 번호가 낭비되지 않는다.
+bool RunControl::StaleDaqPresent(double waitSec)
+{
+   if (fCfg.dryRun) return false;
+
+   double waited = 0;
+   unsigned long long st = 0;
+   while (true) {
+      OnlSocket probe(fCfg.daqServerIP, fCfg.daqServerPort);
+      if (!probe.Connect(1)) return false;          // 아무도 없다 = 정상
+      OnlMessage m;
+      st = probe.Query(onl::kQUERYDAQSTATUS, m) ? m.m1 : 0;
+      probe.Close();
+      if (waited >= waitSec) break;
+      gSystem->Sleep(500);                          // 직전 런이 내려가는 중일 수 있다
+      waited += 0.5;
+   }
+
+   std::cerr << "[FATAL] a DAQ is already listening on " << fCfg.daqServerIP << ":"
+             << fCfg.daqServerPort << " (status=0x" << std::hex << st << std::dec << ")\n"
+             << "        previous DAQ processes are still alive; a new tcb cannot bind\n"
+             << "        the port and rcterm would attach to the old run instead.\n"
+             << "        stop them first :  scripts/killdaq.sh" << std::endl;
+   return true;
+}
+
 bool RunControl::SetupMonitors()
 {
    CloseMonitors();
@@ -746,12 +802,18 @@ unsigned long long RunControl::QueryStatus()
    return m.m1;
 }
 
-bool RunControl::WaitState(int state, double timeoutSec)
+// ignoreStop=true : 정지 요청이 와 있어도 끝까지 기다린다.
+//   런 종료(RunEnded/ProcEnded) 확인에만 쓴다. 여기서 fgStop 때문에 곧바로
+//   빠져나가면 ok=false 가 되어 FinalizeRunInDB 가 통째로 생략되고, 데이터는
+//   멀쩡히 다 쓰였는데 DB 에는 stime/etime 이 NULL 인 고아 행만 남는다.
+//   (실측: run 4284/4287. 감시자 로테이션마다 SIGTERM 이 오므로 매 런 재현됐다.)
+//   두 번째 신호(fgStop>=2)는 "즉시 나가라"이므로 이때는 기다리지 않는다.
+bool RunControl::WaitState(int state, double timeoutSec, bool ignoreStop)
 {
    if (fCfg.dryRun) return true;
    double waited = 0;
    while (waited < timeoutSec) {
-      if (fgStop) return false;
+      if (fgStop >= 2 || (fgStop && !ignoreStop)) return false;
       fStatus = QueryStatus();
       if (CheckError(fStatus)) {
          std::cerr << "[ERROR] DAQ reported ERROR (status=0x" << std::hex << fStatus
@@ -1009,7 +1071,7 @@ bool RunControl::RunOneCycle(int run, int cycle)
       ok = false;
    } else {
       gSystem->Sleep(1000);
-      if (!WaitState(onl::kRUNENDED, fCfg.stateTimeout)) ok = false;
+      if (!WaitState(onl::kRUNENDED, fCfg.stateTimeout, true)) ok = false;
    }
 
    if (ok) {
@@ -1028,7 +1090,7 @@ bool RunControl::RunOneCycle(int run, int cycle)
       Log(buf);
    }
 
-   WaitState(onl::kPROCENDED, 20.0);
+   WaitState(onl::kPROCENDED, 20.0, true);
    SendCmd(onl::kEXIT, "EXIT");
    gSystem->Sleep(1500);
 
@@ -1048,6 +1110,11 @@ int RunControl::Execute()
       if (fgStop) break;
       if (fCfg.maxRuns > 0 && cycle >= fCfg.maxRuns) break;
 
+      // run 번호 발급보다 먼저. 남은 DAQ 때문에 중단할 때 번호를 낭비하지 않는다.
+      // exit=2 : 감시자가 CleanupStale 로 정리한 뒤 재시작하면 풀리는 상황이다.
+      //          설정 오류(exit=1)가 아니므로 1 을 쓰면 안 된다.
+      if (fCfg.staleCheck && StaleDaqPresent(10.0)) { rc = 2; break; }
+
       const int run = fCfg.useDB ? NextRunNumberFromDB() : (fCfg.startRun + cycle);
       if (run <= 0) { rc = 1; break; }
       ++cycle;
@@ -1064,6 +1131,9 @@ int RunControl::Execute()
       prevEnd = time(0);
 
       if (!ok) {
+         MarkFailedRunInDB(run, fRunStartWall > 0
+                                ? "aborted; run started but was not finalized"
+                                : "boot failed; run never started");
          std::cerr << "[FATAL] cycle " << cycle << " failed; stopping." << std::endl;
          rc = 2;
          break;

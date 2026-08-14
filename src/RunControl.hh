@@ -57,6 +57,7 @@ public:
       double      updateSec;
       bool        quiet;
       bool        dryRun;
+      bool        staleCheck;      // 부팅 전에 남은 DAQ 가 있는지 확인
       double      bootTimeout;
       double      stateTimeout;
       std::string logFile;
@@ -75,7 +76,7 @@ public:
         : runtype("physics"), splitTimeMin(1), tcbSplit(true),
           runLengthHour(24.0), maxRuns(0), startRun(0),
           useDB(true), goodRun(true), mergerType(0),
-          updateSec(1.0), quiet(false), dryRun(false),
+          updateSec(1.0), quiet(false), dryRun(false), staleCheck(true),
           bootTimeout(90.0), stateTimeout(60.0),
           daqServerIP(RCTERM_DEF_SERVER_IP),
           daqServerPort(RCTERM_DEF_SERVER_PORT),
@@ -91,17 +92,20 @@ public:
    bool Init();
    int  Execute();
 
-   static void RequestStop() { fgStop = 1; }
+   // 첫 신호는 "현재 런을 정상 종료하라", 두 번째는 "기다리지 말고 즉시 나가라".
+   // WaitState(ignoreStop=true) 가 이 값을 보고 런 종료 확인을 끝까지 기다린다.
+   static void RequestStop() { if (fgStop < 2) fgStop = fgStop + 1; }
    static bool Stopping()    { return fgStop != 0; }
 
 private:
    bool RunOneCycle(int run, int cycle);
    bool BootRun(int run);
    bool OpenTCB();
+   bool StaleDaqPresent(double waitSec);
    bool SetupMonitors();
    void CloseMonitors();
    bool SendCmd(unsigned long long cmd, const char* what);
-   bool WaitState(int state, double timeoutSec);
+   bool WaitState(int state, double timeoutSec, bool ignoreStop = false);
    unsigned long long QueryStatus();
    void QueryRunInfo();
    void UpdateStats(bool finalRead);
@@ -117,6 +121,7 @@ private:
    bool ResolveKinds();
    int  NextRunNumberFromDB();
    void FinalizeRunInDB(int run);
+   void MarkFailedRunInDB(int run, const char* why);
    bool LoadDBColumns();
    bool HasColumn(const std::string& c) const;
    TString RunSQL(const std::string& sql);

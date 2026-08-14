@@ -65,9 +65,15 @@ static void Usage(const char* p)
 "   --heartbeat FILE      write machine-readable status for rcsupervisor\n"
 "   --rootout FILE        write monitoring TTree (ROOT)\n"
 "   --dry-run             print every command, touch no hardware\n"
+"   --no-stale-check      boot even if a DAQ already answers on the TCB port\n"
 "   --boot-timeout SEC    (90)\n"
 "   --state-timeout SEC   (60)\n"
 "   -h, --help\n"
+"\n"
+" NOTE: --params is expanded IN PLACE, so whatever comes later wins.\n"
+"       '--shift A --params f' -> the file wins;\n"
+"       '--params f --shift A' -> the command line wins.\n"
+"       Always put --params first.\n"
 "\n"
 " Environment defaults: ONLDAQ_DIR RAWDATA_DIR RUNCATALOG_DB\n"
 "                       DAQSERVER_IP DAQSERVER_PORT\n"
@@ -169,6 +175,7 @@ int main(int argc, char** argv)
       else if (o == "--heartbeat")     { VAL cfg.heartbeatFile = v; }
       else if (o == "--rootout")       { VAL cfg.rootFile = v; }
       else if (o == "--dry-run")       { cfg.dryRun = true; }
+      else if (o == "--no-stale-check"){ cfg.staleCheck = false; }
       else if (o == "--boot-timeout")  { VAL cfg.bootTimeout = atof(v.c_str()); }
       else if (o == "--state-timeout") { VAL cfg.stateTimeout = atof(v.c_str()); }
       else {
