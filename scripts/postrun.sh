@@ -174,13 +174,26 @@ hb_age()   { local t; t=$(hb_field time); [ -n "$t" ] && echo $(( $(date +%s) - 
 pad6() { printf '%06d' "$1"; }
 pad5() { printf '%05d' "$1"; }
 
-# 원본 스크립트와 동일한 2PC 판정. audit_run.sh 호환을 위해 파일명도 동일하게 쓴다.
+# 서브런이 끝났는지 판정.
+#
+#  원본은 로그 두 개를 grep 한다(merge 로그의 final..., production 로그의 SUCCESS).
+#  그런데 /scratch/LOG 에는 로그가 7만 개가 넘게 쌓여 있고 NFS 위에 있어서,
+#  **400 서브런을 훑는 데 5분이 넘게 걸리는 것을 실측했다.** 재개 지점을 찾으려고
+#  수백 번 grep 하면 스크립트가 시작조차 못 한다.
+#
+#  그래서 산출물 파일 stat 으로 판정한다. production_from_merged_v3_5v.sh 는
+#  ROOT 종료코드가 0 이고 PRD 파일이 비어있지 않을 때만 SUCCESS 를 찍으므로,
+#  'PRD 파일이 존재하고 크기가 0 이 아니다' 는 그 SUCCESS 와 같은 뜻이다.
+#  MERGED 는 그보다 앞 단계이니 함께 확인한다. open+read 없이 stat 만 하므로
+#  grep 대비 수십 배 빠르다.
 subrun_done() {          # run_num subrun
-   local rn=$1 n=$2
-   local ml="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun${n}.txt"
-   local pl="$LOGDIR/log_production_v3_5v_run${rn}_subrun${n}.txt"
-   [ -f "$ml" ] && grep -q "final before_SADC_trgnum" "$ml" 2>/dev/null || return 1
-   [ -f "$pl" ] && grep -q "SUCCESS"                  "$pl" 2>/dev/null || return 1
+   local rn=$1 n=$2 rp
+   rp=$(printf '%06d' "$rn")
+   local merged prd
+   merged=$(printf '%s/%s/Merged/MERGED_%06d.root.%05d' "$RAWROOT" "$rp" "$rn" "$n")
+   prd=$(printf    '%s/%s/PRD/PRD_%06d.%05d.root'       "$RAWROOT" "$rp" "$rn" "$n")
+   [ -s "$merged" ] || return 1
+   [ -s "$prd" ]    || return 1
    return 0
 }
 
@@ -319,12 +332,21 @@ process_range() {        # run_pad run_num from to maxarg
    fi
 
    t0=$(date +%s)
+   local need_state=0
    for (( n=from; n<=to; n++ )); do
       if subrun_done "$rn" "$n"; then
-         # 이미 끝난 것. 상태만 이어받고 넘어간다.
-         load_state "$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun${n}.txt"
-         skip_cnt=$((skip_cnt+1))
+         # 이미 끝난 것. 로그를 읽는 것은 NFS grep 이라 비싸므로 여기서는 건너뛰기만
+         # 하고, 실제로 merge 를 돌리기 직전에 딱 한 번 직전 로그에서 상태를 읽는다.
+         skip_cnt=$((skip_cnt+1)); need_state=1
          continue
+      fi
+      if [ "$need_state" -eq 1 ]; then
+         need_state=0
+         if [ "$n" -gt 0 ]; then
+            local prevlog="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
+            if [ -f "$prevlog" ]; then load_state "$prevlog"
+            else ST_SADC=$n; ST_EVT=0; ST_TRG=0; fi
+         fi
       fi
       if do_subrun "$rp" "$rn" "$n" "$maxarg" "$dd"; then
          done_cnt=$((done_cnt+1))
