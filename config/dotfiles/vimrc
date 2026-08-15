@@ -1,0 +1,176 @@
+" =====================================================================
+"  ~/.vimrc
+"
+"  주의 : /usr/bin/vi 는 vim-minimal 이라 -syntax 다. 즉 vi 로 열면
+"         구문 강조가 아예 없다. ~/.bashrc 에서 alias vi=vim 을 걸어
+"         vi 를 쳐도 vim-enhanced 가 뜨도록 해 두었다.
+"         (sudo vi 는 root 설정을 읽으므로 여전히 최소판이다.)
+"
+"  기능이 없는 빌드에서도 에러가 나지 않도록 has() 로 감쌌다.
+" =====================================================================
+
+set nocompatible
+
+" ---------------------------------------------------------------- 인코딩
+"  이 저장소에는 한글 주석과 문서가 섞여 있고, 과거에 인코딩이 깨져
+"  글자가 망가진 적이 있다. 자동 판별 순서를 명시해 둔다.
+"  파일의 실제 인코딩은 상태줄에 항상 보인다.
+set encoding=utf-8
+set fileencodings=ucs-bom,utf-8,cp949,euc-kr,latin1
+set fileformats=unix,dos
+
+" ------------------------------------------------------------------ 색
+if has('syntax')
+  syntax enable
+  set background=dark
+  silent! colorscheme rene
+endif
+
+" 24bit 색은 켜지 않는다. 256색으로 충분하고, 터미널/tmux 조합에 따라
+" 오히려 색이 깨지는 경우가 있다. 필요하면 아래 줄의 주석을 풀 것.
+" if has('termguicolors') && $COLORTERM ==# 'truecolor' | set termguicolors | endif
+
+" ---------------------------------------------------------------- 화면
+set number                    " 줄번호
+set ruler
+set showcmd
+set laststatus=2              " 상태줄 항상 표시
+set cursorline                " 커서 줄 강조
+set scrolloff=3               " 위아래 여유 3줄
+set sidescrolloff=5
+set display=truncate
+set title                     " 터미널 제목에 파일명
+set colorcolumn=100           " 100칸 눈금
+set linebreak                 " 줄바꿈은 단어 단위로
+set lazyredraw
+
+" 상태줄 : 파일 / 인코딩 / 개행형식 / 종류 / 위치
+"  인코딩을 항상 보이게 한 것은 한글 깨짐을 조기에 발견하기 위해서다.
+set statusline=
+set statusline+=\ %f%m%r%h%w
+set statusline+=%=
+set statusline+=\ [%{&fileencoding!=''?&fileencoding:&encoding}]
+set statusline+=\ [%{&fileformat}]
+set statusline+=\ %y
+set statusline+=\ %l/%L\ :\ %c
+set statusline+=\ %P\
+
+" ---------------------------------------------------------------- 검색
+set hlsearch
+set incsearch
+set ignorecase
+set smartcase                 " 대문자를 섞어 치면 대소문자 구분
+set wrapscan
+" Enter 두 번으로 강조 끄기
+nnoremap <silent> <CR> :nohlsearch<CR><CR>
+
+" ---------------------------------------------------------------- 편집
+set backspace=indent,eol,start
+set autoindent
+set smartindent
+set expandtab                 " 기본은 공백
+set tabstop=4
+set softtabstop=4
+set shiftwidth=4
+set shiftround
+set wildmenu
+set wildmode=longest:full,full
+set history=1000
+set autoread                  " 밖에서 바뀐 파일 자동 반영
+set hidden
+set nostartofline
+
+" 파일 종류별 들여쓰기
+"  이 저장소의 C++ 은 3칸이다(RunControl.cc 등). 여기에 맞춘다.
+if has('autocmd')
+  filetype plugin indent on
+  augroup rene_indent
+    autocmd!
+    autocmd FileType c,cpp        setlocal shiftwidth=3 softtabstop=3 tabstop=3 expandtab
+    autocmd FileType sh,bash      setlocal shiftwidth=3 softtabstop=3 tabstop=3 expandtab
+    autocmd FileType python       setlocal shiftwidth=4 softtabstop=4 tabstop=4 expandtab
+    autocmd FileType make         setlocal noexpandtab tabstop=8 shiftwidth=8
+    autocmd FileType markdown     setlocal wrap linebreak
+  augroup END
+
+  " 이 사이트의 설정 파일들을 conf 문법으로
+  augroup rene_ftdetect
+    autocmd!
+    autocmd BufRead,BufNewFile *.params setfiletype conf
+    autocmd BufRead,BufNewFile *.config setfiletype conf
+    autocmd BufRead,BufNewFile *.hb     setfiletype conf
+  augroup END
+
+  " 마지막으로 편집하던 위치로 복귀
+  augroup rene_lastpos
+    autocmd!
+    autocmd BufReadPost *
+      \ if line("'\"") >= 1 && line("'\"") <= line("$") && &ft !~# 'commit'
+      \ |   execute "normal! g`\""
+      \ | endif
+  augroup END
+
+  " 줄 끝 공백을 붉게. 커밋 전에 눈으로 잡을 수 있다.
+  augroup rene_ws
+    autocmd!
+    autocmd BufWinEnter * match ExtraWhitespace /\s\+$/
+    autocmd InsertEnter * match ExtraWhitespace /\s\+\%#\@<!$/
+    autocmd InsertLeave * match ExtraWhitespace /\s\+$/
+  augroup END
+endif
+
+" 보이지 않는 문자 표시 (탭과 줄 끝 공백)
+set list
+set listchars=tab:▸\ ,trail:·,extends:▸,precedes:◂,nbsp:␣
+
+" ------------------------------------------------- 임시 파일을 한곳으로
+"  기본값이면 편집하는 자리에 .swp 가 생긴다. /scratch 나 저장소 안에
+"  쓰레기를 남기지 않도록 홈으로 모은다.
+silent! call mkdir($HOME . '/.vim/swap',   'p')
+silent! call mkdir($HOME . '/.vim/backup', 'p')
+silent! call mkdir($HOME . '/.vim/undo',   'p')
+set directory=~/.vim/swap//
+set backupdir=~/.vim/backup//
+set backup
+set writebackup
+if has('persistent_undo')
+  set undodir=~/.vim/undo//
+  set undofile
+  set undolevels=1000
+endif
+
+" ---------------------------------------------------------------- 마우스
+"  일부러 끈다. 켜져 있으면 마우스로 드래그해도 vim 이 가로채서
+"  터미널 복사가 안 된다. (RHEL 기본 defaults.vim 이 켜는 경우가 있다)
+set mouse=
+if has('mouse')
+  set mouse=
+endif
+
+" ---------------------------------------------------------------- 기타
+set noerrorbells
+set novisualbell
+set t_vb=
+set ttimeout
+set ttimeoutlen=50            " Esc 반응 빠르게 (tmux escape-time 과 짝)
+set updatetime=500
+set splitbelow
+set splitright
+set confirm                   " 저장 안 하고 나가려 하면 물어본다
+
+" 편의 키
+"  <Space> 를 leader 로
+let mapleader = " "
+nnoremap <leader>w :w<CR>
+nnoremap <leader>q :q<CR>
+nnoremap <leader>n :set number!<CR>
+nnoremap <leader>l :set list!<CR>
+nnoremap <leader>p :set paste!<CR>:set paste?<CR>
+" 붙여넣기 할 때 자동 들여쓰기가 계단처럼 밀리는 것 방지
+set pastetoggle=<F2>
+
+" 창 이동을 Ctrl-h/j/k/l 로 (tmux 와 같은 감각)
+nnoremap <C-h> <C-w>h
+nnoremap <C-j> <C-w>j
+nnoremap <C-k> <C-w>k
+nnoremap <C-l> <C-w>l

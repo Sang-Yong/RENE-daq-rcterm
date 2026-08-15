@@ -1,0 +1,38 @@
+
+# ---------------------------------------------------------------------
+#  터미널/편집기 환경  (2026-08-15 추가)
+#  되돌리려면 이 블록을 지우거나 ~/dotfiles-backup-* 의 .bashrc 로 복원.
+# ---------------------------------------------------------------------
+
+# /usr/bin/vi 는 vim-minimal 이라 -syntax 다. 구문 강조가 아예 없다.
+# vi 를 쳐도 vim-enhanced 가 뜨게 한다.
+if command -v vim >/dev/null 2>&1; then
+    alias vi='vim'
+    export EDITOR=vim
+    export VISUAL=vim
+fi
+
+# ls : 디렉터리를 먼저, 크기는 사람이 읽는 단위로
+alias ls='ls --color=auto --group-directories-first'
+alias ll='ls -alFh'
+alias la='ls -A'
+alias l='ls -CF'
+alias lll='ls -thlarh'
+
+# less/man 에서 색을 살린다. -i 대소문자 무시, -M 자세한 상태줄
+export LESS='-R -i -M'
+
+# 프롬프트 : 사용자@호스트 는 초록, 경로는 하늘색.
+#   ~/.dircolors 및 vim 테마와 같은 색을 쓴다.
+#   맨 앞 [n] 은 직전 명령의 종료코드(0 이 아닐 때만).
+__rc_ps1() {
+    local st=$?
+    local red='\[\e[38;5;203m\]' grn='\[\e[38;5;114m\]' blu='\[\e[38;5;39m\]'
+    local dim='\[\e[38;5;245m\]' rst='\[\e[0m\]'
+    local err=""
+    [ $st -ne 0 ] && err="${red}[${st}]${rst} "
+    PS1="${err}${grn}\u@\h${rst}${dim}:${rst}${blu}\w${rst}\$ "
+}
+case "$TERM" in
+    *color*|screen*|tmux*) PROMPT_COMMAND=__rc_ps1 ;;
+esac
