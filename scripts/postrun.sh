@@ -31,9 +31,19 @@ set -u
 # ---- 기본값 ---------------------------------------------------------
 PRODDIR=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
 RAWROOT=${POSTRUN_RAWROOT:-/scratch/RAW}
+# 산출물(Merged/PRD)을 RAW 와 다른 저장소에 두고 싶을 때. 비우면 RAW 안에 만든다.
+#  병목이 NFS I/O 이므로 로컬 디스크를 지정하면 눈에 띄게 빨라진다(실측 41초 -> 28초).
+#  RAW 쪽에는 심볼릭 링크를 걸어 두므로 매크로와 기존 도구는 경로를 그대로 쓴다.
+OUTROOT=${POSTRUN_OUTROOT:-}
 HB=${POSTRUN_HEARTBEAT:-/Data/LOG/rcterm.hb}
 JOBS=3                 # production 동시 실행 개수
-LAG=2                  # 기록 중인 서브런에서 몇 개 뒤까지만 건드릴지
+# 기록 중인 서브런에서 몇 개 뒤까지만 손대는가.
+#  3 = 실시간 수집보다 약 3분 뒤에서 따라간다(서브런 1개 = 1분).
+#  이 여유가 필요한 이유:
+#   - heartbeat 의 subrun 은 '지금 기록 중인' 파일이다. 그 파일은 아직 안 닫혔다.
+#   - NFS 서버 시계가 로컬보다 약 28초 앞선다(실측). mtime 만으로는 완료를 못 믿는다.
+#   - merger/DAQ 가 파일을 닫고 flush 하는 시간이 필요하다.
+LAG=3
 POLL=20                # --follow 에서 heartbeat 확인 주기 [초]
 NICE=10                # 수집을 방해하지 않도록 낮은 우선순위
 MAXRETRY=2             # 좀비 파일 재시도 (원본은 5회 x 60초 = 5분 낭비)
@@ -59,12 +69,16 @@ postrun.sh - DAQ 수집 뒤에 붙는 merge + production 파이프라인 드라�
   --once              --follow 없이 한 바퀴만 (추적 모드의 1회 실행)
   --jobs N            production 병렬 개수                (${JOBS})
   --lag N             기록 중인 서브런에서 N 개 뒤까지만  (${LAG})
+                      3 이면 실시간 수집보다 약 3분 뒤를 따라간다
   --poll SEC          heartbeat 확인 주기                 (${POLL})
   --nice N            처리 프로세스 nice 값               (${NICE})
   --from N --to N     서브런 범위 지정 (일회 처리용)
   --max-retry N       좀비 파일 재시도 횟수               (${MAXRETRY})
   --prod-dir DIR      production 트리                     (${PRODDIR})
   --rawroot DIR       RAW 상위 디렉터리                   (${RAWROOT})
+  --outroot DIR       Merged/PRD 를 여기에 두고 RAW 에는 심볼릭 링크를 건다.
+                      병목이 NFS 이므로 로컬 디스크를 주면 빨라진다
+                      (예: --outroot /Data_ssd/RAW)
   --heartbeat FILE    rcterm heartbeat                    (${HB})
   --dry-run           무엇을 할지만 출력
   -h, --help
@@ -84,6 +98,7 @@ while [ $# -gt 0 ]; do
       --max-retry)  MAXRETRY=$2; shift 2 ;;
       --prod-dir)   PRODDIR=$2; shift 2 ;;
       --rawroot)    RAWROOT=$2; shift 2 ;;
+      --outroot)    OUTROOT=$2; shift 2 ;;
       --heartbeat)  HB=$2; shift 2 ;;
       --dry-run)    DRYRUN=1; shift ;;
       -h|--help)    usage; exit 0 ;;
@@ -156,6 +171,32 @@ max_file_index() {       # run_pad
    [ -n "$last" ] && echo $((10#$last)) || echo -1
 }
 
+# 산출물 디렉터리 준비.
+#  --outroot 가 있으면 거기에 만들고 RAW 쪽에는 심볼릭 링크를 건다.
+#  매크로는 "$DataDir/Merged/..." 를 그대로 쓰므로 코드를 고칠 필요가 없고,
+#  audit_run.sh 같은 기존 도구도 경로가 그대로다.
+ensure_outdirs() {       # data_dir run_pad
+   local dd=$1 rp=$2 sub
+   mkdir -p "$dd/PNG" 2>/dev/null
+   for sub in Merged PRD; do
+      if [ -z "$OUTROOT" ]; then
+         mkdir -p "$dd/$sub" 2>/dev/null
+         continue
+      fi
+      mkdir -p "$OUTROOT/$rp/$sub" 2>/dev/null
+      if [ -L "$dd/$sub" ]; then
+         :                                    # 이미 링크. 그대로 둔다
+      elif [ -d "$dd/$sub" ]; then
+         # 실제 디렉터리가 이미 있다. 데이터를 임의로 옮기지 않고 알리기만 한다.
+         log "${C_Y}[WARN]${C_0} $dd/$sub 이 실제 디렉터리다. --outroot 를 적용하려면"
+         log "        먼저 mv 로 옮기고 심볼릭 링크를 걸 것 (docs/POSTRUN.md 참조)"
+      else
+         ln -s "$OUTROOT/$rp/$sub" "$dd/$sub" && \
+            log "  $sub -> $OUTROOT/$rp/$sub (심볼릭 링크 생성)"
+      fi
+   done
+}
+
 # ---- production 병렬 풀 ---------------------------------------------
 NRUNNING=0
 prod_launch() {          # run_pad subrun data_dir
@@ -217,7 +258,7 @@ process_range() {        # run_pad run_num from to maxarg
 
    [ "$from" -gt "$to" ] && return 0
 
-   mkdir -p "$dd/Merged" "$dd/PNG" "$dd/PRD" 2>/dev/null
+   ensure_outdirs "$dd" "$rp"
 
    # [경쟁 상태 수정] production_from_merged_v3_5v.sh 는
    #   if [ ! -f "$UseLog" ]; then cat TCBLOG | grep WJ > $UseLog; fi
@@ -286,7 +327,11 @@ run_once() {             # run_num
    hbrun=$(hb_field run); hbsub=$(hb_field subrun); age=$(hb_age)
    if [ -n "$hbrun" ] && [ "$hbrun" = "$rn" ] && [ "$age" -lt 120 ]; then
       active=1
-      lastc=$(( hbsub - 1 ))                 # heartbeat subrun = 기록 중인 파일 번호
+      # heartbeat 의 subrun 은 '지금 기록 중인' 파일 번호다(실측 확인).
+      #   완료된 마지막 서브런  lastc     = subrun - 1
+      #   손대도 되는 마지막    targetmax = subrun - LAG
+      # LAG=3 이면 기록 중인 것보다 3개(=약 3분) 뒤까지만 처리한다.
+      lastc=$(( hbsub - 1 ))
       targetmax=$(( lastc - LAG + 1 ))
    else
       lastc=$maxidx

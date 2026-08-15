@@ -106,10 +106,13 @@ else
 fi
 
 # ---- 우하 : merge + production 추적 ----
-#  DAQ 를 방해하지 않도록 nice 를 걸고, 기록 중인 서브런보다 뒤에서만 처리한다.
-#  --dry-run 없이 바로 돌려도 안전하다. 이미 끝난 서브런은 건너뛴다.
+#  DAQ 를 방해하지 않도록 nice 를 걸고, 기록 중인 서브런보다 3개(=약 3분) 뒤에서만
+#  처리한다. 이미 끝난 서브런은 건너뛰므로 바로 돌려도 안전하다.
+#  산출물은 로컬 NVMe 로 뺀다 — 병목이 NFS I/O 라서 41초/서브런이 29초로 줄었다.
+POSTRUN_OUT=${POSTRUN_OUTROOT:-/Data_ssd/RAW}
 if [ -n "$POSTPANE" ]; then
-   tmux send-keys -t "$POSTPANE" "$DIR/scripts/postrun.sh --follow --jobs 3" C-m
+   tmux send-keys -t "$POSTPANE" \
+      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --outroot '$POSTRUN_OUT'" C-m
 fi
 
 tmux select-pane -t "$RIGHT"          # 작업용 pane 에서 시작
