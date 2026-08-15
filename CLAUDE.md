@@ -189,6 +189,41 @@ run number 변경" 명령이 **없다**. run number는 `executedaq.sh -r`로 프
 **5.7 dry-run은 heartbeat를 만들지 않는다.** 첫 기록이 `booting` 단계이고 dry-run은
 그 전에 빠져나간다. 정상 동작이나 감시자 연동을 dry-run으로 테스트할 수 없다.
 
+## 5.8 후처리 파이프라인 (merge + production) — 상세는 `docs/POSTRUN.md`
+
+DAQ 수집 뒤에 `scripts/postrun.sh` 가 붙는다. `DAQ_cup/production` 의
+`merge_FADC_SADC_v3_5v.cc` / `production_from_merged_v3_5v.cc` 를 **그대로 호출**하며
+매크로를 이 저장소로 복제하지 않는다. 복제하면 두 벌이 갈라진다.
+
+**핵심 사실 (실측)**
+
+- 서브런 1개 = 60초 분량. 처리는 merge 28초 + production 15초 = **43초**
+  (run 4238/4239/4240 의 서브런 로그 33,357개 기준)
+- **merge 는 병렬화 불가** — 매크로가 서브런 끝에 찍는 `final SADC` /
+  `final SADC_evt` / `final before_SADC_trgnum` 이 다음 서브런의 SADC 시작 위치다.
+  이걸 넘겨받지 않으면 서브런 경계에서 이벤트를 잃는다.
+  **production 은 서브런마다 독립이라 병렬 가능.**
+- **heartbeat 의 `subrun` = 지금 기록 중인 파일 번호.** 실측 확인
+  (`subrun=829` ↔ `FADC_004288.root.00829` 가 최대 번호). 완료된 것은 0..828.
+  `--lag`(기본 2)로 더 물러난다. NFS 서버 시계가 로컬보다 **약 28초 앞선다.**
+- **병목은 CPU 가 아니라 NFS I/O다.** 가동 중 실측 iowait 26~34%, CPU 유휴 61~88%.
+  그래서 `--jobs` 를 올려도 크게 나아지지 않는다. 3~4 권장.
+  실제 가동 시 서브런당 40초(직렬 43초 대비 소폭 개선).
+- 용량: 서브런당 RAW 78MB + Merged 80MB + PRD 77MB. **24h 런 1회가 약 334GB.**
+
+**원본 `merge_FADC_SADC_v3_5v.sh` 의 자동화 저해 요소** (원본은 수정하지 않았다)
+
+1. 완전 대화형 (`read run`, 메뉴 1~4, 스킵 목록)
+2. 재개 지점을 **이진 탐색**으로 찾는데, 중간에 실패한 서브런이 있으면 단조성이
+   깨져 엉뚱한 곳에서 재개한다 → postrun.sh 는 선형 스캔
+3. `Run<run>_DLY_THR.log` 를 `if [ ! -f ]` 후 생성 → **production 을 병렬화하면 레이스**.
+   postrun.sh 는 구간 시작 전에 한 번만 만든다
+4. 좀비 파일에 `sleep 1m` × 5회 = 5분 낭비
+5. `pwd` 상대 경로 (`CodeDir=$pwDir/../Code`)
+
+성공 판정(2PC)과 로그 파일명은 원본과 **동일하게** 유지했다. 따라서
+`production/Shell/audit_run.sh` 가 postrun.sh 결과에도 그대로 동작한다.
+
 ## 6. 잔여 작업 큐 (우선순위 순)
 
 ### 작업 1 — 실제 ROOT 빌드 검증 ★최우선

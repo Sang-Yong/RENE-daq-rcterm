@@ -3,14 +3,17 @@
 #  daq-tmux.sh - DAQ 운용 tmux 화면을 한 번에 구성한다.
 #
 #      +---------------------------+---------------------------+
-#      |  rcmon.sh (상태 화면)     |                           |
-#      +---------------------------+   작업용 셸 (vi 등)       |
-#      |  rcsupervisor / 감시자로그|                           |
+#      |  rcmon.sh (상태 화면)     |   작업용 셸 (vi 등)       |
+#      |                           +---------------------------+
+#      |                           |                           |
+#      +---------------------------+  postrun.sh --follow      |
+#      |  rcsupervisor / 감시자로그|  (merge + production)     |
 #      +---------------------------+---------------------------+
 #
 #  사용 :
 #      scripts/daq-tmux.sh              화면만 구성 (DAQ 는 건드리지 않음)
 #      scripts/daq-tmux.sh --start      DAQ 가 안 돌고 있으면 같이 기동
+#      scripts/daq-tmux.sh --no-postrun 후처리 pane 없이 구성
 #      scripts/daq-tmux.sh --kill-layout   화면만 정리 (DAQ 는 그대로 둔다)
 #
 #  안전 규칙 :
@@ -31,9 +34,10 @@ SUP_LOG=${DAQ_SUP_LOG:-/Data/LOG/rcsupervisor.log}
 HB=${DAQ_HEARTBEAT:-/Data/LOG/rcterm.hb}
 DESC_FILE=$DIR/config/rundesc.txt      # 있으면 --desc 로 넘긴다
 
-START=0
+START=0; POSTRUN=1
 case "${1:-}" in
    --start)       START=1 ;;
+   --no-postrun)  POSTRUN=0 ;;
    --kill-layout) tmux kill-session -t "$SESSION" 2>/dev/null &&
                      echo "세션 '$SESSION' 정리함 (DAQ 프로세스는 그대로)"
                   echo "주의: rcsupervisor 가 이 세션 안에서 돌고 있었다면 같이 죽는다."
@@ -67,6 +71,13 @@ TOPLEFT=$(tmux list-panes -t "$SESSION:daq" -F '#{pane_id}' | head -1)
 RIGHT=$(tmux split-window   -h -p 50 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 BOTLEFT=$(tmux split-window -v -p 25 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 
+#  후처리 pane 은 오른쪽 아래를 쓴다. 왼쪽은 DAQ 상태 전용으로 남겨 둔다.
+POSTPANE=""
+if [ "$POSTRUN" -eq 1 ]; then
+   POSTPANE=$(tmux split-window -v -p 40 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
+   tmux select-pane -t "$POSTPANE" -T "postrun"
+fi
+
 tmux select-pane -t "$TOPLEFT" -T "monitor"
 tmux select-pane -t "$BOTLEFT" -T "supervisor"
 tmux select-pane -t "$RIGHT"   -T "work"
@@ -92,6 +103,13 @@ else
       echo "DAQ 는 기동하지 않았다. 좌하단 pane 에 명령을 입력만 해 두었으니"
       echo "확인 후 Enter 를 치거나, 다음부터 --start 로 실행할 것."
    fi
+fi
+
+# ---- 우하 : merge + production 추적 ----
+#  DAQ 를 방해하지 않도록 nice 를 걸고, 기록 중인 서브런보다 뒤에서만 처리한다.
+#  --dry-run 없이 바로 돌려도 안전하다. 이미 끝난 서브런은 건너뛴다.
+if [ -n "$POSTPANE" ]; then
+   tmux send-keys -t "$POSTPANE" "$DIR/scripts/postrun.sh --follow --jobs 3" C-m
 fi
 
 tmux select-pane -t "$RIGHT"          # 작업용 pane 에서 시작
