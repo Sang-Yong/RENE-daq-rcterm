@@ -1,8 +1,67 @@
-# CLAUDE.md — RENE_DAQ_term 작업 지침
+# CLAUDE.md — RENE 실험 DAQ 프로그램 (RENE_DAQ_term) 작업 지침
 
 이 파일은 Claude Code가 매 세션 자동으로 읽는다.
 선행 세션(웹 챗)에서 확정된 사실과 잔여 작업이 전부 여기 있다.
 **추측하지 말고 이 문서의 검증 상태를 신뢰하되, "미검증"으로 표시된 것은 반드시 실측하라.**
+
+---
+
+## 0.0 다른 PC 에서 이어받기 ★ 새 작업 PC 라면 여기부터
+
+**이 저장소가 프로젝트의 정본이다.** 작업 PC 가 바뀌어도 아래만 하면 그대로 이어진다.
+Claude Code 의 로컬 메모리는 PC 를 따라가지 않으므로 의존하지 말 것.
+
+```bash
+git clone https://github.com/Sang-Yong/RENE-daq-rcterm.git
+cd RENE-daq-rcterm
+
+# 1) 이 문서를 처음부터 끝까지 읽는다. 특히 §4 검증 상태와 §6 잔여 작업 큐
+# 2) 운용 환경(터미널·편집기·화면 배치)을 복원한다
+config/dotfiles/install.sh --all
+
+# 3) 사이트 전용 값 두 가지는 저장소에 없다. 새 PC 에 맞게 직접 넣는다
+#      build.sh          thisroot.sh / cupdaq_env.sh 의 source 경로
+#      src/OnlConsts.hh  RCTERM_DEF_RAWDATA_DIR / RCTERM_DEF_DBFILE
+#      config/*.params   (.gitignore 대상. *.params.example 에서 복사해 수정)
+
+# 4) 빌드
+./build.sh
+
+# 5) 화면 구성 (하드웨어는 건드리지 않는다)
+scripts/daq-tmux.sh
+```
+
+**읽는 순서**
+
+| 문서 | 무엇이 있나 |
+|---|---|
+| `CLAUDE.md` (이 문서) | 확정된 사실, 설계 근거, 검증 상태, 잔여 작업, 세션 기록 |
+| `docs/MANUAL.md` | rcterm / rcsupervisor 운용 상세 |
+| `docs/POSTRUN.md` | 병합·production 파이프라인의 구조와 성능 근거 |
+| `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
+| `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
+
+**작업을 마칠 때마다 해야 하는 것** — 이것을 빠뜨리면 다음 PC 에서 맥락이 끊긴다.
+사용자와 **프로젝트 종료를 합의할 때까지** 계속한다.
+
+1. §11 세션 기록에 **무엇을 왜 했는지** 추가. 결과 수치는 실측값만.
+2. §4 검증 상태(✅ / ⚠️)와 §6 잔여 작업 큐를 현재에 맞게 갱신.
+3. 프로젝트 기록 페이지를 **같은 주소로** 갱신 (아래).
+4. 커밋하고 **`git push origin main`**. 푸시하지 않으면 저장한 것이 아니다.
+
+### 프로젝트 기록 페이지
+
+사용자 계정에 발행된 요약 페이지가 있다. 어느 PC 에서든 브라우저로 열 수 있다.
+
+```
+https://claude.ai/code/artifact/dbc5ca50-0165-42f6-9bbc-2008f9a8ca67
+```
+
+Claude Code 로 갱신할 때는 Artifact 도구에 **`url` 로 위 주소를 넘겨야** 같은 페이지가
+갱신된다. 넘기지 않으면 별개의 새 페이지가 생긴다.
+
+**정본은 이 저장소다.** 저 페이지는 읽기용 요약이며, 이어받기에 필요한 것은 전부
+저장소 안에 있어야 한다.
 
 ---
 
