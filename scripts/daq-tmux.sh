@@ -2,16 +2,16 @@
 # ---------------------------------------------------------------------
 #  daq-tmux.sh - DAQ 운용 tmux 화면을 한 번에 구성한다.
 #
-#      +---------------------------+--------------------+
-#      |  rcmon.sh (상태 화면)     |  작업용 셸 (vi 등) |
-#      |                           +--------------------+
-#      |                           |                    |
-#      |                           |  postrun.sh        |
-#      +---------------------------+  --follow          |
-#      |  rcsupervisor / 감시자로그|  (merge+production)|
-#      +---------------------------+--------------------+
-#         좌우 5.5 : 4.5      postrun 높이 = 왼쪽 열의 3/4
+#      +--------------------+-------------------------+
+#      | rcmon.sh (상태) 6  |                         |
+#      +--------------------+                         |
+#      | rcsupervisor    2  |   작업용 셸 (vi 등)     |
+#      +--------------------+                         |
+#      | postrun.sh      2  |                         |
+#      +--------------------+-------------------------+
+#              4.5                      5.5
 #
+#      왼쪽 = DAQ 관련 3개(위에서부터 6 : 2 : 2), 오른쪽 = 작업용 하나
 #      비율이 어긋나면 scripts/daq-layout.sh (tmux 안에서는 Ctrl-B 다음 =)
 #
 #  사용 :
@@ -67,20 +67,20 @@ fi
 SUP_RUNNING=0
 pgrep -x rcsupervisor >/dev/null 2>&1 && SUP_RUNNING=1
 
-# ---- 창 구성 : 좌우로 반 가르고, 왼쪽을 위아래로 나눈다 ----
+# ---- 창 구성 ----
+#  왼쪽에 DAQ 관련 3개를 세로로 쌓고, 오른쪽은 작업용 셸 하나만 둔다.
+#  -p 는 '새로 생기는 pane' 의 비율이다.
+#    오른쪽 55%          -> 왼쪽 45%              (4.5 : 5.5)
+#    왼쪽에서 아래 40%   -> monitor 60%
+#    그 40% 를 반으로    -> supervisor 20%, postrun 20%   (6 : 2 : 2)
 tmux new-session -d -s "$SESSION" -n daq -c "$DIR"
 TOPLEFT=$(tmux list-panes -t "$SESSION:daq" -F '#{pane_id}' | head -1)
-#  좌하단(감시자 로그)은 전체 높이의 1/4 만 쓴다. 좌상단 rcmon.sh 가
-#  전체 화면 형식(약 20행)을 그대로 그려야 하므로 위쪽에 자리를 몰아준다.
-#  -p 는 '새로 생기는 pane' 의 비율이다. 오른쪽이 45% -> 왼쪽 55% (5.5 : 4.5)
-RIGHT=$(tmux split-window   -h -p 45 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
-BOTLEFT=$(tmux split-window -v -p 25 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
+RIGHT=$(tmux split-window   -h -p 55 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
+BOTLEFT=$(tmux split-window -v -p 40 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 
-#  후처리 pane 은 오른쪽 아래를 쓴다. 왼쪽은 DAQ 상태 전용으로 남겨 둔다.
 POSTPANE=""
 if [ "$POSTRUN" -eq 1 ]; then
-   #  postrun 을 오른쪽 열의 75% 로. 왼쪽 열 전체 높이의 3/4 에 해당한다.
-   POSTPANE=$(tmux split-window -v -p 75 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
+   POSTPANE=$(tmux split-window -v -p 50 -P -F '#{pane_id}' -t "$BOTLEFT" -c "$DIR")
    tmux select-pane -t "$POSTPANE" -T "postrun"
 fi
 
@@ -111,7 +111,7 @@ else
    fi
 fi
 
-# ---- 우하 : merge + production 추적 ----
+# ---- 좌하 : merge + production 추적 ----
 #  DAQ 를 방해하지 않도록 nice 를 걸고, 기록 중인 서브런보다 3개(=약 3분) 뒤에서만
 #  처리한다. 이미 끝난 서브런은 건너뛰므로 바로 돌려도 안전하다.
 #  산출물은 로컬 NVMe 로 뺀다 — 병목이 NFS I/O 라서 41초/서브런이 29초로 줄었다.
@@ -120,6 +120,9 @@ if [ -n "$POSTPANE" ]; then
    tmux send-keys -t "$POSTPANE" \
       "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --outroot '$POSTRUN_OUT'" C-m
 fi
+
+# split-window -p 의 반올림은 창이 작을수록 크게 어긋난다. 만든 뒤 한 번 정규화한다.
+[ -x "$DIR/scripts/daq-layout.sh" ] && "$DIR/scripts/daq-layout.sh" "$SESSION" >/dev/null 2>&1
 
 tmux select-pane -t "$RIGHT"          # 작업용 pane 에서 시작
 [ -n "${TMUX:-}" ] && exec tmux switch-client -t "$SESSION"
