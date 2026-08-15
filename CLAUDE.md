@@ -212,7 +212,7 @@ DAQ 수집 뒤에 `scripts/postrun.sh` 가 붙는다. `DAQ_cup/production` 의
   merge 가 Zombie 로 판정해 재시도에 들어가 오히려 느려진다.
 - **병목은 CPU 가 아니라 NFS I/O다.** 가동 중 실측 iowait 26~34%, CPU 유휴 61~88%.
   그래서 `--jobs` 를 올려도 크게 나아지지 않는다. 3~4 권장.
-- **산출물을 로컬 NVMe 로 빼면 서브런당 41초 → 28초** (run 4288 실측).
+- **산출물을 로컬 NVMe 로 빼면 서브런당 41.0초 → 27.7초** (run 4288 실측).
   `--outroot /Data_ssd/RAW` 를 주면 `Merged`/`PRD` 를 거기 만들고 RAW 에는
   심볼릭 링크를 건다. 매크로와 기존 도구는 경로를 그대로 쓰므로 고칠 게 없다.
   단 `/Data_ssd` 는 여유 2.0TB 뿐이라 산출물 기준 **약 9일치**다(`/scratch` 는 48일치).
