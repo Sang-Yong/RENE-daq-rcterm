@@ -2,13 +2,17 @@
 # ---------------------------------------------------------------------
 #  daq-tmux.sh - DAQ 운용 tmux 화면을 한 번에 구성한다.
 #
-#      +---------------------------+---------------------------+
-#      |  rcmon.sh (상태 화면)     |   작업용 셸 (vi 등)       |
-#      |                           +---------------------------+
-#      |                           |                           |
-#      +---------------------------+  postrun.sh --follow      |
-#      |  rcsupervisor / 감시자로그|  (merge + production)     |
-#      +---------------------------+---------------------------+
+#      +---------------------------+--------------------+
+#      |  rcmon.sh (상태 화면)     |  작업용 셸 (vi 등) |
+#      |                           +--------------------+
+#      |                           |                    |
+#      |                           |  postrun.sh        |
+#      +---------------------------+  --follow          |
+#      |  rcsupervisor / 감시자로그|  (merge+production)|
+#      +---------------------------+--------------------+
+#         좌우 5.5 : 4.5      postrun 높이 = 왼쪽 열의 3/4
+#
+#      비율이 어긋나면 scripts/daq-layout.sh (tmux 안에서는 Ctrl-B 다음 =)
 #
 #  사용 :
 #      scripts/daq-tmux.sh              화면만 구성 (DAQ 는 건드리지 않음)
@@ -68,13 +72,15 @@ tmux new-session -d -s "$SESSION" -n daq -c "$DIR"
 TOPLEFT=$(tmux list-panes -t "$SESSION:daq" -F '#{pane_id}' | head -1)
 #  좌하단(감시자 로그)은 전체 높이의 1/4 만 쓴다. 좌상단 rcmon.sh 가
 #  전체 화면 형식(약 20행)을 그대로 그려야 하므로 위쪽에 자리를 몰아준다.
-RIGHT=$(tmux split-window   -h -p 50 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
+#  -p 는 '새로 생기는 pane' 의 비율이다. 오른쪽이 45% -> 왼쪽 55% (5.5 : 4.5)
+RIGHT=$(tmux split-window   -h -p 45 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 BOTLEFT=$(tmux split-window -v -p 25 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 
 #  후처리 pane 은 오른쪽 아래를 쓴다. 왼쪽은 DAQ 상태 전용으로 남겨 둔다.
 POSTPANE=""
 if [ "$POSTRUN" -eq 1 ]; then
-   POSTPANE=$(tmux split-window -v -p 40 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
+   #  postrun 을 오른쪽 열의 75% 로. 왼쪽 열 전체 높이의 3/4 에 해당한다.
+   POSTPANE=$(tmux split-window -v -p 75 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
    tmux select-pane -t "$POSTPANE" -T "postrun"
 fi
 
