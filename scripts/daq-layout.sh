@@ -31,8 +31,12 @@ HR=${DAQ_LAYOUT_H:-6 2 2}        # monitor : supervisor : postrun
 
 tmux has-session -t "$S" 2>/dev/null || { echo "세션 없음 : $S"; exit 1; }
 
+# 제목의 '앞부분'으로 찾는다. postrun pane 의 제목은
+#   "postrun ( production & merging) "
+# 처럼 뒤에 설명이 붙으므로 완전일치로 찾으면 놓친다.
 pane_by_title() {
-   tmux list-panes -s -t "$S" -F "#{pane_id} #{pane_title}" | awk -v t="$1" '$2==t{print $1; exit}'
+   tmux list-panes -s -t "$S" -F "#{pane_id} #{pane_title}" \
+   | awk -v t="$1" '{id=$1; $1=""; sub(/^ /,""); if (index($0,t)==1) {print id; exit}}'
 }
 height_of() {
    tmux list-panes -s -t "$S" -F "#{pane_id} #{pane_height}" | awk -v p="$1" '$1==p{print $2; exit}'

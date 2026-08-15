@@ -113,9 +113,41 @@ LOGDIR=$PRODDIR/LOG
 MERGE_MACRO=merge_FADC_SADC_v3_5v.cc
 PROD_SCRIPT=production_from_merged_v3_5v.sh
 
-C_G='\033[1;32m'; C_Y='\033[1;33m'; C_R='\033[1;31m'; C_C='\033[1;36m'; C_0='\033[0m'
-log()  { printf '%s %b\n' "$(date '+%m-%d %H:%M:%S')" "$*"; }
-die()  { log "${C_R}[FATAL]${C_0} $*"; exit 1; }
+# 색상 코드는 원본 merge_FADC_SADC_v3_5v.sh 와 동일하게 맞춘다.
+C_R='\033[1;31m'; C_G='\033[1;32m'; C_Y='\033[1;33m'
+C_C='\033[1;36m'; C_P='\033[1;35m'; C_0='\033[0m'
+
+ts()   { date '+%Y-%m-%d %H:%M:%S'; }
+say()  { printf '%b\n' "$*"; }                       # 배너 (시각 없음)
+sayt() { printf '[%s] %b\n' "$(ts)" "$*"; }          # 시각이 붙는 줄
+log()  { sayt "$*"; }
+die()  { sayt "${C_R}[FATAL ERROR]${C_0} $*"; exit 1; }
+
+# 원본의 [Data Dashboard] / [Pre-Check] 블록. 런마다 한 번만 찍는다.
+dashboard() {            # run_num data_dir
+   local rn=$1 dd=$2 fc sc maxs empty
+   fc=$(find "$dd" -maxdepth 1 -name 'FADC*.root.*' 2>/dev/null | wc -l)
+   sc=$(find "$dd" -maxdepth 1 -name 'SADC*.root.*' 2>/dev/null | wc -l)
+   maxs=$(( fc - 1 )); [ "$maxs" -lt 0 ] && maxs=0
+   say ""
+   say "${C_C}==========================================================${C_0}"
+   say "${C_C} [Data Dashboard] Scanning storage for Run ${rn}...${C_0}"
+   say "  > 발견된 FADC 서브런 파일 : ${C_G}${fc} 개${C_0}"
+   say "  > 발견된 SADC 서브런 파일 : ${C_G}${sc} 개${C_0}"
+   say "  > Max 서브런 번호 (Max #) : ${C_Y}${maxs}${C_0}"
+   [ "$fc" != "$sc" ] && \
+      say "  ${C_R}[!] 주의: FADC와 SADC 파일 개수가 다릅니다! 데이터 누락 의심.${C_0}"
+   say "${C_C}==========================================================${C_0}"
+   say "${C_C} [Pre-Check] Checking for 0-byte (broken) files...${C_0}"
+   empty=$(find "$dd" -maxdepth 1 -type f -name '*.root.*' -size 0 2>/dev/null)
+   if [ -n "$empty" ]; then
+      say "${C_Y} [WARNING] 0-byte (손상) 파일 발견됨!${C_0}"
+      say "${C_Y}${empty}${C_0}"
+   else
+      say "${C_G} [Pre-Check] 0-byte 파일 없음. 양호.${C_0}"
+   fi
+   say "${C_C}==========================================================${C_0}"
+}
 
 # ---- 사전 점검 ------------------------------------------------------
 [ -d "$CODEDIR" ]  || die "Code 디렉터리 없음 : $CODEDIR"
@@ -155,6 +187,7 @@ subrun_done() {          # run_num subrun
 # merge 매크로가 다음 서브런에 넘기라고 찍어 주는 SADC 위치
 ST_SADC=0; ST_EVT=0; ST_TRG=0
 NEXT_RUN=""; NEXT_SUB=-1        # 추적 모드에서 재스캔을 피하기 위한 진행 지점
+DASH_RUN=""                     # [Data Dashboard] 를 이미 찍은 런
 load_state() {           # merge 로그 파일
    local f=$1 a b c
    a=$(grep -m1 "final SADC "              "$f" 2>/dev/null | awk '{print $4}')
@@ -202,7 +235,20 @@ NRUNNING=0
 prod_launch() {          # run_pad subrun data_dir
    local rp=$1 n=$2 dd=$3
    while [ "$NRUNNING" -ge "$JOBS" ]; do wait -n 2>/dev/null || break; NRUNNING=$((NRUNNING-1)); done
-   ( cd "$SHELLDIR" && nice -n "$NICE" ./"$PROD_SCRIPT" "$rp" "$n" "$dd" >/dev/null 2>&1 ) &
+   # 원본은 production 을 직렬로 돌리고 끝난 뒤 결과를 찍는다. 여기서는 병렬이므로
+   # 자식이 스스로 시작/종료 줄을 찍는다. 형식과 색은 원본과 같다.
+   (
+      local t0 rc el
+      t0=$(date +%s)
+      sayt "${C_P} -> Producing Subrun ${n} (병렬 슬롯 최대 ${JOBS})${C_0}"
+      cd "$SHELLDIR" && nice -n "$NICE" ./"$PROD_SCRIPT" "$rp" "$n" "$dd" >/dev/null 2>&1
+      rc=$?; el=$(( $(date +%s) - t0 ))
+      if [ $rc -eq 0 ]; then
+         sayt "${C_G} [OK] Producing Done : Subrun ${n} (총 처리시간: ${el}초)${C_0}"
+      else
+         sayt "${C_R} [FAIL] Producing FAILED : Subrun ${n} (총 처리시간: ${el}초)${C_0}"
+      fi
+   ) &
    NRUNNING=$((NRUNNING+1))
 }
 prod_drain() { while [ "$NRUNNING" -gt 0 ]; do wait -n 2>/dev/null || break; NRUNNING=$((NRUNNING-1)); done; }
@@ -222,6 +268,8 @@ do_subrun() {            # run_pad run_num subrun maxarg data_dir
 
    date > "$rl"; date > "$ml"
 
+   sayt "${C_C}Merging FADC Subrun ${n} ...${C_0}"
+
    local try=0 rc=1
    while [ $try -le "$MAXRETRY" ]; do
       ( cd "$CODEDIR" && nice -n "$NICE" root -l -b -q \
@@ -233,7 +281,7 @@ do_subrun() {            # run_pad run_num subrun maxarg data_dir
    done
 
    if [ $rc -ne 0 ]; then
-      log "${C_R}[ZOMBIE]${C_0} sub=$n merge 실패. 건너뛴다"
+      say "${C_R} [CORRUPTION DETECTED] ZOMBIE FILE AT SUBRUN ${n} (Skip)${C_0}"
       echo " Skipped subrun $n due to corruption." >> "$rl"
       # 상태를 이 서브런 기준으로 리셋한다. 원본이 비연속 점프에서 하는 것과 같다.
       ST_SADC=$((n+1)); ST_EVT=0; ST_TRG=0
@@ -280,7 +328,6 @@ process_range() {        # run_pad run_num from to maxarg
       fi
       if do_subrun "$rp" "$rn" "$n" "$maxarg" "$dd"; then
          done_cnt=$((done_cnt+1))
-         log "${C_G}[OK]${C_0} run=$rn sub=$n  (다음 SADC 위치 $ST_SADC/$ST_EVT)"
       else
          fail_cnt=$((fail_cnt+1))
       fi
@@ -290,8 +337,11 @@ process_range() {        # run_pad run_num from to maxarg
    # 다음 주기에 처음부터 다시 훑지 않도록 진행 지점을 기억한다.
    NEXT_RUN=$rn; NEXT_SUB=$((to+1))
 
-   [ $((done_cnt+fail_cnt)) -gt 0 ] && \
-      log "구간 종료 run=$rn [$from..$to] 처리 $done_cnt / 건너뜀 $skip_cnt / 실패 $fail_cnt  (${el}초)"
+   if [ $((done_cnt+fail_cnt)) -gt 0 ]; then
+      say "${C_G}==========================================================${C_0}"
+      say "${C_G} [완료] run ${rn} [${from}..${to}] : merge ${done_cnt} / 건너뜀 ${skip_cnt} / 실패 ${fail_cnt}  (${el}초)${C_0}"
+      say "${C_G}==========================================================${C_0}"
+   fi
    return 0
 }
 
@@ -356,8 +406,14 @@ run_once() {             # run_num
       return 0
    fi
 
-   log "${C_C}run=$rn${C_0} 파일 $nf 개(최대 #$maxidx) / $([ $active -eq 1 ] && echo '수집 중' || echo '수집 종료')"
-   log "  처리 구간 [$from .. $to]   maxsubrun 인자=$lastc   jobs=$JOBS"
+   # [Data Dashboard] / [Pre-Check] 는 런마다 한 번만. 추적 모드에서 20초마다
+   # 다시 찍으면 화면이 배너로 뒤덮인다.
+   if [ "$DASH_RUN" != "$rn" ]; then
+      dashboard "$rn" "$dd"
+      DASH_RUN=$rn
+   fi
+   say "${C_C} [Resume Check] Subrun ${from} 부터 이어서 처리합니다."\
+"  (수집 $([ $active -eq 1 ] && echo '진행 중' || echo '종료') / 상한 ${to} / lag ${LAG} / jobs ${JOBS})${C_0}"
 
    # 재개일 때는 직전 서브런의 상태를 이어받는다
    if [ "$from" -gt 0 ]; then

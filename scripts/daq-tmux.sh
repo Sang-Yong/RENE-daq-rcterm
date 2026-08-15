@@ -73,7 +73,12 @@ pgrep -x rcsupervisor >/dev/null 2>&1 && SUP_RUNNING=1
 #    오른쪽 55%          -> 왼쪽 45%              (4.5 : 5.5)
 #    왼쪽에서 아래 40%   -> monitor 60%
 #    그 40% 를 반으로    -> supervisor 20%, postrun 20%   (6 : 2 : 2)
-tmux new-session -d -s "$SESSION" -n daq -c "$DIR"
+# 초기 크기. 클라이언트가 붙으면 그 터미널 크기를 따라가지만, 붙기 전(detached)
+# 상태의 기준이 되고 pane 비율 계산도 이 크기에서 시작한다.
+# 터미널 자체의 기본 크기는 gnome-terminal 프로파일의 default-size-* 로 맞춰 두었다.
+COLS=${DAQ_TMUX_COLS:-157}
+ROWS=${DAQ_TMUX_ROWS:-37}
+tmux new-session -d -s "$SESSION" -n daq -c "$DIR" -x "$COLS" -y "$ROWS"
 TOPLEFT=$(tmux list-panes -t "$SESSION:daq" -F '#{pane_id}' | head -1)
 RIGHT=$(tmux split-window   -h -p 55 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 BOTLEFT=$(tmux split-window -v -p 40 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
@@ -81,7 +86,7 @@ BOTLEFT=$(tmux split-window -v -p 40 -P -F '#{pane_id}' -t "$TOPLEFT" -c "$DIR")
 POSTPANE=""
 if [ "$POSTRUN" -eq 1 ]; then
    POSTPANE=$(tmux split-window -v -p 50 -P -F '#{pane_id}' -t "$BOTLEFT" -c "$DIR")
-   tmux select-pane -t "$POSTPANE" -T "postrun"
+   tmux select-pane -t "$POSTPANE" -T "postrun ( production & merging) "
 fi
 
 tmux select-pane -t "$TOPLEFT" -T "monitor"
