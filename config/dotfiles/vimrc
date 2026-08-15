@@ -39,7 +39,12 @@ set cursorline                " 커서 줄 강조
 set scrolloff=3               " 위아래 여유 3줄
 set sidescrolloff=5
 set display=truncate
-set title                     " 터미널 제목에 파일명
+" 터미널 제목은 건드리지 않는다.
+"  tmux 안에서 'set title' 을 켜면 vim 이 pane 제목을 덮어쓰고, 끝낼 때
+"  titleold("Thanks for flying Vim", 한국어 로케일에서는 그 번역문)으로
+"  되돌려 놓는다. 이 저장소는 pane 제목으로 화면을 구성하고
+"  scripts/daq-layout.sh 가 제목으로 pane 을 찾으므로 켜면 안 된다.
+set notitle
 set colorcolumn=100           " 100칸 눈금
 set linebreak                 " 줄바꿈은 단어 단위로
 set lazyredraw

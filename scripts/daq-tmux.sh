@@ -91,7 +91,7 @@ fi
 
 tmux select-pane -t "$TOPLEFT" -T "monitor"
 tmux select-pane -t "$BOTLEFT" -T "supervisor"
-tmux select-pane -t "$RIGHT"   -T "work"
+tmux select-pane -t "$RIGHT"   -T "work space"
 
 # ---- 좌상 : 상태 화면 ----
 tmux send-keys -t "$TOPLEFT" "$DIR/scripts/rcmon.sh '$HB'" C-m
