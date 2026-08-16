@@ -74,6 +74,33 @@ struct Sup {
 
 static std::ofstream gLog;
 
+// 파일 경로의 상위 디렉터리를 없으면 만든다.
+static bool EnsureParentDir(const std::string& path)
+{
+   if (path.empty()) return true;
+   const size_t slash = path.find_last_of('/');
+   if (slash == std::string::npos || slash == 0) return true;
+   const std::string dir = path.substr(0, slash);
+   struct stat st;
+   if (::stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return true;
+
+   // mkdir -p 를 손으로 한다. 중간 디렉터리도 만들어야 한다.
+   std::string acc;
+   size_t p = 0;
+   while (p < dir.size()) {
+      const size_t next = dir.find('/', p + 1);
+      acc = dir.substr(0, next == std::string::npos ? dir.size() : next);
+      if (!acc.empty() && ::stat(acc.c_str(), &st) != 0) ::mkdir(acc.c_str(), 0755);
+      if (next == std::string::npos) break;
+      p = next;
+   }
+   if (::stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+      std::cerr << "[WARN] cannot create directory : " << dir << std::endl;
+      return false;
+   }
+   return true;
+}
+
 static std::string TimeStr(time_t t)
 {
    char b[64];
@@ -478,6 +505,13 @@ int main(int argc, char** argv)
       const char* od = ::getenv("ONLDAQ_DIR");
       if (od && *od) c.binDir = std::string(od) + "/bin";
    }
+
+   // 로그와 heartbeat 가 놓일 디렉터리를 미리 만든다.
+   //  실측 사고(2026-08-17): /Data/LOG 가 지워진 채로 돌자 rcterm 이 heartbeat 를
+   //  못 써서 감시자가 멀쩡한 런을 죽이고 재시작했다. 감시자가 heartbeat 를
+   //  '읽는' 쪽이지만, 디렉터리는 여기서도 확인해 두는 편이 안전하다.
+   EnsureParentDir(c.logFile);
+   EnsureParentDir(c.heartbeat);
 
    if (!c.logFile.empty()) {
       gLog.open(c.logFile.c_str(), std::ios::app);

@@ -122,6 +122,7 @@ private:
    int  NextRunNumberFromDB();
    void FinalizeRunInDB(int run);
    void MarkFailedRunInDB(int run, const char* why);
+   bool EnsureParentDir(const std::string& path);
    bool LoadDBColumns();
    bool HasColumn(const std::string& c) const;
    TString RunSQL(const std::string& sql);

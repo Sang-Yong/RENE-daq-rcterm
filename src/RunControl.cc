@@ -216,6 +216,17 @@ bool RunControl::Init()
       return false;
    }
 
+   // 상태·로그 파일이 놓일 디렉터리를 미리 만든다.
+   //  실측 사고(2026-08-17): /Data/LOG 가 통째로 지워진 상태에서 런이 돌자
+   //  heartbeat 를 쓸 수 없게 됐고, 감시자는 그것을 'rcterm 이 죽었다'로 읽어
+   //  멀쩡히 수집 중이던 런을 죽이고 새 번호로 재시작했다. 디렉터리가 없다는
+   //  이유만으로 정상 런이 사라지면 안 된다.
+   //  $RAWDATA_DIR/{LOG,CONFIG} 는 이미 이렇게 하고 있었는데(§3 숨은 함정),
+   //  정작 자기 상태 파일의 경로는 확인하지 않고 있었다.
+   EnsureParentDir(fCfg.logFile);
+   EnsureParentDir(fCfg.heartbeatFile);
+   EnsureParentDir(fCfg.rootFile);
+
    if (!fCfg.logFile.empty()) {
       fLog.open(fCfg.logFile.c_str(), std::ios::app);
       if (!fLog.is_open())
@@ -562,6 +573,24 @@ int RunControl::NextRunNumberFromDB()
       return -1;
    }
    return run;
+}
+
+// 파일 경로의 상위 디렉터리를 없으면 만든다. 경로가 비어 있으면 할 일이 없다.
+//  이미 있으면 아무것도 하지 않고 성공으로 본다.
+bool RunControl::EnsureParentDir(const std::string& path)
+{
+   if (path.empty()) return true;
+   const size_t slash = path.find_last_of('/');
+   if (slash == std::string::npos || slash == 0) return true;   // 상대경로 / 루트
+   const std::string dir = path.substr(0, slash);
+
+   if (!gSystem->AccessPathName(dir.c_str(), kWritePermission)) return true;
+   if (gSystem->mkdir(dir.c_str(), kTRUE) != 0 &&
+       gSystem->AccessPathName(dir.c_str(), kWritePermission)) {
+      std::cerr << "[WARN] cannot create directory : " << dir << std::endl;
+      return false;
+   }
+   return true;
 }
 
 void RunControl::FinalizeRunInDB(int run)
@@ -943,7 +972,15 @@ void RunControl::WriteHeartbeat(int run, const char* phase)
 
    const std::string tmp = fCfg.heartbeatFile + ".tmp";
    std::ofstream o(tmp.c_str(), std::ios::trunc);
-   if (!o.is_open()) return;
+   if (!o.is_open()) {
+      // 런 도중에 디렉터리가 사라졌을 수 있다. 한 번 만들어 보고 다시 시도한다.
+      // 여기서 조용히 포기하면 감시자가 이 런을 죽은 것으로 보고 죽인다.
+      if (!EnsureParentDir(fCfg.heartbeatFile)) return;
+      o.clear();
+      o.open(tmp.c_str(), std::ios::trunc);
+      if (!o.is_open()) return;
+      std::cerr << "[WARN] heartbeat directory was missing; recreated" << std::endl;
+   }
 
    const int    st   = CheckError(fStatus) ? onl::kERROR : GetState(fStatus);
    const double daqt = fMonNames.empty() ? 0 : fStats[fMonNames[0]].t;
