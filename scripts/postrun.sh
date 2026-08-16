@@ -48,7 +48,11 @@ POLL=20                # --follow 에서 heartbeat 확인 주기 [초]
 NICE=10                # 수집을 방해하지 않도록 낮은 우선순위
 MAXRETRY=2             # 좀비 파일 재시도 (원본은 5회 x 60초 = 5분 낭비)
 RETRY_WAIT=10
-RUNARG=""; FOLLOW=0; FROM=-1; TO=-1; DRYRUN=0; ONCE=0
+# --outroot(로컬 디스크)에 최근 몇 개 런의 산출물을 남길지. 0 = 정리하지 않음.
+#  로컬은 빠르지만 좁다 — 런당 산출물이 217 GB 이고 여유가 1.5 TB 라 약 7일이면 찬다.
+#  끝나고 검증된 런은 RAW 트리(NFS)로 되돌린다.
+KEEPLOCAL=0
+RUNARG=""; FOLLOW=0; FROM=-1; TO=-1; DRYRUN=0; ONCE=0; ARCHNOW=0
 
 usage() {
    cat <<EOF
@@ -79,6 +83,13 @@ postrun.sh - DAQ 수집 뒤에 붙는 merge + production 파이프라인 드라�
   --outroot DIR       Merged/PRD 를 여기에 두고 RAW 에는 심볼릭 링크를 건다.
                       병목이 NFS 이므로 로컬 디스크를 주면 빨라진다
                       (예: --outroot /Data_ssd/RAW)
+  --keep-local N      --outroot 에 최근 N 개 런만 남기고 나머지 산출물을
+                      RAW 트리로 되돌린다. 0 = 정리하지 않음        (${KEEPLOCAL})
+                      완료·검증된 런만, 수집 중이 아닐 때만 옮긴다
+  --archive-now       정리만 한 번 수행하고 끝낸다 (처리는 하지 않음)
+                      수백 GB 를 옮기므로 시간이 걸린다. ionice 로 우선순위를
+                      낮출 때 -c3(유휴)까지 내리면 후처리에 밀려 굶는다.
+                      낮추려면 -c2 -n7 정도가 적당하다
   --heartbeat FILE    rcterm heartbeat                    (${HB})
   --dry-run           무엇을 할지만 출력
   -h, --help
@@ -99,6 +110,8 @@ while [ $# -gt 0 ]; do
       --prod-dir)   PRODDIR=$2; shift 2 ;;
       --rawroot)    RAWROOT=$2; shift 2 ;;
       --outroot)    OUTROOT=$2; shift 2 ;;
+      --keep-local) KEEPLOCAL=$2; shift 2 ;;
+      --archive-now) ARCHNOW=1; shift ;;
       --heartbeat)  HB=$2; shift 2 ;;
       --dry-run)    DRYRUN=1; shift ;;
       -h|--help)    usage; exit 0 ;;
@@ -223,6 +236,9 @@ max_file_index() {       # run_pad
 #  audit_run.sh 같은 기존 도구도 경로가 그대로다.
 ensure_outdirs() {       # data_dir run_pad
    local dd=$1 rp=$2 sub
+   # dry-run 은 파일시스템을 건드리지 않는다. 예전에는 여기서 빈 디렉터리를
+   # 만들어 두어, 나중에 정리 기능이 그것을 '미완료 런'으로 보고했다.
+   [ "$DRYRUN" -eq 1 ] && return 0
    mkdir -p "$dd/PNG" 2>/dev/null
    for sub in Merged PRD; do
       if [ -z "$OUTROOT" ]; then
@@ -241,6 +257,119 @@ ensure_outdirs() {       # data_dir run_pad
             log "  $sub -> $OUTROOT/$rp/$sub (심볼릭 링크 생성)"
       fi
    done
+}
+
+# =====================================================================
+#  산출물 정리 — 로컬 디스크(--outroot)에서 RAW 트리로 되돌린다
+#
+#  물리 데이터를 옮기는 작업이므로 다음 조건을 모두 만족할 때만 손댄다.
+#   1) --outroot 와 --keep-local 이 둘 다 설정돼 있다
+#   2) 그 런이 수집 중이 아니다 (heartbeat 의 run 과 다르다)
+#   3) 처리가 완료됐다 — PRD 개수 == FADC 개수 이고 0 이 아니다
+#   4) RAW 쪽이 심볼릭 링크다 (이미 실제 디렉터리면 건드릴 것이 없다)
+#   5) 목적지에 충분한 여유가 있다
+#
+#  옮기는 방법 : 파일 단위 mv 로 임시 디렉터리에 모은 뒤, 개수를 확인하고
+#  링크를 치우고 이름을 바꾼다. mv 는 파일마다 복사 후 원본을 지우므로
+#  중간에 끊겨도 파일이 사라지는 구간이 없고, 다시 실행하면 이어서 된다.
+# =====================================================================
+archive_one() {          # run_num  ->  0 정리함 / 1 건너뜀
+   local rn=$1 rp sub src dst tmp n_src n_dst need avail
+   rp=$(pad6 "$rn")
+   local raw="$RAWROOT/$rp"
+   local out="$OUTROOT/$rp"
+
+   [ -d "$out" ] || return 1
+
+   # (2) 수집 중인 런은 손대지 않는다
+   local hbrun; hbrun=$(hb_field run)
+   if [ -n "$hbrun" ] && [ "$hbrun" = "$rn" ] && [ "$(hb_age)" -lt 120 ]; then
+      return 1
+   fi
+
+   # 파일이 하나도 없는 껍데기면 조용히 치운다 (예전 dry-run 이 남긴 것 등)
+   if [ -z "$(find "$out" -type f -print -quit 2>/dev/null)" ]; then
+      [ "$DRYRUN" -eq 1 ] || { rmdir "$out"/* "$out" 2>/dev/null; }
+      return 1
+   fi
+
+   # (3) 완료 확인. 하나라도 모자라면 아직 옮길 때가 아니다.
+   local n_fadc n_prd
+   n_fadc=$(find "$raw" -maxdepth 1 -name 'FADC_*.root.*' 2>/dev/null | wc -l)
+   n_prd=$(ls "$out/PRD"/*.root 2>/dev/null | wc -l)
+   if [ "$n_fadc" -eq 0 ] || [ "$n_prd" -ne "$n_fadc" ]; then
+      log "${C_Y}[정리 보류]${C_0} run=$rn 미완료 (FADC $n_fadc / PRD $n_prd)"
+      return 1
+   fi
+
+   # (5) 여유 공간
+   need=$(du -s -BM "$out" 2>/dev/null | cut -f1 | tr -dc '0-9')
+   avail=$(df --output=avail -BM "$raw" 2>/dev/null | tail -1 | tr -dc '0-9')
+   if [ -n "$need" ] && [ -n "$avail" ] && [ "$avail" -lt "$((need + 10240))" ]; then
+      log "${C_R}[정리 중단]${C_0} run=$rn 목적지 여유 부족 (필요 ${need}M / 여유 ${avail}M)"
+      return 1
+   fi
+
+   log "${C_C}[정리]${C_0} run=$rn 산출물을 $raw 로 되돌린다 (약 $((need/1024)) GB)"
+   [ "$DRYRUN" -eq 1 ] && { log "  ${C_C}[DRY]${C_0} mv $out/{Merged,PRD} -> $raw/"; return 0; }
+
+   for sub in Merged PRD; do
+      src="$out/$sub"; dst="$raw/$sub"; tmp="$raw/.arch_$sub"
+      [ -d "$src" ] || continue
+      # (4) RAW 쪽이 심볼릭 링크가 아니면 이미 실제 데이터가 있다는 뜻이다. 덮지 않는다.
+      if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+         log "${C_Y}  $dst 이 실제 디렉터리다. 건너뛴다${C_0}"
+         continue
+      fi
+      mkdir -p "$tmp" || { log "${C_R}  $tmp 생성 실패${C_0}"; return 1; }
+
+      # [중단 복구] 양쪽에 다 있는 파일은 '복사는 됐는데 원본이 안 지워진' 것,
+      # 즉 끊긴 복사다. 목적지 쪽이 잘려 있을 수 있으므로 버리고 다시 옮긴다.
+      # (정상적으로 끝난 mv 는 원본을 지우므로 양쪽에 남을 수 없다)
+      local f b dropped=0
+      for f in "$tmp"/*; do
+         [ -f "$f" ] || continue
+         b=$(basename "$f")
+         if [ -f "$src/$b" ]; then rm -f "$f"; dropped=$((dropped+1)); fi
+      done
+      [ "$dropped" -gt 0 ] && log "  ${C_Y}끊긴 복사 $dropped 개를 버리고 다시 옮긴다${C_0}"
+
+      n_src=$(ls -1 "$src" 2>/dev/null | wc -l)
+      # 파일 단위 이동. 끊겨도 다시 실행하면 이어진다.
+      #  -exec ... + 로 묶어 한 번의 mv 가 여러 파일을 처리한다. 파일마다
+      #  프로세스를 띄우는 것보다 낫다.
+      find "$src" -maxdepth 1 -type f -exec mv -n -t "$tmp" {} + 2>/dev/null
+      n_dst=$(ls -1 "$tmp" 2>/dev/null | wc -l)
+      if [ "$n_dst" -lt "$n_src" ]; then
+         log "${C_R}  $sub 이동 불완전 ($n_dst / $n_src). 링크를 그대로 둔다${C_0}"
+         return 1
+      fi
+      rmdir "$src" 2>/dev/null
+      rm -f "$dst"                       # 심볼릭 링크 제거
+      mv "$tmp" "$dst"                   # 같은 파일시스템이라 원자적
+      log "  ${C_G}$sub${C_0} $n_dst 개 이동 완료"
+   done
+
+   rmdir "$out" 2>/dev/null && log "  ${C_G}run=$rn 정리 끝${C_0}"
+   return 0
+}
+
+# --keep-local N : outroot 에 최근 N 개 런만 남기고 나머지를 되돌린다
+archive_sweep() {
+   [ -n "$OUTROOT" ] || return 0
+   [ "$KEEPLOCAL" -gt 0 ] || return 0
+   [ -d "$OUTROOT" ] || return 0
+
+   local runs keep r
+   runs=$(ls -1 "$OUTROOT" 2>/dev/null | grep -E '^[0-9]{6}$' | sort -n)
+   [ -z "$runs" ] && return 0
+   keep=$(echo "$runs" | tail -n "$KEEPLOCAL")
+
+   for r in $runs; do
+      echo "$keep" | grep -qx "$r" && continue
+      archive_one "$((10#$r))"
+   done
+   return 0
 }
 
 # ---- production 병렬 풀 ---------------------------------------------
@@ -474,6 +603,9 @@ follow_loop() {
          # 런이 넘어갔다. 이전 런은 이제 전부 완료된 상태이므로 끝까지 처리한다.
          log "${C_Y}런 전환 $cur -> $hbrun${C_0}. 이전 런 마무리"
          FROM=-1; TO=-1; run_once "$cur"; prod_drain
+         # 처리가 끝난 뒤에 정리한다. 이 시점이 가장 안전하다 —
+         # 직전 런은 완료됐고 새 런은 아직 산출물이 거의 없다.
+         archive_sweep
       fi
       cur=$hbrun
 
@@ -485,6 +617,17 @@ follow_loop() {
 
 # =====================================================================
 trap 'echo; log "중단 요청. 진행 중인 production 을 기다린다..."; prod_drain; exit 130' INT TERM
+
+if [ "$ARCHNOW" -eq 1 ]; then
+   [ -n "$OUTROOT" ] || die "--archive-now 는 --outroot 가 있어야 한다"
+   if [ -n "$RUNARG" ]; then
+      archive_one "$((10#$RUNARG))" && log "완료" || log "옮기지 않았다 (위 사유 참조)"
+   else
+      [ "$KEEPLOCAL" -gt 0 ] || die "--archive-now 에는 --keep-local N 또는 run 번호가 필요하다"
+      archive_sweep; log "완료"
+   fi
+   exit 0
+fi
 
 if [ -n "$RUNARG" ]; then
    case "$RUNARG" in
