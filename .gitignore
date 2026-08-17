@@ -11,6 +11,7 @@ rcsupervisor
 # 사이트 고유 설정은 생성해서 사용하고 추적하지 않는다
 config/*.params
 !config/*.params.example
+config/rundesc.txt
 
 # 발표 자료는 저장소 밖에 둔다. tools/slides 의 스크립트로 생성한다
 *.pptx

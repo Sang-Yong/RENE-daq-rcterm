@@ -117,7 +117,11 @@ if [ "$SUP_RUNNING" -eq 1 ]; then
 else
    CMD="$SUP --params '$SUP_PARAMS'"
    if [ -r "$DESC_FILE" ]; then
-      CMD="$CMD -- --desc '$(cat "$DESC_FILE")'"
+      # 주석(#)과 빈 줄은 버리고 첫 줄만 쓴다. 줄 끝 공백은 남긴다 --
+      # rcterm 이 뒤에 ', Split T [m] = N' 을 붙이므로 이전 런의 rundesc 와
+      # 글자 하나까지 같으려면 그 공백이 있어야 한다.
+      DESC=$(grep -v '^[[:space:]]*#' "$DESC_FILE" | grep -m1 '[^[:space:]]')
+      [ -n "$DESC" ] && CMD="$CMD -- --desc '$DESC'"
    fi
    if [ "$START" -eq 1 ]; then
       tmux send-keys -t "$BOTLEFT" "$CMD" C-m

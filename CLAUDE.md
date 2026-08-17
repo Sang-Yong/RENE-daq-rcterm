@@ -24,6 +24,8 @@ config/dotfiles/install.sh --all
 #      src/OnlConsts.hh  RCTERM_DEF_RAWDATA_DIR / RCTERM_DEF_DBFILE
 #      config/*.params   (.gitignore 대상. *.params.example 에서 복사해 수정)
 #                        rcterm / rcsupervisor / dataflow 세 개다
+#      config/rundesc.txt  런 설명(HV 등). 없으면 daq-tmux.sh 가 --desc 를 안 넘겨
+#                        rundesc 가 이전 런들과 달라진다 (§11.20)
 #      ~/.ssh/config     백업 서버 별칭 'khu' + 키 교환 (docs/DATAFLOW.md §4)
 
 # 4) 빌드
@@ -399,6 +401,10 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 확인할 것 : ① `/Data_ssd` 여유가 실제로 회복되는가 ② 원격 개수가 로컬과 맞는가
 ③ 후처리가 옮겨진 런을 찾다가 죽지 않는가(§11.13 에서 고쳤으나 실전 미확인).
 
+**2026-08-18 현재 이 셋 다 아직 못 봤다.** `/Data_ssd` 에 런이 `keep_ssd`(=2) 개뿐이라
+1단계에 대상이 없고 `/data/RAW` 가 비어 2·3단계도 할 일이 없다(§11.19).
+**새 구성으로 런을 3개 이상 받아야 비로소 체인이 실제로 돈다.**
+
 ### 작업 6 — 개선 백로그 (여유 있을 때)
 - `libsqlite3` 링크 + prepared statement (현재는 임시파일 + 셸 호출, 이스케이프만)
 - 모니터 소켓 런당 1회만 오픈 → 런 도중 끊기면 재연결 없음. 주기적 재연결 필요
@@ -474,6 +480,91 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-18 (새벽) — 중단 상태 정리와 재기동 준비
+
+#### 11.17 착수 시점의 실측 상태
+
+DAQ 가 **멎어 있었다.** `rcsupervisor` / `rcterm` / `daq` / `tcb` / `merger` 전부
+없고 7809·7814·7815 도 비어 있었다. tmux 세션 `daq` 도 없다.
+
+마지막 런은 **4291** — 08-17 08:16 시작, 08-17 22:53 에 끊겼다.
+DB 행은 `stime`/`etime`/`onlbit` 이 전부 NULL 인 고아 행이었다.
+
+| 근거 | 값 |
+|---|---|
+| 마지막 heartbeat (`/Data/LOG/rcterm.hb`) | 22:49:29, `phase=running` `subrun=875` `daqtime=52203.2` `totev=104,223,444` |
+| 마지막 FADC 서브런 | `00869`, 22:53:53, **22 MB** (정상 74 MB) → 쓰기 도중 끊김 |
+| 서브런 수 | FADC 870 / Merged 867 / PRD 867 |
+
+heartbeat 가 22:49 에 멈춘 뒤에도 DAQ 는 22:53 까지 파일을 썼다. **rcterm 이 먼저
+사라지고 DAQ 가 남아 있다가 나중에 죽은 모양**이다. 무엇이 죽였는지는 로그가
+남아 있지 않아 확정할 수 없다 — `/Data/LOG/rcsupervisor.log` 는 §11.10 의
+삭제된 inode 문제로 되살아나지 않았고, `rcterm.log` 는 그 뒤 23:32 의
+`--dry-run` 테스트 한 줄로 덮여 있다. **추측하지 않고 사실만 적는다.**
+
+#### 11.18 run 4291 을 DB 에 마감 표기했다
+
+§11.2 의 선례(4284 등)와 `MarkFailedRunInDB()` 의 규약을 그대로 따랐다 —
+`onlbit=0`, 시간·개수 컬럼은 **NULL 로 남긴다**(DAQ 가 보고하지 않은 값을
+파일 mtime 으로 추정해 채우면 나중에 진짜 기록과 구분할 수 없다).
+근거는 `runlog` 에 문장으로 남겼다.
+
+```sql
+UPDATE runcatalog SET onlbit=0, runlog='aborted; run started but was not
+  finalized (marked 20260818-013000); last heartbeat 2026-08-17 22:49:29
+  phase=running subrun=875 daqtime=52203.2 totev=104223444; last FADC
+  subrun 00869 written 22:53:53 and is truncated' WHERE runnum=4291;
+```
+
+수정 전 스냅샷을 `/Data_ssd/runcatalog.pre-4291-mark.db` 에 남겼다.
+
+#### 11.19 `/Data_ssd` 용량 압박은 해소됐다 — §11.7·§11.9 를 대체한다
+
+```
+/Data_ssd  3.7T 중 3.3T 여유 (8% 사용)      ← §11.9 의 "7일 뒤 가득 참" 은 무효
+/data      32T 중 31T 여유
+/scratch   140T 중 20T 여유 (86% 사용)      ← 이제 여기가 가장 빡빡하다
+```
+
+`/Data_ssd` 에 남은 것은 `004290`(30 GB) · `004291`(130 GB) 둘뿐이다. 세션 사이에
+정리가 있었던 것으로 보이나 **무엇을 누가 지웠는지는 확인하지 못했다.**
+
+`dataflow.sh --once --dry-run` 은 조용히 끝난다. 정상이다 — `keep_ssd = 2` 이고
+SSD 에 런이 정확히 2개라 1단계 대상이 없고, `/data/RAW` 가 비어 있어 2·3단계도
+할 일이 없다. **파이프라인이 막힌 것이 아니라 흘려보낼 것이 없는 상태다.**
+
+#### 11.20 재기동 시 런 설명(desc)이 끊기던 문제 — `config/rundesc.txt`
+
+`daq-tmux.sh` 는 `config/rundesc.txt` 가 있으면 그 내용을 `-- --desc` 로 넘기는데
+**그 파일이 사이트에 없었다.** 그대로 기동하면 `rcterm.params` 의
+`desc = RENE cup continuous data taking` 가 쓰여 4288~4291 과 `rundesc` 가
+달라지고, DB 에서 같은 측정으로 묶이지 않는다. §11.4 에서 손으로 복원했던 것과
+같은 일이 매번 반복될 자리다.
+
+- run 4290 의 `rundesc` 에서 rcterm 이 자동으로 붙이는 `, Split T [m] = 1` 을 떼어
+  `config/rundesc.txt` 를 만들었다. 재조립해 **바이트 단위로 일치**함을 확인했다.
+- **줄 끝 공백 한 칸이 실제로 의미가 있다.** 원본이 `... No source ` 로 끝나므로
+  이것을 빠뜨리면 `No source,` 가 되어 어긋난다(만들면서 한 번 겪었다).
+- `daq-tmux.sh` 가 주석·빈 줄을 버리고 첫 내용 줄만 쓰도록 고쳤다. 예전에는
+  `cat` 통째였다.
+- `config/rundesc.txt` 는 `.gitignore` 에 넣고 `.example` 을 추가했다. HV 값 같은
+  사이트 값이라 `*.params` 와 같은 취급이다.
+
+**desc 의 `26.08.14.` 는 이제 날짜가 맞지 않는다.** 이전 런들과 묶으려고 일부러
+그대로 두었다. 새 측정 구간을 시작할 생각이면 `config/rundesc.txt` 를 고칠 것.
+
+#### 11.21 하지 못한 것
+
+- **재기동을 하지 못했다.** `scripts/daq-tmux.sh --start` 가 이 세션의 권한
+  정책에 막혔다. `--dry-run` 까지는 정상 확인했다(부팅 순서 FADCDAQ → SADCDAQ
+  → TCB, `-p 60`, `rawdatadir=/Data_ssd`). **사용자가 직접 실행해야 한다.**
+- `git push` 도 막혔다. 자격증명 캐시(`--timeout=84000`)가 만료됐고 SSH 키는
+  등록돼 있지 않다. 커밋은 되어 있으니 사용자가 한 번 밀면 된다.
+- run 4291 의 남은 서브런(FADC 870 vs PRD 867) 후처리는 하지 않았다. 재기동하면
+  postrun pane 이 알아서 따라잡는다.
+- 예전 구성(`Merged`/`PRD` 가 심볼릭 링크)인 4290·4291 을 어떻게 할지는 여전히
+  §11.16 의 열린 질문이다.
 
 ### 2026-08-17 (밤) — 데이터 흐름 재설계 : 수집 -> 백업 -> 장기보관
 
@@ -732,7 +823,7 @@ runnum 4289  2026-08-16 04:52:24 → 2026-08-17 04:52:11  onlbit 1  87,635,256 e
 **dead time** 29초 / 26초 — §5.5 에 적은 10~40초 범위 안이다.
 **FADC 와 SADC 파일 수가 1440 으로 정확히 일치**한다. 한쪽 누락이 없다는 뜻이다.
 
-#### 11.9 용량 — 이제 가장 급하다
+#### 11.9 용량 — 이제 가장 급하다  ※ 2026-08-18 무효. §11.19 로 대체
 
 ```
 /Data_ssd  3.7T 중 여유 1.6T      런당 산출물 217~219 GB      →  약 7일
@@ -784,7 +875,7 @@ runnum 4288   stime 2026-08-15 04:52:06   etime 2026-08-16 04:51:54   onlbit 1
 밀렸던 800여 서브런을 소화하고 정상 추적 상태에 들어갔다. 로컬 NVMe 로 옮긴
 효과(§5.8)가 확인된 셈이다.
 
-#### 11.7 새로 급해진 것 — `/Data_ssd` 용량
+#### 11.7 새로 급해진 것 — `/Data_ssd` 용량  ※ 2026-08-18 무효. §11.19 로 대체
 
 실측 소비가 **약 400 GB/일**(런 2개분 산출물)이다. 여유가 2.0 TB → 1.6 TB 로 줄었다.
 **약 7일 뒤 가득 찬다.** 앞서 "9일치"로 적었던 것은 런 1개 기준이었고, 실제로는
