@@ -117,10 +117,21 @@ src/RunControl.hh   4.7k
 src/RunControl.cc  39.5k   config파싱 / 상태머신 / DB / 화면출력 / TTree
 src/rcterm.cc       8.0k
 src/rcsupervisor.cc 23.9k
+src/usbreset      20.0k   ★ 소스가 아니라 실행 파일이다. 아래 설명 참조
 config/{rcterm.params.example, rcsupervisor.params.example, SERVER-block.example}
 scripts/{killdaq.sh, rcsupervisor.service.example}
 docs/MANUAL.md      README.md(26k, 영)      README.ko.md(28k, 한)
 ```
+
+**`src/usbreset` 는 이 프로젝트의 소스가 아니다.** NOTICE USB 보드(FADC/SADC)를
+`USBDEVFS_RESET` 으로 되살리는 CUPDAQ 유틸리티이며, 원본은
+`DAQ_cup/CUPDAQ/DAQ/test/usbreset.cc` 다. 2026-08-14 에 이 사이트에서 빌드한
+것으로 `DAQ_cup/install/bin/usbreset`(2025-06, 56 kB) 과는 다른 바이너리다.
+**사용자 요청으로 추적한다** — 보드가 먹통일 때 손에 잡히는 곳에 있어야 해서다.
+소스는 CUPDAQ 쪽 것을 정본으로 두고 여기로 복제하지 않는다(§5.8 과 같은 이유).
+
+> 실행하면 USB 보드가 리셋된다. **수집 중에는 절대 돌리지 말 것.**
+> DAQ 를 먼저 내리고(`scripts/killdaq.sh`) 쓴다.
 
 ```
 OnlConsts.hh ← OnlSocket.hh ← RunControl.hh ← {RunControl.cc, rcterm.cc}
