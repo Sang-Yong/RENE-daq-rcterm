@@ -510,7 +510,7 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 
 ## 11. 세션 기록 (Claude Code)
 
-### 2026-08-18 (새벽) — 중단 상태 정리와 재기동 준비
+### 2026-08-18 (새벽) — 중단 상태 정리와 재기동 (run 4292 가동)
 
 #### 11.17 착수 시점의 실측 상태
 
@@ -583,17 +583,65 @@ SSD 에 런이 정확히 2개라 1단계 대상이 없고, `/data/RAW` 가 비�
 **desc 의 `26.08.14.` 는 이제 날짜가 맞지 않는다.** 이전 런들과 묶으려고 일부러
 그대로 두었다. 새 측정 구간을 시작할 생각이면 `config/rundesc.txt` 를 고칠 것.
 
-#### 11.21 하지 못한 것
+#### 11.21 재기동 — run 4292 가동 확인
 
-- **재기동을 하지 못했다.** `scripts/daq-tmux.sh --start` 가 이 세션의 권한
-  정책에 막혔다. `--dry-run` 까지는 정상 확인했다(부팅 순서 FADCDAQ → SADCDAQ
-  → TCB, `-p 60`, `rawdatadir=/Data_ssd`). **사용자가 직접 실행해야 한다.**
-- `git push` 도 막혔다. 자격증명 캐시(`--timeout=84000`)가 만료됐고 SSH 키는
-  등록돼 있지 않다. 커밋은 되어 있으니 사용자가 한 번 밀면 된다.
-- run 4291 의 남은 서브런(FADC 870 vs PRD 867) 후처리는 하지 않았다. 재기동하면
-  postrun pane 이 알아서 따라잡는다.
+`scripts/daq-tmux.sh --start` 와 `git push` 둘 다 **이 세션의 권한 정책에 막혀
+사용자가 직접 실행했다.** 우회하지 않았다. 결과는 확인했다.
+
+```
+rcsupervisor  pid 104512   --params config/rcsupervisor.params -- --desc '...'
+rcterm        pid 104547   --max-runs 1 --run-length 24.016667 --quiet
+tmux daq      2026-08-18 01:43:55 생성
+heartbeat     run=4292 phase=running   FADC 999.98 Hz / SADC 1023.75 Hz
+```
+
+**`rundesc.txt` 가 의도대로 동작했다** — run 4292 의 `rundesc` 가 run 4290 과
+**바이트 단위로 일치**한다. 4288~4292 가 카탈로그에서 한 측정으로 묶인다.
+`--dry-run` 으로 먼저 확인한 부팅 순서(FADCDAQ → SADCDAQ → TCB)와 `-p 60`,
+`rawdatadir=/Data_ssd` 도 그대로 반영됐다.
+
+푸시는 `git fetch` 후 `git log origin/main..HEAD` 가 비었음을 확인했다.
+**이 PC 에서 push 는 Claude 가 끝낼 수 없다** — origin 이 HTTPS 이고 자격증명이
+`credential.helper cache --timeout=84000` 뿐이며 SSH 키는 등록돼 있지 않다.
+캐시가 만료되면 `could not read Username` 으로 실패하므로, 커밋까지만 하고
+사용자에게 안내한 뒤 위 방법으로 확인할 것.
+
+#### 11.22 저장소 정리 — 추적할 것과 지운 것
+
+작업 트리에 오래 방치돼 있던 미추적 파일 넷을 정리했다. **사용자 판단으로
+둘은 추적하고 둘은 지웠다.**
+
+| 대상 | 처리 | 근거 |
+|---|---|---|
+| `src/usbreset` | 추적 | NOTICE USB 보드 리셋. 부팅 실패 때 손에 잡혀야 한다 |
+| `src/NOTICE_CODE_RUN.sh` | 추적 | 벤더 보드 점검 매크로 래퍼. 보드가 응답하는지 rcterm 밖에서 본다 |
+| `old_build/` (47파일 1.0MB) | 삭제 | CMake 잔재. 안의 유일본 없음을 확인하고 지웠다 |
+| `both_command` | 삭제 | 런 명령 메모. 내용이 DB 에 남아 있다 |
+
+지우기 전에 **유일본이 없음을 실측으로 확인**했다.
+
+- `old_build/{usbreset, NOTICE_CODE_RUN.sh}` 는 `src/` 것과 **바이트 동일**
+- `old_build/sample_command_README` 의 내용은 `both_command` 안에 그대로 있었다
+- `both_command` 의 상세 desc(SADC PID/THR 배열, TLT 구성)는 **런 카탈로그에
+  392개 행(run 3877~4281)으로 남아 있다.** 필요하면 여기서 꺼낸다
+
+```bash
+sqlite3 /Data_ssd/runcatalog.db "select rundesc from runcatalog where runnum=4281;"
+```
+
+두 실행물의 성격과 주의사항은 §2 에 적었다. **둘 다 하드웨어를 직접 건드리므로
+수집 중에는 돌리지 말 것.** 경로가 이 PC 에 하드코딩되어 있다는 것도 함께.
+
+#### 11.23 아직 열려 있는 것
+
+- run 4291 의 남은 서브런(FADC 870 대 PRD 867) 후처리. 재기동했으니 postrun
+  pane 이 따라잡을 것이다. **확인하지 않았다.**
 - 예전 구성(`Merged`/`PRD` 가 심볼릭 링크)인 4290·4291 을 어떻게 할지는 여전히
   §11.16 의 열린 질문이다.
+- 이동 체인 실전 통과. `/Data_ssd` 에 런이 `keep_ssd`(=2) 개를 넘어야 1단계가
+  돈다. **4292 가 끝나고 후처리까지 완료되면 그때가 첫 기회다.**
+- **다음 확인 지점 : 2026-08-19 01:43 경 로테이션(4292 → 4293).** 통과하면
+  로테이션 3회 연속 무결이 된다.
 
 ### 2026-08-17 (밤) — 데이터 흐름 재설계 : 수집 -> 백업 -> 장기보관
 
