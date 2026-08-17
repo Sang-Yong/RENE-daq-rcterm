@@ -123,6 +123,13 @@ static std::string FmtF(double v, int prec) {
    return std::string(buf);
 }
 
+//  tsv 전용. 항상 숫자를 낸다 (없는 값은 음수). FmtF 와 달라야 한다.
+static std::string FmtRaw(double v, int prec) {
+   char buf[64];
+   snprintf(buf, sizeof(buf), "%.*f", prec, v);
+   return std::string(buf);
+}
+
 static std::vector<int> ParseRunList(const char *s) {
    std::vector<int> out;
    std::stringstream ss(s ? s : "");
@@ -320,10 +327,13 @@ static void WriteTsv(const TString &path, const std::map<int, RunSummaryRow> &ro
         "\tcov_trig\tcov_step2\tsource\n";
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
+      //  tsv 는 되읽기용이다. 값이 없으면 '-' 가 아니라 음수를 쓴다 --
+      //  '-' 를 쓰면 LoadExisting 의 >> 가 실패해서 그 행이 통째로 사라진다.
+      //  (실제로 그렇게 run 4084 가 표에서 없어졌다. '-' 는 txt 에서만 쓴다)
       o << r.run << '\t' << r.nSubrun << '\t'
         << (long long)r.epochStart << '\t' << (long long)r.epochEnd << '\t'
-        << FmtF(r.wallSec, 3) << '\t' << FmtF(r.spanSec, 3) << '\t'
-        << FmtF(r.liveSec, 3) << '\t' << FmtF(r.deadSec, 3) << '\t'
+        << FmtRaw(r.wallSec, 3) << '\t' << FmtRaw(r.spanSec, 3) << '\t'
+        << FmtRaw(r.liveSec, 3) << '\t' << FmtRaw(r.deadSec, 3) << '\t'
         << r.nEvents << '\t' << r.nVeto << '\t' << r.nTarget << '\t' << r.nBoth << '\t'
         << r.nClean << '\t' << r.nMuon << '\t' << r.nAfterMu << '\t'
         << r.covTrig << '\t' << r.covStep2 << '\t'

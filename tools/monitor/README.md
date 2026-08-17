@@ -1,4 +1,25 @@
-# run_summary — production 을 마친 런의 DAQ 운용 지표
+# DAQ 모니터링 요약 — livetime 부터 neutrino candidate 까지
+
+단계마다 코드 하나, 스크립트 하나다. 순서가 있고, 앞 단계가 없어도 죽지는 않는다
+(그 칸만 비고 나중에 다시 돌리면 채워진다).
+
+| 순서 | 스크립트 | 매크로 | 내는 것 |
+|---|---|---|---|
+| 1 | `run-summary.sh` | `BuildRunSummary.C` | livetime, 종류별 이벤트 수 → `run_summary.{txt,tsv}` |
+| 2 | `ibd-summary.sh` | `BuildPairSummary.C` | IBD 후보 수 (채널별) → `pair_summary.{txt,tsv}` |
+
+```bash
+tools/monitor/run-summary.sh          # 1단계
+tools/monitor/ibd-summary.sh          # 2단계
+tools/monitor/ibd-summary.sh --show   # 결과
+tools/monitor/ibd-summary.sh --missing  # 페어링이 안 된 런을 찾아준다
+```
+
+2단계 상세는 이 문서 §6 부터. 1단계는 바로 아래.
+
+---
+
+# 1단계 : run_summary — production 을 마친 런의 DAQ 운용 지표
 
 수집이 끝나고 병합·production 까지 지난 런에서 **livetime 과 종류별 이벤트 수**를
 뽑아 하나의 표로 누적한다. rcterm 이 남기는 런 카탈로그(`runcatalog.db`)가
@@ -115,12 +136,102 @@ tools/monitor/run-summary.sh --force 4240   # 이미 있어도 다시 계산해 
 
 ---
 
-## 5. 지금 상태와 다음
+## 5. `tsv` 에는 `-` 를 쓰지 않는다 ★고칠 때 주의
 
-- 실측 검증 완료 — run 4063 · 4084 · 4221~4234 · 4237~4240 으로
-  monitor 경로, Step1 대체 경로, 이어붙이기, 건너뛰기, 정렬을 모두 확인했다.
+`txt` 에서 값이 없으면 `-` 로 찍지만, **`tsv` 에는 반드시 숫자(없으면 음수)를
+쓴다.** 되읽기가 `>>` 로 파싱하기 때문에 `-` 를 만나면 그 행 전체가 조용히
+버려진다. 실제로 그렇게 표가 15행에서 8행으로 줄고 run 4084 가 사라진 적이 있다.
+`FmtF`(txt 용, `-` 를 낸다)와 `FmtRaw`(tsv 용, 항상 숫자)를 섞지 말 것.
+
+---
+
+# 6단계 : pair_summary — neutrino candidate (개략)
+
+페어링 결과에서 IBD 후보 수를 채널별로 뽑는다. **여기서 페어링을 새로 하지
+않는다.** `RunBothChannels.C` 가 만든 것을 읽기만 한다.
+
+```
+Step3/step3_Run<NNNNNN><tag>.root : T_Paired      coincidence 를 만족한 쌍
+                                    T_Paired_Acci off-window 대조 표본
+Step3/step4_Run<NNNNNN><tag>.root : T_IBD         + multiplicity(고립) 통과
+                                    T_IBD_Acci
+```
+
+`tag` 는 `_nGd` / `_nH`. 없으면 `ibd-summary.sh --missing` 이 돌려야 할 명령을
+알려 준다(그 코드는 `ojk` 계정 것이라 그쪽에서 돌려야 한다).
+
+## 6.1 우발 빼기 — `DrawIBD.C` 규약을 그대로 따른다
+
+on-time 창은 `dt ∈ [DT_MIN, DT_MAX]` 라 폭이 `DT_MAX − DT_MIN` 인데,
+off-time 창은 `[DT_ACCI, DT_ACCI + DT_MAX]` 라 폭이 `DT_MAX` 다. **두 폭이
+같지 않다.** 그래서 폭 비율로 맞춘 뒤 뺀다.
+
+```
+acciScale   = (DT_MAX − DT_MIN) / DT_MAX        n-Gd 0.99 · n-H 0.995
+N_candidate = N_IBD − acciScale × N_IBD_Acci
+err         = sqrt(N_IBD + acciScale² × N_IBD_Acci)      통계 오차만
+```
+
+배율을 1 로 두면 우발을 과하게 빼서 후보가 낮게 나온다.
+`DrawIBD.C:164` 의 `h_dt_sub->Add(h_dt_on, h_dt_acci, 1.0, -acciScale)` 와
+같은 양을 세는 것이 목적이므로, **규약을 바꾸려면 그쪽과 함께 바꿀 것.**
+
+## 6.2 컷 상수는 복제하지 않는다
+
+`DT_MIN` / `DT_MAX` / `S2` 창 / `ISO` 는 분석 쪽
+`essential/AnalysisCondition.h` 를 **직접 include** 해서 쓴다. 베껴 두면 저쪽이
+컷을 바꿨을 때 이 표만 조용히 틀린 값이 된다. 경로는 `RENE_COND` 환경변수
+(또는 `-DRENE_COND_HEADER=`)로 바꾼다.
+
+그래서 표에 찍히는 컷은 **문서가 아니라 코드에서 읽은 값**이다. 둘이 다를 수
+있다 — `README_pipeline.md` 는 n-Gd S2 를 `[7.77, 9.36]` 이라 적었지만
+코드에서 그 줄은 주석이고 실제로는 **`[6.0, 10.0]`** 이 쓰인다(2026-08-18 확인).
+
+## 6.3 선원 런을 반드시 구분한다 ★
+
+AmBe · Cf252 를 넣고 받은 교정 런은 **후보 수가 백만 단위로 나온다.** 선원이
+만든 중성자이지 neutrino 가 아니다. 구분하지 않으면 합계가 통째로 무의미해진다.
+
+`ibd-summary.sh` 가 런 카탈로그(`runcatalog.db`)의 `rundesc` 에서 선원 이름을
+뽑아 `runtype.tsv` 를 만들고, 매크로가 그것을 붙인다.
+
+- `src = none` — 선원 없음. **채널별 합계는 이것만 더한다.**
+- `src = AmBe` / `Cf252` / … — 교정 런. 표에는 남기되 합계에서 뺀다.
+- `src = ?` — 카탈로그에 없거나 설명에서 못 읽었다. 안전하게 합계에서 뺀다.
+
+실측 예 (같은 n-Gd 채널인데 자릿수가 다르다) :
+
+```
+4224  _nGd  AmBe     ibd 847,911   acci 3,095.7   cand 844,815.3   S/B 272.90
+4237  _nGd  none     ibd   2,097   acci 1,363.2   cand     733.8   S/B   0.54
+```
+
+## 6.4 지금 나오는 값
+
+선원 없는 런 5개(4084 · 4237~4240), livetime 29.8일 기준.
+
+| 채널 | ibd | acci | cand | S/B | cand/day |
+|---|---|---|---|---|---|
+| `_nGd` | 6,262 | 4,069.9 | 2,192 ± 101 | 0.54 | **73.5 ± 3.4** |
+| `_nH` | 1,989,144 | 1,822,510.7 | 166,633 ± 1,950 | 0.09 | 5,589 ± 65 |
+
+**이 cand 는 개략값이다.** 우발만 뺀 것이고 검출 효율, 우주선 유발 배경
+(fast neutron, ⁹Li/⁸He), 컷 효율 보정이 들어 있지 않다. 물리 결과가 아니라
+**"수집이 정상이면 이만큼 나온다"는 운용 지표**로 볼 것. n-H 의 S/B 0.09 는
+이 채널에서 추가 컷 없이는 정상이다.
+
+---
+
+## 7. 지금 상태와 다음
+
+- 실측 검증 완료 — 1단계는 run 4063 · 4084 · 4221~4234 · 4237~4240,
+  2단계는 페어링된 13개 런 × 2채널 = 26행. monitor 경로 / Step1 대체 경로 /
+  이어붙이기 / 건너뛰기 / 정렬 / 미분석 런 무시 / **되읽기 라운드트립**을
+  모두 확인했다.
 - 아직 자동화하지 않았다. **수동 실행이다.** 동작을 지켜본 뒤 postrun /
   dataflow 처럼 tmux pane 에서 주기 실행으로 올리는 것이 다음 단계다.
-- 하지 않은 것 : rcterm 의 `runcatalog.db` 와 대조. DB 의 `nfadc` / `tfadc` 는
-  DAQ 가 보고한 값이고 여기 `n_events` / `live` 는 데이터에서 나온 값이라,
-  둘을 나란히 놓으면 **수집과 저장 사이의 손실**이 보인다. 해 볼 가치가 있다.
+- 하지 않은 것
+  - `runcatalog.db` 의 `nfadc`/`tfadc`(DAQ 가 보고한 값) 대 `n_events`/`live`
+    (데이터에서 나온 값) 대조. 나란히 놓으면 수집과 저장 사이의 손실이 보인다.
+  - 병합 런(`step4_Run004237+004238_nGd.root` 같은 것)은 건너뛴다. 단일 런만 센다.
+  - 시간에 따른 후보율 추이(그림). 지금은 표까지다.
