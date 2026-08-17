@@ -632,6 +632,43 @@ sqlite3 /Data_ssd/runcatalog.db "select rundesc from runcatalog where runnum=428
 두 실행물의 성격과 주의사항은 §2 에 적었다. **둘 다 하드웨어를 직접 건드리므로
 수집 중에는 돌리지 말 것.** 경로가 이 PC 에 하드코딩되어 있다는 것도 함께.
 
+#### 11.24 pane 이름을 바꿨더니 레이아웃 복원이 깨졌다 ★교훈
+
+사용자 요청으로 pane 제목 둘을 바꿨다.
+
+```
+monitor                                 -> DAQ Run Status(monitor)
+dataflow (ssd -> data -> khu -> scratch)
+     -> dataflow: /Data_ssd(RAW)->/data(PRD)->khu(backup)->scratch(save)
+```
+
+**`daq-layout.sh` 가 pane 을 제목으로 찾는다는 것을 잊고 있었다.** 그것도
+`index($0,t)==1` 로 **앞부분 일치**였다. `"DAQ Run Status(monitor)"` 는
+`monitor` 로 시작하지 않으므로 바꾼 즉시 `monitor pane 을 찾을 수 없다` 로
+죽었다. 실행해 보고 알았다.
+
+수정 — 부분문자열 일치(`index($0,t)>0`)로 바꿨다. 제목은 사람이 읽으라고
+붙이는 것이라 앞뒤로 말이 붙는 게 자연스럽다. 열쇠말 다섯(`monitor`
+`supervisor` `postrun` `work space` `dataflow`)은 서로 다른 제목에 겹쳐
+나오지 않는 것을 확인했다. **§5.2 에서 ADC 종류를 `name[0]` 이 아니라
+부분문자열로 판정하기로 한 것과 같은 성격의 실수**다.
+
+**곁들여 원래 있던 버그 하나를 찾았다.** 레이아웃을 실제로 돌려 보니
+`postrun` pane 이 **1행**이었다. 왼쪽 열을 아래에서 위로 잡는 코드였는데,
+`tmux resize-pane -y` 는 그 pane 의 **아래쪽 경계**를 움직인다. postrun 을
+4행으로 만든 뒤 supervisor 를 7행으로 만들면 그 경계가 도로 내려와 postrun 이
+1행으로 찌그러진다. "두 번 적용해 보정한다"는 주석은 오히려 반대였다.
+
+위에서 아래로(`monitor` → `supervisor`, 마지막 `postrun` 은 나머지를 받게)
+바꾸니 159x39 창에서 **24 : 7 : 5** 로 정확히 떨어진다(28:8:5 를 36행에
+정규화한 값). 반복 실행해도 같은 값이다.
+
+```
+DAQ Run Status(monitor)   73x24      work space   85x26
+supervisor                73x7       dataflow:    85x11
+postrun                   73x5
+```
+
 #### 11.23 아직 열려 있는 것
 
 - run 4291 의 남은 서브런(FADC 870 대 PRD 867) 후처리. 재기동했으니 postrun
@@ -976,18 +1013,29 @@ install/bin/rcsupervisor --params config/rcsupervisor.params -- --desc '<8/14 �
 **화면 구성은 `scripts/daq-tmux.sh` 하나로 재현된다.**
 
 ```
-+--------------------+-------------------------+
-| rcmon.sh (상태)  6 |                         |
-+--------------------+                         |
-| rcsupervisor     2 |   작업용 셸 (vi 등)     |
-+--------------------+                         |
-| postrun.sh       2 |                         |
-+--------------------+-------------------------+
-        4.5                      5.5
++---------------------------+----------------------+
+| DAQ Run Status(monitor) 28|  work space (vi 등) 7|
+|   = rcmon.sh              |                      |
++---------------------------+                      |
+| supervisor               8|                      |
++---------------------------+----------------------+
+| postrun                  5|  dataflow:          3|
+|                           |  /Data_ssd(RAW)      |
+|                           |  ->/data(PRD)        |
+|                           |  ->khu(backup)       |
+|                           |  ->scratch(save)     |
++---------------------------+----------------------+
+             46%                       54%
 ```
 
-왼쪽에 DAQ 관련 3개를 세로로 쌓고(위에서부터 **6 : 2 : 2**),
-오른쪽은 작업용 셸 하나만 둔다. 좌우는 **4.5 : 5.5**.
+왼쪽에 DAQ 관련 3개를 세로로 쌓고(위에서부터 **28 : 8 : 5**),
+오른쪽은 작업용 셸과 데이터 이동(**7 : 3**). 좌우는 **46 : 54**.
+(착수 시점에 적었던 `6 : 2 : 2` / `4.5 : 5.5` 는 실사용하며 위 값으로 바뀌었다.
+dataflow pane 은 2026-08-17 에 추가됐다 — §11.11, §11.13)
+
+**pane 제목은 장식이 아니다.** `daq-layout.sh` 가 제목 안의 열쇠말
+(`monitor` / `supervisor` / `postrun` / `work space` / `dataflow`)로 pane 을
+찾는다. 제목을 바꿀 때 그 낱말을 빼면 레이아웃 복원이 깨진다 (§11.24).
 
 **비율이 어긋나면 `scripts/daq-layout.sh`** (tmux 안에서는 `Ctrl-B` 다음 `=`).
 퍼센트로 준 크기는 지정 순간의 창 크기로 계산되어 열/행 수로 굳으므로,

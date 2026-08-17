@@ -87,3 +87,7 @@ vim 이 가로채서 터미널 복사가 안 된다. RHEL 기본 `defaults.vim` 
   인자를 주지 않으면 기본 프로파일을 찾아 쓴다.
 - `tmux.conf` 의 `bind =` 는 `scripts/daq-layout.sh` 를 부른다.
   저장소 경로가 `/home/frontend/DAQ/RENE-daq-rcterm` 이 아니면 그 줄을 고칠 것.
+- **`pane-border-format` 이 보여 주는 pane 제목은 장식이 아니다.**
+  `daq-layout.sh` 가 제목 안의 열쇠말로 pane 을 찾는다 — `monitor` ·
+  `supervisor` · `postrun` · `work space` · `dataflow`. 제목을 바꾸는 것은
+  자유지만 해당 낱말은 남겨 둘 것. 빼면 레이아웃 복원이 pane 을 못 찾는다.

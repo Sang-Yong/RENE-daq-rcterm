@@ -269,7 +269,7 @@ scripts/postrun.sh --follow --jobs 3 --lag 3 --outroot /Data_ssd/RAW
 scripts/postrun.sh 4288
 scripts/postrun.sh 4288 --from 100 --to 200
 
-# tmux 배치에 포함해서 한 번에 (우하단 pane)
+# tmux 배치에 포함해서 한 번에 (왼쪽 열 맨 아래, 제목 'postrun')
 scripts/daq-tmux.sh
 scripts/daq-tmux.sh --no-postrun      # 후처리 없이
 ```
@@ -278,7 +278,8 @@ scripts/daq-tmux.sh --no-postrun      # 후처리 없이
 뒤까지 = 실시간 대비 몇 분 뒤를 따라갈지), `--outroot`(산출물 저장 위치),
 `--nice`, `--poll`. 자세한 것은 `--help`.
 
-`scripts/daq-tmux.sh` 는 우하단 pane 에서 위 권장 형태를 그대로 띄운다.
+`scripts/daq-tmux.sh` 는 **왼쪽 열 맨 아래 pane**(제목 `postrun`)에서 위 권장
+형태를 그대로 띄운다. 우하단은 데이터 이동(`dataflow:`)이다.
 
 **중단은 Ctrl-C.** 진행 중인 production 을 기다린 뒤 종료한다.
 다시 시작하면 2PC 판정으로 끝난 서브런을 건너뛰고 이어서 한다.

@@ -497,16 +497,19 @@ divider(4, "Running it", "What an operator actually sees and types.")
 # =========================================================================
 # 19  screen
 # =========================================================================
-s, top = new("operations", "One screen, four panes")
+s, top = new("operations", "One screen, five panes")
 codebox(s, [
-    "+--------------------+-------------------------+",
-    "| monitor         6  |                         |   left   DAQ status",
-    "+--------------------+                         |   right  your shell",
-    "| supervisor      2  |    work space           |",
-    "+--------------------+                         |   survives ssh drops,",
-    "| postrun         2  |                         |   display crashes,",
-    "+--------------------+-------------------------+   terminal restarts",
-    "        4.5                     5.5",
+    "+-------------------------+------------------+",
+    "| DAQ Run Status(monitor) |                  |  left   DAQ status",
+    "|                     28  |   work space  7  |  right  your shell and",
+    "+-------------------------+                  |         where data went",
+    "| supervisor           8  |                  |",
+    "+-------------------------+------------------+  survives ssh drops,",
+    "| postrun              5  | dataflow:     3  |  display crashes,",
+    "|                         |  ssd->data->     |  terminal restarts",
+    "|                         |  khu->scratch    |",
+    "+-------------------------+------------------+",
+    "            46%                    54%",
 ], M, top, W - 2 * M, size=14)
 bullets(s, [
     ("The supervisor forces rcterm into one-line mode, because the full screen clears "

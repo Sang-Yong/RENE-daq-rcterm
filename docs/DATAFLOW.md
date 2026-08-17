@@ -178,6 +178,12 @@ Host khu
 
 ### 평소 (tmux 우하단 pane 에서 자동으로 뜬다)
 
+pane 제목이 흐름을 그대로 적어 둔 것이라 어디까지 갔는지 눈으로 찾기 쉽다.
+
+```
+dataflow: /Data_ssd(RAW)->/data(PRD)->khu(backup)->scratch(save)
+```
+
 ```bash
 scripts/daq-tmux.sh --start        # dataflow pane 이 --follow 로 함께 뜬다
 ```
