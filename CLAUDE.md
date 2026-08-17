@@ -704,6 +704,47 @@ cand 734 / S/B 0.54). 런카탈로그 `rundesc` 에서 선원 이름을 뽑아 `
 `FmtF`(txt, `-` 를 낸다) 와 `FmtRaw`(tsv, 항상 숫자) 를 나눴다. **표에 열을
 추가할 때 이걸 다시 밟기 쉽다.**
 
+#### 11.27 rate_trend — 시간축 추이와 효율 보정, 그리고 자동화
+
+3단계로 완성했다. 각 단계가 코드 하나 + 스크립트 하나다.
+
+```
+1) run-summary.sh  + BuildRunSummary.C   livetime, 종류별 이벤트 수
+2) ibd-summary.sh  + BuildPairSummary.C  IBD 후보 수 (채널별)
+3) rate-trend.sh   + BuildRateTrend.C    효율 보정 + 시간축 그림
+   monitor-all.sh                        위 셋을 순서대로 (--follow 로 반복)
+```
+
+x축은 **그 런의 DAQ 시작 시각**이다. 표가 누적되므로 런이 끝날 때마다 그림
+오른쪽 끝에 점이 하나 붙는다. 7쪽(후보 수 / 보정 전 rate / **보정 rate** /
+효율 / 우발 / R_LL / 누적)이고 쪽마다 PNG 도 나온다. 두 채널이 100배쯤
+차이나서 후보·rate 쪽은 **로그축**이다 — 선형이면 n-Gd 이 안 보인다.
+
+**효율은 새로 만들지 않고 분석 쪽 정의를 그대로 썼다.**
+`eps_T = exp(-DT_MIN/tau) - exp(-DT_MAX/tau)` (`diagnostics/EffCutFlow.C:86`,
+tau = n-Gd 25 / n-H 171 us), `eps_iso = exp(-R_LL*(ISO_PRE+ISO_POST))`
+(`diagnostics/IsolationEfficiency.C:62`). **`eps_E` 는 봉우리 fit 이 필요해
+자동으로 못 구한다 — 기본 1.0 이고 보정에서 빠져 있다** (`--eps-e` 로 넣을 수 있다).
+
+**★ R_LL 을 n_clean/live 로 추정하면 안 된다.** Step2 의 `T_Event` 에는 에너지
+문턱이 없어서(muon/afterMu/saturation 컷만) 1.2 MeV 미만이 절반쯤 섞여 있다.
+실측 — run 4237 서브런 100 에서 `T_Event` 11,356 개 중 1.2 MeV 이상은
+**5,740 개뿐**. 그대로 썼으면 R_LL 이 두 배가 되고 보정 rate 가 부풀려졌다.
+그래서 Step2 part 를 **서브런 20개 표본으로 열어 직접 센다**(rate 라 전수
+조사가 필요 없다). `rll.tsv` 에 캐시해 런당 한 번만 잰다.
+
+지금 값 — R_LL 92~95 Hz 로 안정, eps_T 0.942 / eps_iso 0.945 / eps_tot 0.890.
+`_nGd` 보정 rate 93.3 → 81.9 → 83.7 → 59.5 /day (run 4237~4240).
+
+**문서와 코드가 어긋난 곳을 또 찾았다** — `README_pipeline.md` §4-1 에 적힌
+매크로 11개(`IsolationEfficiency.C` 등)가 최상위에 없다. 전부
+`diagnostics/` 에 있다. 인용할 때 경로를 확인할 것.
+
+**자동화** — `monitor-all.sh --follow` (기본 1시간). 각 단계가 이미 처리한 런을
+건너뛰므로 반복이 안전하다. 한 바퀴마다 채널별 가장 최근 점을 한 줄로 찍는다.
+**tmux 화면 배치는 건드리지 않았다**(§11.24 에서 막 정한 것이라) — 붙이려면
+`tmux new-window -t daq -n monitor '...--follow'`.
+
 #### 11.24 pane 이름을 바꿨더니 레이아웃 복원이 깨졌다 ★교훈
 
 사용자 요청으로 pane 제목 둘을 바꿨다.

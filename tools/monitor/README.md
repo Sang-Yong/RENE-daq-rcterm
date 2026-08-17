@@ -7,15 +7,20 @@
 |---|---|---|---|
 | 1 | `run-summary.sh` | `BuildRunSummary.C` | livetime, 종류별 이벤트 수 → `run_summary.{txt,tsv}` |
 | 2 | `ibd-summary.sh` | `BuildPairSummary.C` | IBD 후보 수 (채널별) → `pair_summary.{txt,tsv}` |
+| 3 | `rate-trend.sh` | `BuildRateTrend.C` | 효율 보정 + 시간축 추이 그림 → `rate_trend.{pdf,tsv}`, `*.png` |
+| 전부 | `monitor-all.sh` | — | 위 셋을 순서대로. 자동화는 이것을 쓴다 |
 
 ```bash
-tools/monitor/run-summary.sh          # 1단계
-tools/monitor/ibd-summary.sh          # 2단계
-tools/monitor/ibd-summary.sh --show   # 결과
-tools/monitor/ibd-summary.sh --missing  # 페어링이 안 된 런을 찾아준다
+tools/monitor/monitor-all.sh              # 한 번 (1→2→3)
+tools/monitor/monitor-all.sh --follow     # 1시간마다 계속 갱신
+tools/monitor/ibd-summary.sh --missing    # 페어링이 안 된 런을 찾아준다
 ```
 
-2단계 상세는 이 문서 §6 부터. 1단계는 바로 아래.
+**런이 하나 끝날 때마다 그림 오른쪽 끝에 점이 하나 붙는다.** x축은 그 런의 DAQ
+시작 시각이고, 표가 누적되므로 다시 돌리기만 하면 추이가 계속 자란다. 지우고
+새로 그리는 것이 아니다.
+
+2단계 상세는 §6, 3단계는 §8 부터. 1단계는 바로 아래.
 
 ---
 
@@ -222,14 +227,97 @@ AmBe · Cf252 를 넣고 받은 교정 런은 **후보 수가 백만 단위로 �
 
 ---
 
-## 7. 지금 상태와 다음
+---
+
+# 8단계 : rate_trend — 시간축 추이와 효율 보정
+
+`rate-trend.sh` 가 `pair_summary` 를 읽어 **시각을 x축으로** 그린다. 쪽마다
+PNG 도 하나씩 나오므로 화면에 띄워 두기 좋다.
+
+| 쪽 | PNG | 내용 |
+|---|---|---|
+| 1 | `rate_trend_candidates.png` | 런당 IBD 후보 수 (우발 뺀 값) |
+| 2 | `rate_trend_rate_raw.png` | 보정 전 rate [/day] |
+| 3 | `rate_trend_rate_corrected.png` | **효율 보정 rate [/day]** ← 핵심 |
+| 4 | `rate_trend_efficiency.png` | ε_iso, ε_tot 추이 |
+| 5 | `rate_trend_accidental.png` | 우발 [/day] |
+| 6 | `rate_trend_rll.png` | R_LL — ε_iso 가 흔들리면 여기가 원인이다 |
+| 7 | `rate_trend_cumulative.png` | 누적 후보 수 |
+
+두 채널의 크기가 100배쯤 달라서 후보 수·rate 쪽은 **로그축**이다. 선형축이면
+n-Gd 이 바닥에 깔려 보이지 않는다.
+
+## 8.1 효율 — 분석 쪽 정의를 그대로 쓴다
+
+```
+eps_T   = exp(-DT_MIN/tau) - exp(-DT_MAX/tau)        diagnostics/EffCutFlow.C:86
+          포획시간 tau : n-Gd 25 us, n-H 171 us       같은 파일 :85
+eps_iso = exp(-R_LL x (ISO_PRE + ISO_POST))          diagnostics/IsolationEfficiency.C:62
+          R_LL = 1.2 MeV 이상 clean single 의 rate
+
+rate_corr = rate_raw / (eps_T x eps_iso x eps_E)
+```
+
+**ε_E(에너지창)는 자동으로 구할 수 없다.** 봉우리 fit 이 필요해 사람이 봐야
+한다. 기본 1.0 이고 보정에서 **빠져 있다.** 값을 알면 넣어 줄 수 있다.
+
+```bash
+tools/monitor/rate-trend.sh --eps-e 0.85
+```
+
+## 8.2 R_LL 은 추정하지 않고 잰다 ★
+
+`run_summary` 의 `n_clean / live` 를 R_LL 로 쓰고 싶어지지만 **틀린다.**
+Step2 의 `T_Event` 에는 에너지 문턱이 없다(muon / after-muon / saturation 컷만).
+실측 — run 4237 의 서브런 100 에서 `T_Event` 11,356 개 중 1.2 MeV 이상은
+**5,740 개뿐**이었다. 그대로 쓰면 R_LL 이 두 배가 되고 ε_iso 가 낮아져
+보정 rate 가 부풀려진다.
+
+그래서 Step2 part 를 **서브런 20개쯤 표본으로 열어 직접 센다.** rate 라서
+전수 조사가 필요 없다. 결과는 `rll.tsv` 에 캐시하므로 런당 한 번만 잰다.
+다시 재려면 `--remeasure`.
+
+## 8.3 지금 나오는 값 (선원 없는 런 4개)
+
+```
+run 4237  R_LL 95.03 Hz   eps_T 0.942  eps_iso 0.945  eps_tot 0.890
+   _nGd   rate 83.1 -> 보정 93.3 /day        _nH  6008.7 -> 7842.8 /day
+run 4240  R_LL 92.62 Hz
+   _nGd   rate 53.0 -> 보정 59.5 /day        _nH  6740.4 -> 8763.8 /day
+```
+
+R_LL 이 92~95 Hz 로 안정적이라 ε_iso 도 0.945 근처에서 거의 변하지 않는다.
+
+## 9. 자동화
+
+`monitor-all.sh --follow` 가 세 단계를 주기적으로 돈다(기본 1시간). 각 단계가
+이미 처리한 런을 건너뛰므로 몇 번을 돌려도 안전하다.
+
+```bash
+# tmux 새 창으로 (기존 화면 배치는 건드리지 않는다)
+tmux new-window -t daq -n monitor 'tools/monitor/monitor-all.sh --follow'
+
+# cron 이면 ROOT 환경을 먼저 잡아야 한다
+0 * * * * . /usr/local/bin/thisroot.sh; \
+          /home/frontend/DAQ/RENE-daq-rcterm/tools/monitor/monitor-all.sh --quiet
+```
+
+한 바퀴가 끝날 때마다 채널별 **가장 최근 점**을 한 줄로 찍는다. 그것만 봐도
+수집이 정상인지 감이 온다.
+
+**페어링 자체는 돌리지 않는다.** `RunBothChannels.C` 는 `ojk` 계정의 코드라
+그쪽에서 돌려야 한다. 빠진 런은 `ibd-summary.sh --missing` 이 명령까지 만들어
+준다.
+
+---
+
+## 10. 지금 상태와 다음
 
 - 실측 검증 완료 — 1단계는 run 4063 · 4084 · 4221~4234 · 4237~4240,
-  2단계는 페어링된 13개 런 × 2채널 = 26행. monitor 경로 / Step1 대체 경로 /
-  이어붙이기 / 건너뛰기 / 정렬 / 미분석 런 무시 / **되읽기 라운드트립**을
+  2단계는 페어링된 13개 런 × 2채널 = 26행, 3단계는 선원 없는 런 4개의
+  R_LL 측정과 7쪽 그림. monitor 경로 / Step1 대체 경로 / 이어붙이기 /
+  건너뛰기 / 정렬 / 미분석 런 무시 / **되읽기 라운드트립** / R_LL 캐시를
   모두 확인했다.
-- 아직 자동화하지 않았다. **수동 실행이다.** 동작을 지켜본 뒤 postrun /
-  dataflow 처럼 tmux pane 에서 주기 실행으로 올리는 것이 다음 단계다.
 - 하지 않은 것
   - `runcatalog.db` 의 `nfadc`/`tfadc`(DAQ 가 보고한 값) 대 `n_events`/`live`
     (데이터에서 나온 값) 대조. 나란히 놓으면 수집과 저장 사이의 손실이 보인다.
