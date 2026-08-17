@@ -118,6 +118,7 @@ src/RunControl.cc  39.5k   config파싱 / 상태머신 / DB / 화면출력 / TTr
 src/rcterm.cc       8.0k
 src/rcsupervisor.cc 23.9k
 src/usbreset      20.0k   ★ 소스가 아니라 실행 파일이다. 아래 설명 참조
+src/NOTICE_CODE_RUN.sh    ★ rcterm 과 무관한 보드 점검 스크립트. 아래 설명 참조
 config/{rcterm.params.example, rcsupervisor.params.example, SERVER-block.example}
 scripts/{killdaq.sh, rcsupervisor.service.example}
 docs/MANUAL.md      README.md(26k, 영)      README.ko.md(28k, 한)
@@ -132,6 +133,23 @@ docs/MANUAL.md      README.md(26k, 영)      README.ko.md(28k, 한)
 
 > 실행하면 USB 보드가 리셋된다. **수집 중에는 절대 돌리지 말 것.**
 > DAQ 를 먼저 내리고(`scripts/killdaq.sh`) 쓴다.
+
+**`src/NOTICE_CODE_RUN.sh` 도 rcterm 과 무관하다.** NOTICE 벤더 코드
+(`~/DAQ/NOTICE/nkfadc500_CNU/notice`)의 보드 점검 매크로를 순서대로 부르는
+얇은 래퍼다. 보드가 응답하는지 rcterm 밖에서 확인할 때 쓴다.
+
+```
+notice_env.sh 를 source 한 뒤
+  SADC : set_M64ADC.C -> run_M64ADC.C -> tcb_test.C -> stop_M64ADC.C
+  FADC : tcb_stop.C   -> tcb_test.C
+```
+
+> **하드웨어를 직접 건드린다. 수집 중에는 절대 돌리지 말 것.** 보드를 설정하고
+> 돌렸다 세우므로 진행 중인 런이 깨진다.
+
+두 파일 모두 **경로가 이 PC 에 하드코딩**되어 있다(`/home/frontend/DAQ/...`).
+새 PC 에서는 §0.0 의 사이트 전용 값과 함께 고쳐야 한다. `src/` 에 있는 것은
+원래 자리를 그대로 둔 것이고, 성격상으로는 `scripts/` 가 맞다.
 
 ```
 OnlConsts.hh ← OnlSocket.hh ← RunControl.hh ← {RunControl.cc, rcterm.cc}
