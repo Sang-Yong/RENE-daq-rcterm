@@ -52,7 +52,7 @@ RETRY_WAIT=10
 #  로컬은 빠르지만 좁다 — 런당 산출물이 217 GB 이고 여유가 1.5 TB 라 약 7일이면 찬다.
 #  끝나고 검증된 런은 RAW 트리(NFS)로 되돌린다.
 KEEPLOCAL=0
-RUNARG=""; FOLLOW=0; FROM=-1; TO=-1; DRYRUN=0; ONCE=0; ARCHNOW=0
+RUNARG=""; FOLLOW=0; FROM=-1; TO=-1; DRYRUN=0; ONCE=0; ARCHNOW=0; NORSYNC=0
 
 usage() {
    cat <<EOF
@@ -90,6 +90,7 @@ postrun.sh - DAQ 수집 뒤에 붙는 merge + production 파이프라인 드라�
                       수백 GB 를 옮기므로 시간이 걸린다. ionice 로 우선순위를
                       낮출 때 -c3(유휴)까지 내리면 후처리에 밀려 굶는다.
                       낮추려면 -c2 -n7 정도가 적당하다
+  --no-rsync          rsync 대신 mv 로 옮긴다 (기본은 rsync 가 있으면 rsync)
   --heartbeat FILE    rcterm heartbeat                    (${HB})
   --dry-run           무엇을 할지만 출력
   -h, --help
@@ -112,6 +113,7 @@ while [ $# -gt 0 ]; do
       --outroot)    OUTROOT=$2; shift 2 ;;
       --keep-local) KEEPLOCAL=$2; shift 2 ;;
       --archive-now) ARCHNOW=1; shift ;;
+      --no-rsync)   NORSYNC=1; shift ;;
       --heartbeat)  HB=$2; shift 2 ;;
       --dry-run)    DRYRUN=1; shift ;;
       -h|--help)    usage; exit 0 ;;
@@ -119,6 +121,10 @@ while [ $# -gt 0 ]; do
       *)            RUNARG=$1; shift ;;
    esac
 done
+
+# 산출물 이동에 rsync 를 쓴다. 없으면 mv 로 떨어진다(--no-rsync 로 강제 가능).
+USE_RSYNC=0
+if [ "${NORSYNC:-0}" -eq 0 ] && command -v rsync >/dev/null 2>&1; then USE_RSYNC=1; fi
 
 CODEDIR=$PRODDIR/Code
 SHELLDIR=$PRODDIR/Shell
@@ -294,9 +300,13 @@ archive_one() {          # run_num  ->  0 정리함 / 1 건너뜀
    fi
 
    # (3) 완료 확인. 하나라도 모자라면 아직 옮길 때가 아니다.
+   #  중단된 정리를 다시 돌릴 때를 위해 staging(.arch_PRD)에 이미 옮겨진 것도
+   #  함께 센다. 로컬만 세면 중간에 끊긴 정리는 '미완료'로 판정되어
+   #  영영 재개할 수 없다(실측으로 겪었다).
    local n_fadc n_prd
    n_fadc=$(find "$raw" -maxdepth 1 -name 'FADC_*.root.*' 2>/dev/null | wc -l)
-   n_prd=$(ls "$out/PRD"/*.root 2>/dev/null | wc -l)
+   n_prd=$( { ls "$out/PRD"/*.root 2>/dev/null; ls "$raw/.arch_PRD"/*.root 2>/dev/null; } \
+            | sed 's#.*/##' | sort -u | wc -l )
    if [ "$n_fadc" -eq 0 ] || [ "$n_prd" -ne "$n_fadc" ]; then
       log "${C_Y}[정리 보류]${C_0} run=$rn 미완료 (FADC $n_fadc / PRD $n_prd)"
       return 1
@@ -323,22 +333,29 @@ archive_one() {          # run_num  ->  0 정리함 / 1 건너뜀
       fi
       mkdir -p "$tmp" || { log "${C_R}  $tmp 생성 실패${C_0}"; return 1; }
 
-      # [중단 복구] 양쪽에 다 있는 파일은 '복사는 됐는데 원본이 안 지워진' 것,
-      # 즉 끊긴 복사다. 목적지 쪽이 잘려 있을 수 있으므로 버리고 다시 옮긴다.
-      # (정상적으로 끝난 mv 는 원본을 지우므로 양쪽에 남을 수 없다)
-      local f b dropped=0
-      for f in "$tmp"/*; do
-         [ -f "$f" ] || continue
-         b=$(basename "$f")
-         if [ -f "$src/$b" ]; then rm -f "$f"; dropped=$((dropped+1)); fi
-      done
-      [ "$dropped" -gt 0 ] && log "  ${C_Y}끊긴 복사 $dropped 개를 버리고 다시 옮긴다${C_0}"
-
       n_src=$(ls -1 "$src" 2>/dev/null | wc -l)
-      # 파일 단위 이동. 끊겨도 다시 실행하면 이어진다.
-      #  -exec ... + 로 묶어 한 번의 mv 가 여러 파일을 처리한다. 파일마다
-      #  프로세스를 띄우는 것보다 낫다.
-      find "$src" -maxdepth 1 -type f -exec mv -n -t "$tmp" {} + 2>/dev/null
+
+      if [ "$USE_RSYNC" -eq 1 ]; then
+         # rsync 는 임시 이름(.파일명.XXXXXX)으로 받아 다 받은 뒤에 최종 이름으로
+         # rename 한다. 그래서 중간에 끊겨도 **잘린 파일이 최종 이름을 차지하는
+         # 일이 없다.** 파일마다 전송 후 체크섬을 검증하고, 통과한 것만
+         # --remove-source-files 로 원본을 지운다. 다시 실행하면 크기·시각이
+         # 다른 것만 골라 재전송하므로, 예전에 mv 로 옮기다 남은 잘린 파일도
+         # 알아서 고쳐진다.
+         rsync -a --remove-source-files --info=progress2 "$src"/ "$tmp"/ 2>&1 \
+            | tail -1 | sed 's/^/    /'
+      else
+         # rsync 가 없을 때의 대안. mv 는 최종 이름으로 바로 쓰므로 끊기면
+         # 잘린 파일이 남을 수 있어, 양쪽에 다 있는 파일을 끊긴 복사로 보고 버린다.
+         local f b dropped=0
+         for f in "$tmp"/*; do
+            [ -f "$f" ] || continue
+            b=$(basename "$f")
+            if [ -f "$src/$b" ]; then rm -f "$f"; dropped=$((dropped+1)); fi
+         done
+         [ "$dropped" -gt 0 ] && log "  ${C_Y}끊긴 복사 $dropped 개를 버리고 다시 옮긴다${C_0}"
+         find "$src" -maxdepth 1 -type f -exec mv -n -t "$tmp" {} + 2>/dev/null
+      fi
       n_dst=$(ls -1 "$tmp" 2>/dev/null | wc -l)
       if [ "$n_dst" -lt "$n_src" ]; then
          log "${C_R}  $sub 이동 불완전 ($n_dst / $n_src). 링크를 그대로 둔다${C_0}"
