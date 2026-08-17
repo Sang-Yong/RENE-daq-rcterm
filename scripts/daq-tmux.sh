@@ -100,10 +100,11 @@ fi
 FLOWPANE=""
 if [ "$DATAFLOW" -eq 1 ]; then
    FLOWPANE=$(tmux split-window -v -p 30 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
-   tmux select-pane -t "$FLOWPANE" -T "dataflow (ssd -> data -> khu -> scratch)"
+   tmux select-pane -t "$FLOWPANE" \
+      -T "dataflow: /Data_ssd(RAW)->/data(PRD)->khu(backup)->scratch(save)"
 fi
 
-tmux select-pane -t "$TOPLEFT" -T "monitor"
+tmux select-pane -t "$TOPLEFT" -T "DAQ Run Status(monitor)"
 tmux select-pane -t "$BOTLEFT" -T "supervisor"
 tmux select-pane -t "$RIGHT"   -T "work space"
 
