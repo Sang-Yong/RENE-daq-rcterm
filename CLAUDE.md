@@ -23,12 +23,17 @@ config/dotfiles/install.sh --all
 #      build.sh          thisroot.sh / cupdaq_env.sh 의 source 경로
 #      src/OnlConsts.hh  RCTERM_DEF_RAWDATA_DIR / RCTERM_DEF_DBFILE
 #      config/*.params   (.gitignore 대상. *.params.example 에서 복사해 수정)
+#                        rcterm / rcsupervisor / dataflow 세 개다
+#      ~/.ssh/config     백업 서버 별칭 'khu' + 키 교환 (docs/DATAFLOW.md §4)
 
 # 4) 빌드
 ./build.sh
 
 # 5) 화면 구성 (하드웨어는 건드리지 않는다)
 scripts/daq-tmux.sh
+
+# 6) 데이터 이동 체인이 도는지 확인. 이것이 멈추면 /Data_ssd 가 차고 DAQ 가 멈춘다
+scripts/dataflow.sh --params config/dataflow.params --once --dry-run
 ```
 
 **읽는 순서**
@@ -38,6 +43,7 @@ scripts/daq-tmux.sh
 | `CLAUDE.md` (이 문서) | 확정된 사실, 설계 근거, 검증 상태, 잔여 작업, 세션 기록 |
 | `docs/MANUAL.md` | rcterm / rcsupervisor 운용 상세 |
 | `docs/POSTRUN.md` | 병합·production 파이프라인의 구조와 성능 근거 |
+| `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
 | `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
 
@@ -180,6 +186,10 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | **★ 실 하드웨어 24h 로테이션 (수정본)** | **2회 연속 무결** — 4288→4289(08-16), 4289→4290(08-17). 둘 다 `ENDED` + `exit=code 0` + DB 완전 마감. **§11.1 버그 A 수정 확정** (§11.8) |
 | **후처리 실시간 추적** | run 4288·4289 모두 **PRD 1440개 전량 완료**, 좀비 0건. FADC=SADC=Merged=PRD 로 수가 정확히 일치 |
 | **heartbeat 디렉터리 자가 복구** | 런 도중 `/Data/LOG` 삭제 재현 → 다음 갱신에 스스로 재생성, 런은 exit 0 (§11.10) |
+| **데이터 이동 체인 (dataflow)** | 3단계 전부 `--dry-run` 실측. 수집 중/후처리 미완료 런을 정확히 건너뜀 (§11.13) |
+| **경희대 백업 실전송** | run 4290 의 `config` + `DAQLOG` 3종 + `db` 를 **실제로 보내고 원격에서 확인**. 재실행 시 마커로 건너뜀 (§11.13) |
+| **백업 계정 권한** | `renecomm`(별칭 `khu`, 키 인증) = 7개 카테고리 전부 쓰기 가능. `sykim` = `config`/`db`/`RAW` 만 (§11.14) |
+| **경희대 링크 속도** | 500 MB 업로드 31.9초 = **15.7 MB/s**. `/scratch` 의 100 Mb 와 **다른 랜카드**라 서로 대역을 뺏지 않는다 (§11.14) |
 
 종료코드가 0/1/2 세 값으로 갈리는 것은 설계상 이상적이다 — supervisor가
 "설정 오류(재시작 무의미)" / "런 실패(재시작 가치 있음)" / "정상"을 구분할 수 있다.
@@ -208,7 +218,8 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | 1 | 실 하드웨어 실행 | ✅ 2026-08-14~15 (§11) |
 | 2 | 수정본의 첫 로테이션 관찰 | ✅ 2026-08-16, 이후 2회 연속 무결 (§11.5, §11.8) |
 | 3 | DAQ 를 tmux 로 이관 | ✅ 2026-08-15. `tmux attach -t daq` |
-| 4 | `/Data_ssd` 용량 | ✅ `--keep-local` 로 해결 (§11.11). 운용 시 `--keep-local 2` 를 붙일 것 |
+| 4 | `/Data_ssd` 용량 | ✅ 2026-08-17 재설계. `scripts/dataflow.sh` 가 `/data` -> 백업 -> `/scratch` 로 흘려보낸다 (§11.13). `--keep-local` 은 더 이상 쓰지 않는다 |
+| 5 | 외부(경희대) 백업 | ✅ `scripts/backup-khu.sh`. 성격별 카테고리 rsync + 검증 + 재개 (§11.13) |
 
 다음에 손댈 것은 §6 작업 6 의 개선 백로그다(libsqlite3 링크, 모니터 소켓 재연결,
 단위 테스트 등). 급한 것은 없다.
@@ -370,6 +381,24 @@ rcsupervisor 가 이 규칙에 의존한다는 점(params 뒤에 자기 설정�
 - `boot failed; run never started` — STARTRUN 이전에 실패
 - `aborted; run started but was not finalized` — 시작은 했으나 마감 실패
 
+### 작업 6.5 — 데이터 흐름 (2026-08-17 구축, §11.13)
+
+구조와 근거는 `docs/DATAFLOW.md`. 남은 것은 **실전 확인**뿐이다.
+
+```bash
+# 매번 이것부터. 각 단계가 무엇을 왜 건너뛰는지 한 줄씩 나온다
+scripts/dataflow.sh --params config/dataflow.params --once --dry-run
+
+# 새 구성으로 런을 하나 받은 뒤, 1단계만 실제로
+scripts/dataflow.sh --params config/dataflow.params --stage 1 --once
+
+# 대용량 백업 첫 실전송 (런당 221 GB / 약 4시간). 사용자 승인 후에
+scripts/backup-khu.sh --params config/dataflow.params --run <N>
+```
+
+확인할 것 : ① `/Data_ssd` 여유가 실제로 회복되는가 ② 원격 개수가 로컬과 맞는가
+③ 후처리가 옮겨진 런을 찾다가 죽지 않는가(§11.13 에서 고쳤으나 실전 미확인).
+
 ### 작업 6 — 개선 백로그 (여유 있을 때)
 - `libsqlite3` 링크 + prepared statement (현재는 임시파일 + 셸 호출, 이스케이프만)
 - 모니터 소켓 런당 1회만 오픈 → 런 도중 끊기면 재연결 없음. 주기적 재연결 필요
@@ -378,6 +407,10 @@ rcsupervisor 가 이 규칙에 의존한다는 점(params 뒤에 자기 설정�
   → PID 파일 + `flock`
 - rate가 벽시계가 아니라 DAQ 보고 시간 기준 → ns 카운터 정지 시 순간 rate 미정의
 - 단위 테스트 없음. config 파싱 / 머저 판정 / 비트마스크 디코딩은 순수 함수라 쉽다
+- dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
+  고치는 것이 정답이고, 그 전까지는 `--drop-merged` 가 유일한 단축 수단이다
+- `backup-khu.sh` 는 원격 **개수**만 검증한다. 체크섬 검증(`rsync -c`)은 100 Mb/WAN
+  에서 너무 비싸 넣지 않았다. 주기적 `--checksum` 감사 스크립트가 있으면 좋겠다
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -441,6 +474,96 @@ rcsupervisor 가 이 규칙에 의존한다는 점(params 뒤에 자기 설정�
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-17 (밤) — 데이터 흐름 재설계 : 수집 -> 백업 -> 장기보관
+
+#### 11.13 무엇을 만들었나
+
+사용자 요구는 한 문장이었다. **RAW 는 `/Data_ssd` 에 수집하고, 후처리를 거친
+파일들은 `/data` 로 옮기고, 경희대 서버에 성격별로 rsync 백업하고, 백업이 끝난
+것은 `/scratch` 로 보내 장기 보관한다.** 이것을 스크립트 두 개로 구현했다.
+
+| 파일 | 하는 일 |
+|---|---|
+| `scripts/dataflow.sh` | 3단계 이동 (재작성). 설정 파일·백업 연동·부속 파일 이동 추가 |
+| `scripts/backup-khu.sh` | **신규.** 성격별 카테고리 rsync + 원격 개수 검증 + 재개 마커 |
+| `config/dataflow.params(.example)` | **신규.** 두 스크립트가 함께 읽는 설정 |
+| `docs/DATAFLOW.md` | **신규.** 구조와 실측 근거 |
+
+```
+   /Data_ssd  ──1──►  /data  ──2──►  khu:/store/cpnr-data/RENE
+   (NVMe 3.7T)        (32T)     └──3──►  /scratch (NFS 140T)
+```
+
+곁들여 고친 것
+
+- `rcterm` 의 `rawdatadir` 기본값을 `/Data_ssd` 로. RAW·LOG·CONFIG 가 전부
+  로컬 NVMe 로 간다 (`src/OnlConsts.hh`, `config/rcterm.params(.example)`).
+- `postrun.sh` 의 `--rawroot` 기본값을 `/Data_ssd/RAW` 로. `--outroot` 와
+  심볼릭 링크가 더 이상 필요 없다.
+- **`postrun.sh` 가 추적 모드에서 `die` 하지 않게 했다.** dataflow 가 끝난 런을
+  옮기고 나면 데이터 디렉터리가 사라지는데, 그 때문에 후처리 전체가 죽으면
+  수집 추적이 멈춘다. 이제 한 줄 알리고 다음 주기로 넘긴다.
+- `daq-tmux.sh` 에 **dataflow pane 추가** (오른쪽 아래). `daq-layout.sh` 가
+  오른쪽 열 비율(`work space : dataflow = 7 : 3`)도 정규화한다.
+
+#### 11.14 실측으로 확정한 것
+
+**두 개의 랜카드. 속도가 10배 다르다.** 이것이 설계 전부를 결정했다.
+
+| 인터페이스 | 속도 | 쓰임 | 실측 |
+|---|---|---|---|
+| `enp1s0` (10.0.0.11) | 100 Mb | `/scratch` NFS | 7.7 MB/s |
+| `enp0s31f6` (203.230.111.71) | 1000 Mb | 경희대 백업 | **15.7 MB/s** (500 MB / 31.9초) |
+
+**경로가 다르므로 2단계(백업)와 3단계(/scratch)는 동시에 돌려도 서로를 굶기지
+않는다.** 24시간 런 1회 기준으로 백업 약 3.9시간, `/scratch` 이동 약 12.1시간이라
+둘 다 여유가 있다.
+
+**서브런당 크기 (실측, run 4290/4291)** — FADC 71.4 + SADC 8.6 + Merged 78.8 +
+PRD 73.7 = **232 MB**. 1440 서브런 = **런당 334 GB**.
+
+**백업 계정** — 사용자는 `sykim` / 비밀번호를 알려 줬으나, 실측해 보니
+`sykim` 은 `config` · `db` · `RAW` **세 곳에만** 쓰기 권한이 있다.
+`PRD` · `PNG` · `DAQLOG` · `Data` 는 `renecomm:users` 의 `drwxr-xr-x` 라
+그 계정으로는 백업의 절반이 조용히 실패한다. 반면 `~/.ssh/config` 에 이미 있던
+**`khu` 별칭(renecomm, 키 인증)은 7개 전부 쓰기 가능**이다. 그래서 `khu` 를 쓴다.
+**설정 파일에 비밀번호를 적지 않았다.**
+(사용자가 말한 `ssh knu` / `frontend` 계정은 실제로 없다 — 별칭은 `khu` 이고
+원격 계정은 `renecomm` 이다. `frontend@hep.khu.ac.kr` 은 접속 거부된다.)
+
+**Merged 는 백업하지 않는다.** 원격 트리에 `Merged` 카테고리가 아예 없고
+(실측), 런당 114 GB 인데 RAW 로부터 다시 만들 수 있는 중간 산출물이다.
+필요하면 `--with-merged`.
+
+**PRD 원격 배치** — 최근 런 몇 개는 `PRD/<run>/PRD/` 로 한 겹 더 들어가 있고
+나머지 대다수는 `PRD/<run>/` 평면이다(20개 중 14 평면). 새로 보내는 것은
+`RAW` · `PNG` 와 같은 **평면**으로 통일했다.
+
+#### 11.15 실제로 보내 본 것 / 아직 아닌 것
+
+- ✅ run 4290 의 `config` + `DAQLOG` 3종을 **실전송**하고 원격에서 확인.
+  재실행하니 마커를 보고 건너뛰었다. `db` 도 실전송
+  (`db/runcatalog.2026-08-17.db`, sqlite3 `.backup` 스냅샷).
+- ⚠️ **대용량 카테고리(RAW · PRD · PNG)는 아직 실전송하지 않았다.** 런 하나가
+  221 GB / 약 4시간이라 사용자 승인 없이 시작하지 않았다. `--dry-run` 으로
+  대상·개수·경로가 맞는 것은 확인했다.
+- ⚠️ **1단계·3단계의 실제 이동도 아직 하지 않았다.** dry-run 만 돌렸다.
+  지금 `/Data_ssd` 에 있는 run 4290·4291 은 예전 `--outroot` 구성이라
+  `Merged`/`PRD` 가 `/scratch` 쪽 심볼릭 링크와 얽혀 있다. dataflow 는 이 상태를
+  **감지해서 손대지 않는다**(`has_symlink_subdir`). 새 구성으로 수집하는
+  다음 런부터 자연스럽게 정상 경로를 탄다.
+
+#### 11.16 남은 판단 — 사용자 확인이 필요한 것
+
+1. **예전 런(4290·4291 및 그 이전)을 어떻게 할 것인가.** 심볼릭 링크가 얽힌
+   상태라 자동 이동 대상이 아니다. 백업만 먼저 하려면
+   `backup-khu.sh --mid /scratch --run <N>` 으로 `/scratch` 에서 바로 보낼 수 있다
+   (링크를 따라가도록 `find -L` 로 고쳐 두었다).
+2. **`--drop-merged` 를 켤 것인가.** `/scratch` 이동이 12.1시간에서 8.0시간으로
+   줄고 런당 114 GB 를 아낀다. 데이터를 지우는 설정이라 기본은 꺼 두었다.
+3. **100 Mb 스토리지 링크(§11.12).** 고치면 3단계가 12시간에서 1~2시간이 된다.
+   사이트 차원의 조치가 필요하다.
 
 ### 2026-08-15 — 실운용에서 드러난 버그 3종 수정 ★중요
 

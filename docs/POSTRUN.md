@@ -4,6 +4,14 @@ DAQ 수집 뒤에 붙는 단계다. `scripts/postrun.sh` 가 드라이버이고,
 실제 물리 코드는 `DAQ_cup/production` 의 것을 **그대로 호출한다.**
 매크로를 이 저장소로 복제하지 않는다 — 복제하면 두 벌이 갈라진다.
 
+> **2026-08-17 이후 — 이 문서의 `--outroot` / `--keep-local` 설명은 옛 구성이다.**
+> 지금은 rcterm 이 처음부터 로컬 NVMe(`rawdatadir = /Data_ssd`)에 수집하므로
+> 후처리도 **그 자리에서** 한다. `--outroot` 도 심볼릭 링크도 필요 없다.
+> 끝난 런을 `/data` → 경희대 백업 → `/scratch` 로 넘기는 것은
+> **`scripts/dataflow.sh` 가 맡는다. `docs/DATAFLOW.md` 를 볼 것.**
+> `--keep-local` 은 예전 구성으로 돌아갈 때를 위해 남겨 두었을 뿐,
+> dataflow 와 함께 쓰면 같은 파일을 둘이 옮기려 든다. **둘 중 하나만 쓸 것.**
+
 ---
 
 ## 1. 데이터 흐름
@@ -112,7 +120,11 @@ ln -s /Data_ssd/RAW/004288/PRD    /scratch/RAW/004288/PRD
 **주의** — 로컬 디스크는 쓰기는 빠르지만 담아둘 자리가 좁다. 런 하나가 산출물로만
 약 217 GB 를 쓴다. 직전 런과 현재 런이 함께 남으므로 실측 소비는 하루 400 GB 수준이다.
 
-### 끝난 런을 되돌리는 정리 (`--keep-local`)
+### 끝난 런을 되돌리는 정리 (`--keep-local`) — 옛 구성 전용
+
+> 지금 구성에서는 쓰지 않는다. `scripts/dataflow.sh` 가 이 일을 대신하고,
+> 저장소 사이 이동을 백업 순서까지 지켜 가며 한다(`docs/DATAFLOW.md`).
+> 아래는 `--outroot` 로 산출물만 따로 빼던 시절의 설명이다.
 
 ```bash
 scripts/postrun.sh --follow --outroot /Data_ssd/RAW --keep-local 2   # 자동
