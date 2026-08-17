@@ -164,8 +164,12 @@ static std::map<int, double> LoadLivetimes(const TString &tsv) {
    while (std::getline(in, line)) {
       if (line.empty() || line[0] == '#') continue;
       std::stringstream ss(line);
-      int run, nsub; double es, ee, wall, span, live;
-      if (!(ss >> run >> nsub >> es >> ee >> wall >> span >> live)) continue;
+      //  run_summary.tsv 의 열 순서 (schema 2) --
+      //  run n_subrun n_bad epoch_start epoch_end wall_s span_s live_s ...
+      //  BuildRunSummary.C 의 WriteTsv 와 짝이다. 한쪽만 고치면 live 자리에
+      //  span 이 들어와 조용히 틀린다.
+      int run, nsub, nbad; double es, ee, wall, span, live;
+      if (!(ss >> run >> nsub >> nbad >> es >> ee >> wall >> span >> live)) continue;
       out[run] = live;
    }
    return out;

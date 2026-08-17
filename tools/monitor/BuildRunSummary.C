@@ -1,38 +1,58 @@
 // ---------------------------------------------------------------------------
-//  BuildRunSummary.C - production 을 마친 런에서 DAQ 운용 지표를 뽑아
-//                      run_summary 로 누적한다.
+//  BuildRunSummary.C - production 을 마친 런의 PRD 파일에서 직접 DAQ 운용
+//                      지표를 뽑아 run_summary 로 누적한다.
 //
-//  무엇을 읽나
-//     1순위  <SampleDir>/Monitor/monitor_Run<NNNNNN>.root : T_Monitor
-//            (BuildMonitorSummary.C 산출물. Step2 계수까지 들어 있다)
-//     2순위  <SampleDir>/Step1/step1_Run<NNNNNN>.root     : T_LiveTime
-//            (AnalysisStep1.C 산출물. clean/muon 계수는 없다)
+//  무엇을 읽나  ★ production 산출물이 정본이다
+//     <RawDir>/<NNNNNN>/PRD/PRD_<NNNNNN>.<SSSSS>.root  : TTree "Event"
+//        TCBTRGTime  [ns]  TCB 트리거 시각 (되감긴다. 아래 참조)
+//        EventType   1 = target only (FADC)
+//                    2 = veto only   (SADC)
+//                    3 = both
+//     서브런의 수집 시각은 같은 런 디렉터리의 원시 FADC 파일 mtime 을 쓴다.
+//        <RawDir>/<NNNNNN>/FADC_<NNNNNN>.root.<SSSSS>
 //
 //  무엇을 쓰나
 //     <OutDir>/run_summary.txt   사람이 읽는 고정폭 표 (정본)
-//     <OutDir>/run_summary.tsv   그림 그릴 때 쓰는 탭 구분 표
+//     <OutDir>/run_summary.tsv   되읽기·그림용 탭 구분 표
 //
-//  이미 있는 런은 건너뛰고 새 런만 이어붙인다(--force 로 다시 씀).
-//  두 파일 모두 run 번호 오름차순을 유지한다.
+//  이미 있는 런은 건너뛰고 새 런만 이어붙인다(force 로 다시 씀).
+//
+//  ---- EventType 의 뜻은 추측이 아니라 실측으로 확인했다 ----
+//     run 4237 서브런 101 에서
+//        EventType==1 : 10,918 개 중 F_Triggered>0 이 10,918
+//        EventType==2 : 51,738 개 중 S_Triggered>0 이 51,738
+//        EventType==3 : 381 개, 양쪽 다 켜져 있음
+//     따라서 total = t1+t2+t3, target = t1+t3, veto = t2+t3, both = t3.
+//
+//  ---- TCBTRGTime 은 되감긴다. 풀어야 livetime 이 나온다 ----
+//  TCB 시계는 약 16.78초(2^24 x 1000 ns)마다 0 으로 돌아간다. 60초짜리 서브런
+//  하나에 서너 번 감긴다. AnalysisStep1.C 가 쓰는 규칙을 그대로 따른다 --
+//
+//        if (t < prev) offset += prev;      globalTime = t + offset
+//
+//  풀지 않으면 livetime 이 음수가 되거나 16초로 나온다. 실측 확인 :
+//  run 4237 서브런 101 에서 이 규칙으로 59.907 s -- 60초 서브런과 맞는다.
+//  carry 는 **런 전체에 걸쳐** 이어 간다. 그래야 서브런 사이의 빈 시간(dead)
+//  까지 한 시간축에서 잰다.
+//
+//  ---- 파일에 TTree cycle 이 여러 개 있다 ----
+//  PRD 파일에는 Event;2, Event;3 처럼 cycle 이 여럿 있다(생산 중 autosave).
+//  TFile::Get("Event") 는 가장 높은 cycle 을 준다. 그것이 완전한 것이므로
+//  **cycle 을 더하면 안 된다.** 더하면 이벤트를 두 번 센다.
 //
 //  사용 :
-//     root -l -b -q 'BuildRunSummary.C(4237, 4240)'          범위
-//     root -l -b -q 'BuildRunSummary.C("4237,4239,4240")'    목록
-//     root -l -b -q 'BuildRunSummary.C(4237, 4240, true)'    이미 있어도 다시 씀
+//     root -l -b -q 'BuildRunSummary.C+(4237, 4240)'         범위
+//     root -l -b -q 'BuildRunSummary.C+("4237,4239")'        목록
+//     root -l -b -q 'BuildRunSummary.C+(4237, 4240, true)'   이미 있어도 다시
 //  경로를 바꾸려면 :
-//     root -l -b -q 'BuildRunSummary.C(4237,4240,false,"/scratch/RunSummary/","/scratch/junkyo/SampleFiles/")'
-//
-//  livetime 의 정의 — AnalysisStep1.C 를 그대로 따른다.
-//     서브런 livetime = (T_State.end_time - start_time) * 1e-9   [TCB 시각, ns]
-//     런  livetime    = 서브런 livetime 의 합
-//  DAQ 시작 시각은 첫 서브런의 epoch 다. 이것은 원시 FADC 파일의 mtime 이라
-//  '그 서브런이 닫힌 시각'에 가깝다. 벽시계 경과와 livetime 의 차이가
-//  곧 죽은 시간이므로 duty 로 함께 적는다.
+//     root -l -b -q 'BuildRunSummary.C+(4237,4240,false,"/scratch/RunSummary/","/scratch/RAW/")'
 // ---------------------------------------------------------------------------
 #include <TFile.h>
-#include <TTree.h>
+#include <TKey.h>
 #include <TSystem.h>
+#include <TSystemDirectory.h>
 #include <TString.h>
+#include <TTree.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -44,90 +64,56 @@
 #include <string>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-//  한 런의 집계 결과
+//  tsv 스키마가 바뀌면 이 번호를 올린다. 옛 파일을 조용히 잘못 읽는 것보다
+//  못 읽는다고 말하는 편이 낫다.
+static const int kSchema = 2;
+
 // ---------------------------------------------------------------------------
 struct RunSummaryRow {
-   int      run          = 0;
-   int      nSubrun      = 0;
-   double   epochStart   = -1;   // 첫 서브런 epoch [Unix s]
-   double   epochEnd     = -1;   // 마지막 서브런 epoch [Unix s]
-   double   wallSec      = -1;   // epochEnd - epochStart
-   double   spanSec      = -1;   // (마지막 start_ns - 첫 start_ns) + 마지막 duration
-   double   liveSec      = 0;    // Σ duration_sec
-   double   deadSec      = 0;    // Σ max(gap - duration, 0)
-   // 이벤트 수 (서브런 누적). 음수면 그 정보가 없다는 뜻이다.
-   long long nEvents     = -1;
-   long long nVeto       = -1;
-   long long nTarget     = -1;
-   long long nBoth       = -1;
-   long long nClean      = -1;
-   long long nMuon       = -1;
-   long long nAfterMu    = -1;
-   //  각 계수에 값이 있던 서브런 수. 일부만 있는 런을 완전한 합으로 착각하지
-   //  않으려면 이것이 있어야 한다. 실제로 4237~4239 는 n_target 이 없고
-   //  4240 만 있다 -- 합만 보면 구분이 안 된다.
-   int covTrig           = 0;    // n_events/veto/target/both 중 최소 커버리지
-   int covStep2          = 0;    // n_clean/muon/aftermu 중 최소 커버리지
-   std::string source    = "-";  // monitor | step1
+   int      run        = 0;
+   int      nSubrun    = 0;      // PRD 파일이 실제로 있던 서브런 수
+   int      nBadSubrun = 0;      // 열리지 않거나 Event 트리가 없던 것
+   double   epochStart = -1;     // 첫 서브런 수집 시각 [Unix s]
+   double   epochEnd   = -1;
+   double   wallSec    = -1;     // epochEnd - epochStart (파일 시각 기준)
+   double   spanSec    = -1;     // TCB 시각으로 첫 트리거 ~ 마지막 트리거
+   double   liveSec    = 0;      // Σ 서브런 livetime
+   double   deadSec    = -1;     // spanSec - liveSec (서브런 사이의 빈 시간)
+   long long nType1 = 0, nType2 = 0, nType3 = 0;   // target only / veto only / both
+   std::string source = "prd";
 
-   double duty() const {
-      double base = (spanSec > 0) ? spanSec : wallSec;
-      return (base > 0) ? liveSec / base : -1;
-   }
-   double rate(long long n) const {
-      return (n >= 0 && liveSec > 0) ? (double)n / liveSec : -1;
-   }
-   double pctTrig()  const { return nSubrun > 0 ? 100.0 * covTrig  / nSubrun : -1; }
-   double pctStep2() const { return nSubrun > 0 ? 100.0 * covStep2 / nSubrun : -1; }
-   // 파생 분류. 하나라도 없으면 -1.
-   long long targetOnly() const {
-      return (nTarget >= 0 && nBoth >= 0) ? nTarget - nBoth : -1;
-   }
-   long long vetoOnly() const {
-      return (nVeto >= 0 && nBoth >= 0) ? nVeto - nBoth : -1;
-   }
-   long long neither() const {
-      if (nEvents < 0 || nTarget < 0 || nVeto < 0 || nBoth < 0) return -1;
-      return nEvents - (nTarget - nBoth) - (nVeto - nBoth) - nBoth;
-   }
+   long long nEvents() const { return nType1 + nType2 + nType3; }
+   long long nTarget() const { return nType1 + nType3; }
+   long long nVeto()   const { return nType2 + nType3; }
+   long long nBoth()   const { return nType3; }
+   double duty() const { return (spanSec > 0) ? liveSec / spanSec : -1; }
+   double rate(long long n) const { return liveSec > 0 ? (double)n / liveSec : -1; }
 };
 
-// ---------------------------------------------------------------------------
-//  보조
 // ---------------------------------------------------------------------------
 static TString RunStr(int run) { return TString::Format("%06d", run); }
 
 static std::string FmtEpoch(double e) {
    if (e <= 0) return "-";
-   time_t t = (time_t)e;
-   struct tm tmv;
-   localtime_r(&t, &tmv);
-   char buf[32];
-   strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
-   return std::string(buf);
+   time_t t = (time_t)e; struct tm tmv; localtime_r(&t, &tmv);
+   char b[32]; strftime(b, sizeof(b), "%Y-%m-%d %H:%M:%S", &tmv);
+   return std::string(b);
 }
-
-//  큰 수는 자릿수를 세기 어렵다. 천 단위로 끊어 준다.
 static std::string FmtCount(long long v) {
    if (v < 0) return "-";
    std::string s = std::to_string(v);
    for (int i = (int)s.size() - 3; i > 0; i -= 3) s.insert(i, ",");
    return s;
 }
-
+//  txt 용. 값이 없으면 '-'.
 static std::string FmtF(double v, int prec) {
    if (v < 0) return "-";
-   char buf[64];
-   snprintf(buf, sizeof(buf), "%.*f", prec, v);
-   return std::string(buf);
+   char b[64]; snprintf(b, sizeof(b), "%.*f", prec, v); return std::string(b);
 }
-
-//  tsv 전용. 항상 숫자를 낸다 (없는 값은 음수). FmtF 와 달라야 한다.
+//  tsv 용. 항상 숫자를 낸다. '-' 를 쓰면 되읽기의 >> 가 실패해 그 행이
+//  통째로 사라진다 -- 실제로 그렇게 행을 잃은 적이 있다.
 static std::string FmtRaw(double v, int prec) {
-   char buf[64];
-   snprintf(buf, sizeof(buf), "%.*f", prec, v);
-   return std::string(buf);
+   char b[64]; snprintf(b, sizeof(b), "%.*f", prec, v); return std::string(b);
 }
 
 static std::vector<int> ParseRunList(const char *s) {
@@ -135,422 +121,354 @@ static std::vector<int> ParseRunList(const char *s) {
    std::stringstream ss(s ? s : "");
    std::string tok;
    while (std::getline(ss, tok, ',')) {
-      // 공백 제거
       size_t a = tok.find_first_not_of(" \t");
       if (a == std::string::npos) continue;
       size_t b = tok.find_last_not_of(" \t");
       tok = tok.substr(a, b - a + 1);
       if (tok.empty()) continue;
       size_t dash = tok.find('-');
-      if (dash != std::string::npos && dash > 0) {          // "4237-4240"
+      if (dash != std::string::npos && dash > 0) {
          int lo = std::atoi(tok.substr(0, dash).c_str());
          int hi = std::atoi(tok.substr(dash + 1).c_str());
          for (int r = lo; r <= hi; ++r) out.push_back(r);
-      } else {
-         out.push_back(std::atoi(tok.c_str()));
-      }
+      } else out.push_back(std::atoi(tok.c_str()));
    }
    return out;
 }
 
 // ---------------------------------------------------------------------------
-//  런 하나 집계
+//  PRD 디렉터리에서 서브런 번호를 모은다.
+static std::vector<int> ListSubruns(const TString &prdDir, const TString &runS) {
+   std::vector<int> out;
+   TSystemDirectory d("prd", prdDir);
+   TList *files = d.GetListOfFiles();
+   if (!files) return out;
+   TString pref = "PRD_" + runS + ".";
+   TIter it(files);
+   TSystemFile *sf;
+   while ((sf = (TSystemFile *)it())) {
+      if (sf->IsDirectory()) continue;
+      TString nm = sf->GetName();
+      if (!nm.BeginsWith(pref) || !nm.EndsWith(".root")) continue;
+      TString num = nm(pref.Length(), nm.Length() - pref.Length() - 5);
+      if (num.IsDigit()) out.push_back(num.Atoi());
+   }
+   delete files;
+   std::sort(out.begin(), out.end());
+   return out;
+}
+
+static double FileEpoch(const TString &path) {
+   Long64_t size; Long_t id, flags, modtime;
+   if (gSystem->GetPathInfo(path, &id, &size, &flags, &modtime) != 0) return -1;
+   return (double)modtime;
+}
+
 // ---------------------------------------------------------------------------
-//  서브런 하나를 담는다. 두 입력이 주는 항목이 달라 공통형으로 받는다.
-struct SubrunRow {
-   int       sid   = -1;
-   double    start = 0;    // TCB 시각 [ns]
-   double    dur   = 0;    // livetime [s]
-   double    epoch = -1;   // [Unix s]
-   double    gap   = -1;   // 다음 서브런까지 [s]
-   long long nEv = -1, nVt = -1, nTg = -1, nBo = -1;
-   long long nCl = -1, nMu = -1, nAf = -1;
-};
-
-static bool ReadMonitor(int run, const TString &sampleDir, std::vector<SubrunRow> &out) {
-   TString path = TString::Format("%sMonitor/monitor_Run%s.root", sampleDir.Data(), RunStr(run).Data());
-   if (gSystem->AccessPathName(path)) return false;
-   TFile *f = TFile::Open(path, "READ");
-   if (!f || f->IsZombie()) { if (f) f->Close(); return false; }
-   TTree *t = (TTree *)f->Get("T_Monitor");
-   if (!t) { f->Close(); return false; }
-
-   Int_t sid; Double_t start, epoch, dur, gap;
-   Long64_t nEv, nVt, nTg, nBo, nCl, nMu, nAf;
-   t->SetBranchAddress("subrun_id",    &sid);
-   t->SetBranchAddress("start_ns",     &start);
-   t->SetBranchAddress("epoch",        &epoch);
-   t->SetBranchAddress("duration_sec", &dur);
-   t->SetBranchAddress("gap_sec",      &gap);
-   t->SetBranchAddress("n_events",     &nEv);
-   t->SetBranchAddress("n_veto",       &nVt);
-   t->SetBranchAddress("n_target",     &nTg);
-   t->SetBranchAddress("n_both",       &nBo);
-   t->SetBranchAddress("n_clean",      &nCl);
-   t->SetBranchAddress("n_muon",       &nMu);
-   t->SetBranchAddress("n_aftermu",    &nAf);
-
-   for (Long64_t i = 0; i < t->GetEntries(); ++i) {
-      t->GetEntry(i);
-      out.push_back({sid, start, dur, epoch, gap, nEv, nVt, nTg, nBo, nCl, nMu, nAf});
+static bool BuildOneRun(int run, const TString &rawDir, RunSummaryRow &row) {
+   TString runS  = RunStr(run);
+   TString rdir  = rawDir + runS + "/";
+   TString pdir  = rdir + "PRD/";
+   if (gSystem->AccessPathName(pdir)) {
+      printf("  [SKIP] run %d : PRD 디렉터리가 없다 (%s)\n", run, pdir.Data());
+      return false;
    }
-   f->Close();
-   return !out.empty();
-}
-
-static bool ReadStep1(int run, const TString &sampleDir, std::vector<SubrunRow> &out) {
-   TString path = TString::Format("%sStep1/step1_Run%s.root", sampleDir.Data(), RunStr(run).Data());
-   if (gSystem->AccessPathName(path)) return false;
-   TFile *f = TFile::Open(path, "READ");
-   if (!f || f->IsZombie()) { if (f) f->Close(); return false; }
-   TTree *t = (TTree *)f->Get("T_LiveTime");
-   if (!t) { f->Close(); return false; }
-
-   Int_t sid; Double_t start, end, dur, epoch = -1;
-   Long64_t nEv = -1, nVt = -1, nTg = -1, nBo = -1;
-   t->SetBranchAddress("subrun_id",    &sid);
-   t->SetBranchAddress("start_time",   &start);
-   t->SetBranchAddress("end_time",     &end);
-   t->SetBranchAddress("duration_sec", &dur);
-   if (t->GetBranch("epoch"))    t->SetBranchAddress("epoch",    &epoch);
-   if (t->GetBranch("n_events")) t->SetBranchAddress("n_events", &nEv);
-   if (t->GetBranch("n_veto"))   t->SetBranchAddress("n_veto",   &nVt);
-   if (t->GetBranch("n_target")) t->SetBranchAddress("n_target", &nTg);
-   if (t->GetBranch("n_both"))   t->SetBranchAddress("n_both",   &nBo);
-
-   for (Long64_t i = 0; i < t->GetEntries(); ++i) {
-      t->GetEntry(i);
-      out.push_back({sid, start, dur, epoch, -1, nEv, nVt, nTg, nBo, -1, -1, -1});
+   std::vector<int> subs = ListSubruns(pdir, runS);
+   if (subs.empty()) {
+      printf("  [SKIP] run %d : PRD 파일이 없다\n", run);
+      return false;
    }
-   f->Close();
-   return !out.empty();
-}
-
-//  누적기. 한 서브런이라도 값이 있으면 그 항목은 살아난다.
-//  값이 있던 서브런 수를 함께 센다 -- 합만으로는 '전부 더한 것'과
-//  '있는 것만 더한 것'을 구분할 수 없기 때문이다.
-static void Accum(long long &dst, long long v, int *cov = nullptr) {
-   if (v < 0) return;
-   dst = (dst < 0 ? 0 : dst) + v;
-   if (cov) (*cov)++;
-}
-
-static bool BuildOneRun(int run, const TString &sampleDir, RunSummaryRow &row) {
-   std::vector<SubrunRow> subs;
-   const char *src = "monitor";
-   if (!ReadMonitor(run, sampleDir, subs)) {
-      src = "step1";
-      if (!ReadStep1(run, sampleDir, subs)) {
-         printf("  [SKIP] run %d : Monitor 도 Step1 도 없다 (아직 분석 전)\n", run);
-         return false;
-      }
-      printf("  [INFO] run %d : monitor 요약이 없어 Step1 로 집계한다 "
-             "(clean/muon 계수 없음. BuildMonitorSummary.C+(%d) 를 먼저 돌리면 채워진다)\n",
-             run, run);
-   }
-   std::sort(subs.begin(), subs.end(),
-             [](const SubrunRow &a, const SubrunRow &b) { return a.sid < b.sid; });
 
    row = RunSummaryRow();
-   row.run     = run;
-   row.source  = src;
-   row.nSubrun = (int)subs.size();
+   row.run = run;
 
-   int covEv = 0, covVt = 0, covTg = 0, covBo = 0, covCl = 0, covMu = 0, covAf = 0;
-   for (size_t i = 0; i < subs.size(); ++i) {
-      const SubrunRow &s = subs[i];
-      if (s.dur > 0) row.liveSec += s.dur;
+   //  carry 는 런 전체에 이어 간다. 서브런마다 초기화하면 서브런 사이의
+   //  빈 시간을 잴 수 없다.
+   double prev = -1, off = 0;
+   double runFirst = -1, runLast = 0;
 
-      // gap 이 없는 입력(Step1)에서는 이웃 start_ns 로 직접 만든다
-      double gap = s.gap;
-      if (gap < 0 && i + 1 < subs.size()) gap = (subs[i + 1].start - s.start) * 1e-9;
-      if (gap > 0 && s.dur > 0 && gap > s.dur) row.deadSec += gap - s.dur;
-
-      if (s.epoch > 0) {
-         if (row.epochStart < 0 || s.epoch < row.epochStart) row.epochStart = s.epoch;
-         if (s.epoch > row.epochEnd) row.epochEnd = s.epoch;
+   const int nAll = (int)subs.size();
+   for (int k = 0; k < nAll; ++k) {
+      int sid = subs[k];
+      TString p = TString::Format("%sPRD_%s.%05d.root", pdir.Data(), runS.Data(), sid);
+      TFile *f = TFile::Open(p, "READ");
+      if (!f || f->IsZombie()) { if (f) f->Close(); row.nBadSubrun++; continue; }
+      //  가장 높은 cycle 을 준다. cycle 을 더하면 두 번 세게 된다.
+      TTree *t = (TTree *)f->Get("Event");
+      if (!t || !t->GetBranch("TCBTRGTime") || !t->GetBranch("EventType")) {
+         f->Close(); row.nBadSubrun++; continue;
       }
-      Accum(row.nEvents,  s.nEv, &covEv);
-      Accum(row.nVeto,    s.nVt, &covVt);
-      Accum(row.nTarget,  s.nTg, &covTg);
-      Accum(row.nBoth,    s.nBo, &covBo);
-      Accum(row.nClean,   s.nCl, &covCl);
-      Accum(row.nMuon,    s.nMu, &covMu);
-      Accum(row.nAfterMu, s.nAf, &covAf);
-   }
-   row.covTrig  = std::min(std::min(covEv, covVt), std::min(covTg, covBo));
-   row.covStep2 = std::min(covCl, std::min(covMu, covAf));
+      //  필요한 가지만 켠다. 파형까지 읽으면 100배 느려진다.
+      t->SetBranchStatus("*", 0);
+      t->SetBranchStatus("TCBTRGTime", 1);
+      t->SetBranchStatus("EventType", 1);
+      Double_t tt = 0; Int_t et = 0;
+      t->SetBranchAddress("TCBTRGTime", &tt);
+      t->SetBranchAddress("EventType", &et);
 
-   if (row.epochStart > 0 && row.epochEnd > 0) row.wallSec = row.epochEnd - row.epochStart;
-   if (!subs.empty()) {
-      // DAQ 시작을 기점으로 한 경과. TCB 시각이라 파일 mtime 보다 믿을 만하다.
-      row.spanSec = (subs.back().start - subs.front().start) * 1e-9 + subs.back().dur;
+      double subFirst = -1, subLast = 0;
+      Long64_t n = t->GetEntries();
+      for (Long64_t i = 0; i < n; ++i) {
+         t->GetEntry(i);
+         if (prev >= 0 && tt < prev) off += prev;   // AnalysisStep1.C 와 같은 규칙
+         double g = tt + off;
+         prev = tt;
+         if (subFirst < 0) subFirst = g;
+         subLast = g;
+         if (runFirst < 0) runFirst = g;
+         runLast = g;
+         if      (et == 1) row.nType1++;
+         else if (et == 2) row.nType2++;
+         else if (et == 3) row.nType3++;
+      }
+      if (subFirst >= 0 && subLast > subFirst) row.liveSec += (subLast - subFirst) * 1e-9;
+      row.nSubrun++;
+      f->Close();
+
+      //  수집 시각은 원시 FADC 파일 mtime. 없으면 PRD 파일 mtime 으로 대신한다.
+      double ep = FileEpoch(TString::Format("%sFADC_%s.root.%05d", rdir.Data(), runS.Data(), sid));
+      if (ep <= 0) ep = FileEpoch(p);
+      if (ep > 0) {
+         if (row.epochStart < 0 || ep < row.epochStart) row.epochStart = ep;
+         if (ep > row.epochEnd) row.epochEnd = ep;
+      }
+
+      if (nAll > 50 && (k % (nAll / 20 ? nAll / 20 : 1) == 0)) {
+         printf("\r    run %d : %d/%d 서브런 ...", run, k + 1, nAll);
+         fflush(stdout);
+      }
    }
+   if (nAll > 50) printf("\r%60s\r", "");
+
+   if (row.nSubrun == 0) {
+      printf("  [SKIP] run %d : 읽을 수 있는 PRD 가 하나도 없다\n", run);
+      return false;
+   }
+   if (runFirst >= 0 && runLast > runFirst) row.spanSec = (runLast - runFirst) * 1e-9;
+   if (row.spanSec > 0) row.deadSec = std::max(0.0, row.spanSec - row.liveSec);
+   if (row.epochStart > 0 && row.epochEnd > 0) row.wallSec = row.epochEnd - row.epochStart;
    return true;
 }
 
 // ---------------------------------------------------------------------------
-//  기존 run_summary.tsv 를 읽어 이미 있는 런을 알아낸다.
-//  txt 는 사람이 읽는 표라 표시용 서식이 섞여 있다. 되읽기는 tsv 만 한다.
-// ---------------------------------------------------------------------------
-static std::map<int, RunSummaryRow> LoadExisting(const TString &tsvPath) {
+static std::map<int, RunSummaryRow> LoadExisting(const TString &tsv, bool &schemaOk) {
    std::map<int, RunSummaryRow> out;
-   std::ifstream in(tsvPath.Data());
+   schemaOk = true;
+   std::ifstream in(tsv.Data());
    if (!in) return out;
    std::string line;
+   int seen = -1;
    while (std::getline(in, line)) {
+      if (line.rfind("# schema ", 0) == 0) { seen = std::atoi(line.c_str() + 9); continue; }
       if (line.empty() || line[0] == '#') continue;
+      if (seen != kSchema) { schemaOk = false; return {}; }
       std::stringstream ss(line);
-      RunSummaryRow r;
-      std::string src;
-      // 열 순서는 WriteTsv 와 반드시 같아야 한다
-      if (!(ss >> r.run >> r.nSubrun >> r.epochStart >> r.epochEnd
+      RunSummaryRow r; std::string src;
+      if (!(ss >> r.run >> r.nSubrun >> r.nBadSubrun >> r.epochStart >> r.epochEnd
                >> r.wallSec >> r.spanSec >> r.liveSec >> r.deadSec
-               >> r.nEvents >> r.nVeto >> r.nTarget >> r.nBoth
-               >> r.nClean >> r.nMuon >> r.nAfterMu
-               >> r.covTrig >> r.covStep2 >> src))
-         continue;
+               >> r.nType1 >> r.nType2 >> r.nType3 >> src)) continue;
       r.source = src;
       out[r.run] = r;
    }
+   if (seen != kSchema && seen != -1) schemaOk = false;
    return out;
 }
 
 static void WriteTsv(const TString &path, const std::map<int, RunSummaryRow> &rows) {
    std::ofstream o(path.Data());
    o << "# RENE DAQ run summary (machine readable). BuildRunSummary.C 가 만든다.\n"
-        "# 음수는 '그 정보 없음'. 시각은 Unix 초, 시간은 초, rate 는 livetime 기준.\n"
-        "# cov_trig / cov_step2 = 그 계수에 값이 있던 서브런 수. n_subrun 과\n"
-        "# 같지 않으면 합이 런 전체를 덮지 않는다는 뜻이다.\n"
-        "#run\tn_subrun\tepoch_start\tepoch_end\twall_s\tspan_s\tlive_s\tdead_s"
-        "\tn_events\tn_veto\tn_target\tn_both\tn_clean\tn_muon\tn_aftermu"
-        "\tcov_trig\tcov_step2\tsource\n";
+        "# schema " << kSchema << "\n"
+        "# 입력은 production 산출물 <RawDir>/<run>/PRD/PRD_<run>.<sub>.root 다.\n"
+        "# 음수는 '그 정보 없음'. 시각 [Unix s], 시간 [s].\n"
+        "# n_type1 = target only(FADC), n_type2 = veto only(SADC), n_type3 = both\n"
+        "#run\tn_subrun\tn_bad\tepoch_start\tepoch_end\twall_s\tspan_s\tlive_s\tdead_s"
+        "\tn_type1\tn_type2\tn_type3\tsource\n";
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
-      //  tsv 는 되읽기용이다. 값이 없으면 '-' 가 아니라 음수를 쓴다 --
-      //  '-' 를 쓰면 LoadExisting 의 >> 가 실패해서 그 행이 통째로 사라진다.
-      //  (실제로 그렇게 run 4084 가 표에서 없어졌다. '-' 는 txt 에서만 쓴다)
-      o << r.run << '\t' << r.nSubrun << '\t'
+      o << r.run << '\t' << r.nSubrun << '\t' << r.nBadSubrun << '\t'
         << (long long)r.epochStart << '\t' << (long long)r.epochEnd << '\t'
         << FmtRaw(r.wallSec, 3) << '\t' << FmtRaw(r.spanSec, 3) << '\t'
         << FmtRaw(r.liveSec, 3) << '\t' << FmtRaw(r.deadSec, 3) << '\t'
-        << r.nEvents << '\t' << r.nVeto << '\t' << r.nTarget << '\t' << r.nBoth << '\t'
-        << r.nClean << '\t' << r.nMuon << '\t' << r.nAfterMu << '\t'
-        << r.covTrig << '\t' << r.covStep2 << '\t'
+        << r.nType1 << '\t' << r.nType2 << '\t' << r.nType3 << '\t'
         << r.source << '\n';
    }
 }
 
 static void WriteTxt(const TString &path, const std::map<int, RunSummaryRow> &rows) {
    std::ofstream o(path.Data());
-   time_t now = time(nullptr);
-   char nowbuf[32];
-   struct tm tmv; localtime_r(&now, &tmv);
-   strftime(nowbuf, sizeof(nowbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+   time_t now = time(nullptr); struct tm tmv; localtime_r(&now, &tmv);
+   char nowbuf[32]; strftime(nowbuf, sizeof(nowbuf), "%Y-%m-%d %H:%M:%S", &tmv);
 
    o << "===============================================================================\n"
-        "  RENE DAQ run summary\n"
+        "  RENE DAQ run summary   (입력 : production 산출물 PRD)\n"
         "  " << nowbuf << " 갱신 · BuildRunSummary.C 생성 · 런 " << rows.size() << "개\n"
         "===============================================================================\n"
-        "  livetime  = 서브런 (end_time - start_time) 의 합. TCB 시각 기준\n"
-        "  span      = 첫 서브런 시작부터 마지막 서브런 끝까지 (TCB 시각)\n"
-        "  duty      = livetime / span. 1 에 가까울수록 죽은 시간이 없다\n"
-        "  DAQ start = 첫 서브런의 원시 FADC 파일 mtime. 파일이 닫힌 시각에 가깝다\n"
-        "  '-' 는 그 정보가 아직 없다는 뜻이다 (Step2 미완료 등)\n"
-        "\n";
+        "  livetime  = 서브런마다 (마지막 트리거 - 첫 트리거) 를 더한 값.\n"
+        "              TCB 시각을 되감김까지 풀어서 잰다\n"
+        "  span      = 런의 첫 트리거부터 마지막 트리거까지 (같은 시간축)\n"
+        "  dead      = span - livetime. 서브런 사이의 빈 시간이다\n"
+        "  duty      = livetime / span. 1 에 가까울수록 빈 시간이 없다\n"
+        "  DAQ start = 첫 서브런의 원시 FADC 파일 mtime (닫힌 시각에 가깝다)\n"
+        "  bad       = 열리지 않거나 Event 트리가 없던 서브런 수\n\n";
 
-   // ---- 런별 표 ----
    o << "-- 런별 -----------------------------------------------------------------------\n";
    char hdr[512];
-   snprintf(hdr, sizeof(hdr), "%-7s %-19s %8s %12s %12s %7s %8s %s\n",
-            "run", "DAQ start", "subrun", "live[s]", "span[s]", "duty", "dead[s]", "source");
+   snprintf(hdr, sizeof(hdr), "%-7s %-19s %8s %5s %12s %12s %7s %10s\n",
+            "run", "DAQ start", "subrun", "bad", "live[s]", "span[s]", "duty", "dead[s]");
    o << hdr;
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
-      char buf[512];
-      snprintf(buf, sizeof(buf), "%-7d %-19s %8d %12s %12s %7s %8s %s\n",
-               r.run, FmtEpoch(r.epochStart).c_str(), r.nSubrun,
+      char b[512];
+      snprintf(b, sizeof(b), "%-7d %-19s %8d %5d %12s %12s %7s %10s\n",
+               r.run, FmtEpoch(r.epochStart).c_str(), r.nSubrun, r.nBadSubrun,
                FmtF(r.liveSec, 1).c_str(), FmtF(r.spanSec, 1).c_str(),
-               FmtF(r.duty(), 4).c_str(), FmtF(r.deadSec, 1).c_str(),
-               r.source.c_str());
-      o << buf;
+               FmtF(r.duty(), 4).c_str(), FmtF(r.deadSec, 1).c_str());
+      o << b;
    }
 
-   // ---- 종류별 이벤트 수 ----
-   o << "\n-- 종류별 이벤트 수 -----------------------------------------------------------\n"
-        "   total      = TCB 가 낸 전체 트리거\n"
-        "   veto       = SADC(외부 veto) 가 때린 것\n"
-        "   target     = FADC(표적) 가 때린 것\n"
-        "   both       = 둘 다\n"
-        "   tgt_only   = target - both        veto_only = veto - both\n"
-        "   neither    = total - tgt_only - veto_only - both\n";
-   o << "   cov        = 이 계수를 가진 서브런의 비율. 100 이 아니면 아래 합은\n"
-        "                런 전체가 아니라 '값이 있던 서브런만' 더한 것이다\n";
-   snprintf(hdr, sizeof(hdr), "%-7s %14s %14s %14s %14s %14s %14s %12s %7s\n",
-            "run", "total", "veto", "target", "both", "tgt_only", "veto_only", "neither", "cov[%]");
+   o << "\n-- 종류별 이벤트 수 (PRD 의 EventType) ----------------------------------------\n"
+        "   EventType 1 = target only (FADC 만)   2 = veto only (SADC 만)   3 = both\n"
+        "   total  = 1+2+3      target = 1+3      veto = 2+3      both = 3\n"
+        "   (실측 확인 : type1 은 전부 F_Triggered>0, type2 는 전부 S_Triggered>0)\n";
+   snprintf(hdr, sizeof(hdr), "%-7s %15s %15s %15s %15s %13s\n",
+            "run", "total", "tgt_only", "veto_only", "both", "target");
    o << hdr;
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
-      char buf[512];
-      snprintf(buf, sizeof(buf), "%-7d %14s %14s %14s %14s %14s %14s %12s %7s\n",
-               r.run, FmtCount(r.nEvents).c_str(), FmtCount(r.nVeto).c_str(),
-               FmtCount(r.nTarget).c_str(), FmtCount(r.nBoth).c_str(),
-               FmtCount(r.targetOnly()).c_str(), FmtCount(r.vetoOnly()).c_str(),
-               FmtCount(r.neither()).c_str(), FmtF(r.pctTrig(), 1).c_str());
-      o << buf;
+      char b[512];
+      snprintf(b, sizeof(b), "%-7d %15s %15s %15s %15s %13s\n",
+               r.run, FmtCount(r.nEvents()).c_str(), FmtCount(r.nType1).c_str(),
+               FmtCount(r.nType2).c_str(), FmtCount(r.nType3).c_str(),
+               FmtCount(r.nTarget()).c_str());
+      o << b;
    }
 
-   // ---- 분석 후 계수 ----
-   o << "\n-- 분석 후 계수 (Step2) -------------------------------------------------------\n"
-        "   clean      = muon 태그도 veto 창도 포화도 아닌 것\n"
-        "   muon       = muon 태그. Step2 의 T_Muon 이며 SADC veto 태그와 같은 것을\n"
-        "                센다 (실측: 위 표의 veto 와 수가 정확히 일치한다)\n"
-        "   aftermu    = muon 직후 창에 들어온 것\n";
-   snprintf(hdr, sizeof(hdr), "%-7s %14s %14s %14s %12s %12s %7s\n",
-            "run", "clean", "muon", "aftermu", "clean[Hz]", "muon[Hz]", "cov[%]");
-   o << hdr;
-   for (const auto &kv : rows) {
-      const RunSummaryRow &r = kv.second;
-      char buf[512];
-      snprintf(buf, sizeof(buf), "%-7d %14s %14s %14s %12s %12s %7s\n",
-               r.run, FmtCount(r.nClean).c_str(), FmtCount(r.nMuon).c_str(),
-               FmtCount(r.nAfterMu).c_str(),
-               FmtF(r.rate(r.nClean), 4).c_str(), FmtF(r.rate(r.nMuon), 4).c_str(),
-               FmtF(r.pctStep2(), 1).c_str());
-      o << buf;
-   }
-
-   // ---- 계수율 ----
    o << "\n-- 계수율 [Hz] (livetime 기준) ------------------------------------------------\n";
    snprintf(hdr, sizeof(hdr), "%-7s %12s %12s %12s %12s\n",
-            "run", "total", "veto", "target", "both");
+            "run", "total", "target", "veto", "both");
    o << hdr;
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
-      char buf[512];
-      snprintf(buf, sizeof(buf), "%-7d %12s %12s %12s %12s\n",
-               r.run, FmtF(r.rate(r.nEvents), 2).c_str(), FmtF(r.rate(r.nVeto), 2).c_str(),
-               FmtF(r.rate(r.nTarget), 2).c_str(), FmtF(r.rate(r.nBoth), 2).c_str());
-      o << buf;
+      char b[512];
+      snprintf(b, sizeof(b), "%-7d %12s %12s %12s %12s\n",
+               r.run, FmtF(r.rate(r.nEvents()), 2).c_str(),
+               FmtF(r.rate(r.nTarget()), 2).c_str(),
+               FmtF(r.rate(r.nVeto()), 2).c_str(),
+               FmtF(r.rate(r.nBoth()), 3).c_str());
+      o << b;
    }
 
-   // ---- 누적 ----
-   double cumLive = 0, cumDead = 0;
-   long long cEv = -1, cVt = -1, cTg = -1, cBo = -1, cCl = -1, cMu = -1;
-   int cSub = 0, nPartTrig = 0, nPartStep2 = 0;
-   double firstEpoch = -1, lastEpoch = -1;
    o << "\n-- 누적 (런을 순서대로 더해 간다) ---------------------------------------------\n";
-   snprintf(hdr, sizeof(hdr), "%-7s %14s %10s %16s %16s\n",
-            "run", "cum_live[s]", "cum[day]", "cum_total_ev", "cum_clean");
+   snprintf(hdr, sizeof(hdr), "%-7s %14s %10s %18s\n",
+            "run", "cum_live[s]", "cum[day]", "cum_total_ev");
    o << hdr;
+   double cumLive = 0, cumDead = 0;
+   long long cEv = 0, cTg = 0, cVt = 0, cBo = 0;
+   int cSub = 0, cBad = 0;
+   double firstE = -1, lastE = -1;
    for (const auto &kv : rows) {
       const RunSummaryRow &r = kv.second;
       cumLive += r.liveSec;
       if (r.deadSec > 0) cumDead += r.deadSec;
-      cSub += r.nSubrun;
-      Accum(cEv, r.nEvents); Accum(cVt, r.nVeto);  Accum(cTg, r.nTarget);
-      Accum(cBo, r.nBoth);   Accum(cCl, r.nClean); Accum(cMu, r.nMuon);
-      if (r.nSubrun > 0 && r.covTrig  < r.nSubrun) nPartTrig++;
-      if (r.nSubrun > 0 && r.covStep2 < r.nSubrun) nPartStep2++;
-      if (r.epochStart > 0 && (firstEpoch < 0 || r.epochStart < firstEpoch)) firstEpoch = r.epochStart;
-      if (r.epochEnd   > lastEpoch) lastEpoch = r.epochEnd;
-      char buf[512];
-      snprintf(buf, sizeof(buf), "%-7d %14s %10s %16s %16s\n",
+      cSub += r.nSubrun; cBad += r.nBadSubrun;
+      cEv += r.nEvents(); cTg += r.nTarget(); cVt += r.nVeto(); cBo += r.nBoth();
+      if (r.epochStart > 0 && (firstE < 0 || r.epochStart < firstE)) firstE = r.epochStart;
+      if (r.epochEnd > lastE) lastE = r.epochEnd;
+      char b[512];
+      snprintf(b, sizeof(b), "%-7d %14s %10s %18s\n",
                r.run, FmtF(cumLive, 1).c_str(), FmtF(cumLive / 86400.0, 4).c_str(),
-               FmtCount(cEv).c_str(), FmtCount(cCl).c_str());
-      o << buf;
+               FmtCount(cEv).c_str());
+      o << b;
    }
 
    o << "\n-- 합계 -----------------------------------------------------------------------\n";
-   char buf[512];
-   snprintf(buf, sizeof(buf), "  런 %zu 개 · 서브런 %d 개\n", rows.size(), cSub);              o << buf;
-   snprintf(buf, sizeof(buf), "  첫 DAQ 시작 : %s\n", FmtEpoch(firstEpoch).c_str());          o << buf;
-   snprintf(buf, sizeof(buf), "  마지막 기록 : %s\n", FmtEpoch(lastEpoch).c_str());           o << buf;
-   snprintf(buf, sizeof(buf), "  livetime    : %s s  = %s day\n",
-            FmtF(cumLive, 1).c_str(), FmtF(cumLive / 86400.0, 4).c_str());                     o << buf;
-   snprintf(buf, sizeof(buf), "  dead time   : %s s  (livetime 대비 %s %%)\n",
+   char b[512];
+   snprintf(b, sizeof(b), "  런 %zu 개 · 서브런 %d 개 (읽지 못한 것 %d)\n",
+            rows.size(), cSub, cBad);                                          o << b;
+   snprintf(b, sizeof(b), "  첫 DAQ 시작 : %s\n", FmtEpoch(firstE).c_str());   o << b;
+   snprintf(b, sizeof(b), "  마지막 기록 : %s\n", FmtEpoch(lastE).c_str());    o << b;
+   snprintf(b, sizeof(b), "  livetime    : %s s  = %s day\n",
+            FmtF(cumLive, 1).c_str(), FmtF(cumLive / 86400.0, 4).c_str());     o << b;
+   snprintf(b, sizeof(b), "  dead time   : %s s  (livetime 대비 %s %%)\n",
             FmtF(cumDead, 1).c_str(),
-            FmtF(cumLive > 0 ? cumDead / cumLive * 100.0 : -1, 4).c_str());                    o << buf;
-   snprintf(buf, sizeof(buf), "  total ev    : %s\n", FmtCount(cEv).c_str());                  o << buf;
-   snprintf(buf, sizeof(buf), "  veto        : %s\n", FmtCount(cVt).c_str());                  o << buf;
-   snprintf(buf, sizeof(buf), "  target      : %s\n", FmtCount(cTg).c_str());                  o << buf;
-   snprintf(buf, sizeof(buf), "  both        : %s\n", FmtCount(cBo).c_str());                  o << buf;
-   snprintf(buf, sizeof(buf), "  clean       : %s\n", FmtCount(cCl).c_str());                  o << buf;
-   snprintf(buf, sizeof(buf), "  muon        : %s\n", FmtCount(cMu).c_str());                  o << buf;
-   if (nPartTrig > 0 || nPartStep2 > 0) {
-      o << "\n  [주의] 계수가 런 전체를 덮지 않는 런이 있다 --\n";
-      if (nPartTrig > 0) {
-         snprintf(buf, sizeof(buf), "         트리거 계수 %d 개 런, ", nPartTrig); o << buf;
-      }
-      if (nPartStep2 > 0) {
-         snprintf(buf, sizeof(buf), "Step2 계수 %d 개 런", nPartStep2); o << buf;
-      }
-      o << "\n         위 표의 cov 열을 볼 것. 합계는 그만큼 과소평가다.\n";
+            FmtF(cumLive > 0 ? cumDead / cumLive * 100.0 : -1, 4).c_str());    o << b;
+   snprintf(b, sizeof(b), "  total ev    : %s\n", FmtCount(cEv).c_str());      o << b;
+   snprintf(b, sizeof(b), "  target      : %s\n", FmtCount(cTg).c_str());      o << b;
+   snprintf(b, sizeof(b), "  veto        : %s\n", FmtCount(cVt).c_str());      o << b;
+   snprintf(b, sizeof(b), "  both        : %s\n", FmtCount(cBo).c_str());      o << b;
+   if (cBad > 0) {
+      snprintf(b, sizeof(b),
+               "\n  [주의] 읽지 못한 서브런이 %d 개 있다. 그만큼 과소평가다.\n", cBad);
+      o << b;
    }
    o << "===============================================================================\n";
 }
 
 // ---------------------------------------------------------------------------
-//  본체
-// ---------------------------------------------------------------------------
-static void BuildRunSummaryImpl(const std::vector<int> &runs, bool force,
-                                const char *outDir, const char *sampleDir) {
-   TString out(outDir), sample(sampleDir);
-   if (!out.EndsWith("/"))    out    += "/";
-   if (!sample.EndsWith("/")) sample += "/";
+static void Impl(const std::vector<int> &runs, bool force,
+                 const char *outDir, const char *rawDir) {
+   TString out(outDir), raw(rawDir);
+   if (!out.EndsWith("/")) out += "/";
+   if (!raw.EndsWith("/")) raw += "/";
 
    if (gSystem->mkdir(out, kTRUE) != 0 && gSystem->AccessPathName(out, kWritePermission)) {
       printf("[FATAL] 출력 디렉터리에 쓸 수 없다 : %s\n", out.Data());
       return;
    }
-
    TString txtPath = out + "run_summary.txt";
    TString tsvPath = out + "run_summary.tsv";
 
-   std::map<int, RunSummaryRow> rows = LoadExisting(tsvPath);
-   printf("[INFO] 기존 run_summary : %zu 개 런 (%s)\n", rows.size(), tsvPath.Data());
+   bool schemaOk = true;
+   std::map<int, RunSummaryRow> rows = LoadExisting(tsvPath, schemaOk);
+   if (!schemaOk) {
+      printf("[FATAL] %s 가 옛 형식이다 (schema %d 가 아니다).\n"
+             "        입력이 Monitor/Step1 에서 PRD 로 바뀌어 열이 달라졌다.\n"
+             "        옛 파일을 치우고 다시 만들 것 :\n"
+             "          mv %s %s.old\n", tsvPath.Data(), kSchema,
+             tsvPath.Data(), tsvPath.Data());
+      return;
+   }
+   printf("[INFO] 기존 run_summary : %zu 개 런\n", rows.size());
+   printf("[INFO] 입력 : %s<run>/PRD/  (읽기 전용)\n", raw.Data());
 
    int nNew = 0, nSkip = 0, nMiss = 0;
    for (int run : runs) {
       if (!force && rows.count(run)) { nSkip++; continue; }
       RunSummaryRow r;
-      if (!BuildOneRun(run, sample, r)) { nMiss++; continue; }
+      if (!BuildOneRun(run, raw, r)) { nMiss++; continue; }
       bool replaced = rows.count(run) > 0;
       rows[run] = r;
       nNew++;
-      printf("  [%s] run %d : subrun=%d  live=%.1f s (%.4f d)  duty=%.4f  total=%s  source=%s\n",
-             replaced ? "REDO" : " NEW", run, r.nSubrun, r.liveSec, r.liveSec / 86400.0,
-             r.duty(), FmtCount(r.nEvents).c_str(), r.source.c_str());
+      printf("  [%s] run %d : subrun=%d  live=%.1f s (%.4f d)  duty=%.4f  total=%s\n",
+             replaced ? "REDO" : " NEW", run, r.nSubrun, r.liveSec,
+             r.liveSec / 86400.0, r.duty(), FmtCount(r.nEvents()).c_str());
+      //  런 하나가 몇 분 걸린다. 중간에 끊겨도 한 것은 남도록 그때그때 쓴다.
+      WriteTsv(tsvPath, rows);
+      WriteTxt(txtPath, rows);
    }
 
    if (nNew == 0) {
-      printf("[INFO] 새로 더한 런이 없다 (건너뜀 %d, 자료 없음 %d). 파일은 그대로 둔다.\n",
-             nSkip, nMiss);
+      printf("[INFO] 새로 더한 런이 없다 (건너뜀 %d, 자료 없음 %d).\n", nSkip, nMiss);
       return;
    }
-
-   WriteTsv(tsvPath, rows);
-   WriteTxt(txtPath, rows);
    printf("[SAVED] %s\n[SAVED] %s\n", txtPath.Data(), tsvPath.Data());
    printf("[DONE ] 새로/다시 쓴 런 %d, 건너뜀 %d, 자료 없음 %d, 표에 든 런 %zu\n",
           nNew, nSkip, nMiss, rows.size());
 }
 
-//  범위로 : BuildRunSummary(4237, 4240)
 void BuildRunSummary(int runFirst, int runLast = -1, bool force = false,
-                     const char *outDir    = "/scratch/RunSummary/",
-                     const char *sampleDir = "/scratch/junkyo/SampleFiles/") {
+                     const char *outDir = "/scratch/RunSummary/",
+                     const char *rawDir = "/scratch/RAW/") {
    if (runLast < runFirst) runLast = runFirst;
    std::vector<int> runs;
    for (int r = runFirst; r <= runLast; ++r) runs.push_back(r);
-   BuildRunSummaryImpl(runs, force, outDir, sampleDir);
+   Impl(runs, force, outDir, rawDir);
 }
 
-//  목록으로 : BuildRunSummary("4237,4239,4240")  또는 "4237-4240,4288"
 void BuildRunSummary(const char *runList, bool force = false,
-                     const char *outDir    = "/scratch/RunSummary/",
-                     const char *sampleDir = "/scratch/junkyo/SampleFiles/") {
+                     const char *outDir = "/scratch/RunSummary/",
+                     const char *rawDir = "/scratch/RAW/") {
    std::vector<int> runs = ParseRunList(runList);
-   if (runs.empty()) { printf("[FATAL] 런 목록이 비어 있다 : '%s'\n", runList ? runList : ""); return; }
-   BuildRunSummaryImpl(runs, force, outDir, sampleDir);
+   if (runs.empty()) { printf("[FATAL] 런 목록이 비어 있다\n"); return; }
+   Impl(runs, force, outDir, rawDir);
 }

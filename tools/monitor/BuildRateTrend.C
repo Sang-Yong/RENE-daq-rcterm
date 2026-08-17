@@ -299,8 +299,10 @@ void BuildRateTrend(bool remeasure = false,
       while (std::getline(in, line)) {
          if (line.empty() || line[0] == '#') continue;
          std::stringstream ss(line);
-         int run, nsub; double es, ee, wall, span, lv;
-         if (!(ss >> run >> nsub >> es >> ee >> wall >> span >> lv)) continue;
+         //  run_summary.tsv 열 순서 (schema 2). BuildRunSummary.C 의 WriteTsv
+         //  와 짝이다 -- 한쪽만 고치면 live 자리에 span 이 들어온다.
+         int run, nsub, nbad; double es, ee, wall, span, lv;
+         if (!(ss >> run >> nsub >> nbad >> es >> ee >> wall >> span >> lv)) continue;
          if (es > 0) epoch[run] = es;
          if (lv > 0) live[run]  = lv;
       }

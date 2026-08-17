@@ -704,6 +704,47 @@ cand 734 / S/B 0.54). 런카탈로그 `rundesc` 에서 선원 이름을 뽑아 `
 `FmtF`(txt, `-` 를 낸다) 와 `FmtRaw`(tsv, 항상 숫자) 를 나눴다. **표에 열을
 추가할 때 이걸 다시 밟기 쉽다.**
 
+#### 11.28 1단계 입력을 production 산출물(PRD)로 바꿨다 ★
+
+사용자 지적 — run_summary 는 **production 을 마친 데이터**를 봐야 한다.
+입력을 `SampleFiles/{Monitor,Step1}` 에서
+**`/scratch/RAW/<런>/PRD/PRD_<런>.<서브런>.root`** 로 바꿨다.
+
+PRD 의 `Event` 트리에서 직접 센다.
+
+- **`EventType` 의 뜻은 추측하지 않고 실측했다.** run 4237 서브런 101 에서
+  `EventType==1` 10,918 개가 전부 `F_Triggered>0`, `==2` 51,738 개가 전부
+  `S_Triggered>0`, `==3` 381 개는 양쪽. 따라서 **1=target only, 2=veto only,
+  3=both** 이고 `total=1+2+3`, `target=1+3`, `veto=2+3`.
+- **`TCBTRGTime` 은 약 16.78초(2²⁴×1000 ns)마다 되감긴다.** 60초 서브런에
+  서너 번 감긴다. `AnalysisStep1.C` 의 규칙(`if (t<prev) offset+=prev`)을 그대로
+  따랐다. 풀지 않으면 livetime 이 음수가 되거나 16초로 나온다. carry 는
+  **런 전체에 이어 간다** — 그래야 서브런 사이 빈 시간까지 한 축에서 잰다.
+- **PRD 파일에 TTree cycle 이 여러 개다**(`Event;2`, `Event;3` — 생산 중
+  autosave). `Get("Event")` 가 최고 cycle 을 주고 그것이 완전한 것이다.
+  **cycle 을 더하면 두 번 센다.**
+
+**검증 — 기존 분석 체인과 정확히 일치한다.**
+
+```
+PRD 직독     run 4234  subrun 61  live 2486.5 s  total 14,627,857
+Step1 경유   run 4234  subrun 61  live 2486.5 s  total 14,627,857
+```
+
+**속도가 문제다.** 파형을 빼고 두 가지 가지만 읽어도 `/scratch` 가 100 Mb
+링크라(§11.12) 서브런당 약 1.3초다 — 24시간 런(1440) 약 30분, 12,720 서브런
+런은 몇 시간. 그래서 `--newest N` 으로 끊는다(`monitor-all.sh` 기본 2개).
+지금 PRD 가 있는 런이 **1,406개**라 끊지 않으면 첫 실행이 며칠 물린다.
+런 하나가 끝날 때마다 파일을 써서 중간에 끊겨도 한 것은 남는다.
+
+**열이 바뀌어 `# schema 2` 를 넣었다.** 옛 tsv 는 조용히 잘못 읽지 않고
+거부한다. 2·3단계가 이 열 순서를 그대로 읽으므로(`live_s` 자리가 밀리면
+`span_s` 를 livetime 으로 쓰게 된다) 함께 고쳤다. **`WriteTsv` 를 건드리면
+`BuildPairSummary.C` · `BuildRateTrend.C` 도 같이 볼 것.**
+
+Step2 계수(`n_clean`/`n_muon`/`n_aftermu`)는 PRD 에 없으므로 1단계에서 뺐다.
+그 정보는 2·3단계가 쓰는 것이라 잃은 것은 없다.
+
 #### 11.27 rate_trend — 시간축 추이와 효율 보정, 그리고 자동화
 
 3단계로 완성했다. 각 단계가 코드 하나 + 스크립트 하나다.

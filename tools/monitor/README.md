@@ -24,122 +24,81 @@ tools/monitor/ibd-summary.sh --missing    # 페어링이 안 된 런을 찾아�
 
 ---
 
-# 1단계 : run_summary — production 을 마친 런의 DAQ 운용 지표
+# 1단계 : run_summary — production 산출물(PRD)에서 뽑는 DAQ 운용 지표
 
-수집이 끝나고 병합·production 까지 지난 런에서 **livetime 과 종류별 이벤트 수**를
-뽑아 하나의 표로 누적한다. rcterm 이 남기는 런 카탈로그(`runcatalog.db`)가
-"DAQ 가 무엇을 했다고 보고했는가"라면, 이쪽은 **"실제로 데이터에 무엇이 남았는가"**다.
+**입력은 production 을 마친 데이터다.**
 
 ```
-tools/monitor/run-summary.sh              새로 끝난 런을 전부 이어붙인다
-tools/monitor/run-summary.sh 4237 4240    범위를 지정해서
-tools/monitor/run-summary.sh --show       결과만 본다
-tools/monitor/run-summary.sh --dry-run    무엇을 할지만 본다
+/scratch/RAW/<런번호>/PRD/PRD_<런번호>.<서브런>.root     TTree "Event"
+      TCBTRGTime  [ns]  TCB 트리거 시각
+      EventType   1 = target only(FADC) · 2 = veto only(SADC) · 3 = both
+/scratch/RAW/<런번호>/FADC_<런번호>.root.<서브런>        수집 시각(mtime)
 ```
 
-산출물은 `/scratch/RunSummary/` 에 둘이 생긴다.
+경로는 `RUNSUM_RAW`(기본 `/scratch/RAW`)로 바꾼다. **읽기만 한다.**
 
-| 파일 | 쓰임 |
+## 1. EventType 의 뜻은 실측으로 확인했다
+
+문서를 믿지 않고 트리거 플래그와 대조했다 (run 4237 서브런 101).
+
+| EventType | 개수 | `F_Triggered>0` | `S_Triggered>0` |
+|---|---|---|---|
+| 1 | 10,918 | 10,918 | 9 |
+| 2 | 51,738 | 1 | 51,738 |
+| 3 | 381 | 378 | 377 |
+
+따라서 `total = 1+2+3`, `target = 1+3`, `veto = 2+3`, `both = 3`.
+
+## 2. TCBTRGTime 은 되감긴다 ★
+
+TCB 시계는 약 **16.78초**(2²⁴×1000 ns)마다 0 으로 돌아간다. 60초 서브런 하나에
+서너 번 감긴다. `AnalysisStep1.C` 가 쓰는 규칙을 그대로 따른다.
+
+```
+if (t < prev) offset += prev;        globalTime = t + offset
+```
+
+풀지 않으면 livetime 이 음수가 되거나 16초로 나온다. carry 는 **런 전체에
+이어 간다** — 그래야 서브런 사이의 빈 시간까지 한 시간축에서 잰다.
+
+```
+livetime = Σ (서브런의 마지막 트리거 − 첫 트리거)
+span     = 런의 첫 트리거 ~ 마지막 트리거
+dead     = span − livetime          duty = livetime / span
+```
+
+## 3. TTree cycle 이 여러 개다 ★
+
+PRD 파일에는 `Event;2`, `Event;3` 처럼 cycle 이 여럿 있다(생산 중 autosave).
+`TFile::Get("Event")` 가 **가장 높은 cycle** 을 주고 그것이 완전한 것이다.
+**cycle 을 더하면 이벤트를 두 번 센다.**
+
+## 4. 기존 분석 체인과 일치한다 (검증)
+
+같은 런을 두 경로로 계산해 대조했다.
+
+```
+PRD 직독     run 4234  subrun 61  live 2486.5 s  total 14,627,857
+Step1 경유   run 4234  subrun 61  live 2486.5 s  total 14,627,857
+```
+
+## 4.1 속도 — 끊어서 따라잡는다
+
+파형을 빼고 `TCBTRGTime`·`EventType` 두 가지만 읽지만, `/scratch` 가 100 Mb
+링크라(CLAUDE.md §11.12) 서브런당 약 **1.3초**다.
+
+| 런 크기 | 걸리는 시간 |
 |---|---|
-| `run_summary.txt` | 사람이 읽는 고정폭 표. 이것이 정본이다 |
-| `run_summary.tsv` | 그림 그릴 때 쓰는 탭 구분 표. 이어붙이기도 이 파일을 되읽는다 |
+| 61 서브런 | 약 80초 |
+| 1,440 서브런 (24시간 런) | 약 30분 |
+| 12,720 서브런 | 몇 시간 |
 
----
+그래서 `--newest N` 으로 한 번에 처리할 런 수를 끊는다. `monitor-all.sh` 는
+기본 2개다. 끊지 않으면 첫 실행이 며칠 물린다(지금 PRD 가 있는 런이 1,406개).
+런 하나가 끝날 때마다 파일을 쓰므로 중간에 끊겨도 한 것은 남는다.
 
-## 1. 무엇을 읽는가 — 기존 분석 코드에 얹는다
-
-물리 분석 코드는 `/home/ojk/analysis3` 에 있고 **그대로 쓴다. 복제하지 않는다**
-(`docs/POSTRUN.md` 에서 production 매크로를 호출만 하는 것과 같은 이유다 —
-복제하면 두 벌이 갈라진다).
-
-```
-AnalysisStep1.C(run)                 -> Step1/step1_Run<NNNNNN>.root   : T_LiveTime
-BuildMonitorSummary.C+(run, run)     -> Monitor/monitor_Run<NNNNNN>.root : T_Monitor
-RateMonitor.C("run")                 -> 그림 (PDF)
-                                          |
-                        run-summary.sh 는 여기의 T_Monitor 를 읽는다
-```
-
-- **1순위 `T_Monitor`** — 서브런별 `duration_sec`, `epoch`, `gap_sec`,
-  `n_events` / `n_veto` / `n_target` / `n_both`, 그리고 Step2 의
-  `n_clean` / `n_muon` / `n_aftermu` 까지 들어 있다.
-- **2순위 `T_LiveTime`** — `monitor_Run*.root` 가 아직 없는 런은 이쪽으로
-  집계한다. Step2 계수는 빠지고, 그 칸은 `-` 로 남는다.
-  `BuildMonitorSummary.C+(run)` 를 먼저 돌리면 채워진다.
-
-**입력은 읽기만 한다.** `SampleFiles` 는 `ojk` 계정 소유이고 이 도구는 거기에
-아무것도 쓰지 않는다. 쓰는 곳은 `RUNSUM_OUT` 뿐이다.
-
-경로를 바꾸려면 환경변수로 준다.
-
-```bash
-RUNSUM_OUT=/somewhere RUNSUM_SAMPLE=/other/SampleFiles tools/monitor/run-summary.sh
-```
-
----
-
-## 2. 무엇을 계산하는가
-
-**livetime 의 정의는 `AnalysisStep1.C` 를 그대로 따른다.** 새로 만들지 않았다.
-
-```
-서브런 livetime = (T_State.end_time - start_time) * 1e-9      [TCB 시각, ns]
-런   livetime   = 서브런 livetime 의 합
-```
-
-| 항목 | 뜻 |
-|---|---|
-| `DAQ start` | 첫 서브런의 원시 FADC 파일 mtime. **파일이 닫힌 시각에 가깝다** |
-| `live[s]` | 위 정의의 합 |
-| `span[s]` | 첫 서브런 시작부터 마지막 서브런 끝까지 (TCB 시각) |
-| `duty` | `live / span`. 1 에 가까울수록 죽은 시간이 없다 |
-| `dead[s]` | Σ max(다음 서브런까지의 간격 − livetime, 0) |
-
-종류별 이벤트 수는 트리거 계수를 서브런에 걸쳐 누적하고, 파생값을 함께 낸다.
-
-```
-tgt_only  = target - both
-veto_only = veto   - both
-neither   = total - tgt_only - veto_only - both
-```
-
-`muon` 은 Step2 의 `T_Muon` 이며 **SADC veto 태그와 같은 것을 센다** —
-실측으로 `veto` 열과 수가 정확히 일치한다(run 4237~4240). 별개의 물리량이
-아니므로 둘을 더하지 말 것.
-
----
-
-## 3. `cov` 열을 반드시 볼 것
-
-계수가 없는 서브런이 섞여 있으면 **합만 보고는 '전부 더한 것'과 '있는 것만
-더한 것'을 구분할 수 없다.** 그래서 각 계수마다 값이 있던 서브런의 비율을
-`cov[%]` 로 함께 적는다.
-
-- `cov = 100.0` — 런 전체를 덮은 합이다.
-- `cov < 100.0` — **그만큼 과소평가된 합이다.** 합계 블록에도 경고가 붙는다.
-- `cov = 0.0` — 그 계수가 아예 없다. 값은 `-` 로 나온다.
-
-`0` 과 `-` 는 다르다. `0` 은 "0 이라고 기록됨", `-` 는 "기록이 없음"이다.
-실제로 run 4237~4239 는 `target` 이 `0` 이고 `cov` 는 100 이다 — 누락이 아니라
-그 production 에 표적 계수기가 없었다는 뜻이다.
-
----
-
-## 4. 이어붙이기
-
-이미 표에 있는 런은 건너뛴다. 그래서 몇 번을 돌려도 안전하고, 끝난 런이
-생길 때마다 부르면 된다.
-
-```bash
-tools/monitor/run-summary.sh            # 새 런만 더한다
-tools/monitor/run-summary.sh --force 4240   # 이미 있어도 다시 계산해 덮어쓴다
-```
-
-되읽기는 `run_summary.tsv` 로 한다(`txt` 는 표시용 서식이 섞여 있다).
-**두 파일의 열 순서는 `WriteTsv()` 와 `LoadExisting()` 이 짝을 이룬다.**
-열을 추가할 때는 반드시 양쪽을 함께 고칠 것.
-
----
+대상 런 찾기는 `/scratch/RAW/<6자리>/PRD` 디렉터리 존재로만 판단한다(약 40초).
+안에 파일이 있는지까지 확인하면 NFS 왕복이 배로 든다.
 
 ## 5. `tsv` 에는 `-` 를 쓰지 않는다 ★고칠 때 주의
 
@@ -147,6 +106,11 @@ tools/monitor/run-summary.sh --force 4240   # 이미 있어도 다시 계산해 
 쓴다.** 되읽기가 `>>` 로 파싱하기 때문에 `-` 를 만나면 그 행 전체가 조용히
 버려진다. 실제로 그렇게 표가 15행에서 8행으로 줄고 run 4084 가 사라진 적이 있다.
 `FmtF`(txt 용, `-` 를 낸다)와 `FmtRaw`(tsv 용, 항상 숫자)를 섞지 말 것.
+
+`run_summary.tsv` 첫머리에 `# schema <N>` 이 있다. 열 구성이 바뀌면 이 번호를
+올리고, 옛 파일은 **조용히 잘못 읽지 말고 거부한다**. 2·3단계가 이 열 순서를
+그대로 읽으므로(`live_s` 자리가 어긋나면 `span_s` 를 livetime 으로 쓰게 된다)
+`WriteTsv` 를 고칠 때 `BuildPairSummary.C` · `BuildRateTrend.C` 도 함께 볼 것.
 
 ---
 
@@ -224,8 +188,6 @@ AmBe · Cf252 를 넣고 받은 교정 런은 **후보 수가 백만 단위로 �
 (fast neutron, ⁹Li/⁸He), 컷 효율 보정이 들어 있지 않다. 물리 결과가 아니라
 **"수집이 정상이면 이만큼 나온다"는 운용 지표**로 볼 것. n-H 의 S/B 0.09 는
 이 채널에서 추가 컷 없이는 정상이다.
-
----
 
 ---
 

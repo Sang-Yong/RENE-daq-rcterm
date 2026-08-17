@@ -14,6 +14,11 @@
 #      tools/monitor/monitor-all.sh --follow     주기적으로 계속 (기본 1시간)
 #      tools/monitor/monitor-all.sh --follow --poll 1800
 #      tools/monitor/monitor-all.sh --quiet      요약만 출력
+#      tools/monitor/monitor-all.sh --newest 3   한 바퀴에 새 런 3개까지만
+#
+#  1단계는 PRD 를 통째로 읽으므로 런당 몇 분~몇 시간이다(서브런 수에 비례).
+#  그래서 한 바퀴에 처리할 런 수를 --newest 로 끊는다. 기본 2 개다 --
+#  끊지 않으면 첫 실행이 며칠 물린다(지금 PRD 가 있는 런이 1,400 개가 넘는다).
 #
 #  tmux pane 에 붙이려면 (화면 배치는 건드리지 않는다) :
 #      tmux new-window -t daq -n monitor \
@@ -30,7 +35,7 @@ set -u
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 OUT=${RUNSUM_OUT:-/scratch/RunSummary}
-FOLLOW=0; POLL=3600; QUIET=0; EPSE=""
+FOLLOW=0; POLL=3600; QUIET=0; EPSE=""; NEWEST=2
 
 while [ $# -gt 0 ]; do
    case "${1:-}" in
@@ -38,6 +43,7 @@ while [ $# -gt 0 ]; do
       --poll)   POLL=${2:-3600}; shift 2 ;;
       --quiet)  QUIET=1; shift ;;
       --eps-e)  EPSE=${2:-}; shift 2 ;;
+      --newest) NEWEST=${2:-2}; shift 2 ;;
       -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
       *) echo "모르는 옵션 : $1"; sed -n '2,30p' "$0"; exit 1 ;;
    esac
@@ -58,8 +64,10 @@ one_pass() {
    say "===== $(stamp) ====="
 
    say "-- 1/3 livetime --"
-   if [ "$QUIET" -eq 1 ]; then "$DIR/run-summary.sh" >/dev/null 2>&1 || rc=1
-   else "$DIR/run-summary.sh" 2>&1 | tail -4 || rc=1; fi
+   local r1=(--newest "$NEWEST")
+   [ "$NEWEST" -le 0 ] && r1=()
+   if [ "$QUIET" -eq 1 ]; then "$DIR/run-summary.sh" "${r1[@]}" >/dev/null 2>&1 || rc=1
+   else "$DIR/run-summary.sh" "${r1[@]}" 2>&1 | tail -4 || rc=1; fi
 
    say "-- 2/3 IBD 후보 --"
    if [ "$QUIET" -eq 1 ]; then "$DIR/ibd-summary.sh" >/dev/null 2>&1 || rc=1
