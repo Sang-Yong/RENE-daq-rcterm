@@ -3,21 +3,23 @@
 #  daq-tmux.sh - DAQ 운용 tmux 화면을 한 번에 구성한다.
 #
 #      +-------------------+--------------------------+
-#      | rcmon.sh (상태) 28|                          |
+#      | rcmon.sh (상태) 28|   work space (vi 등)  7  |
 #      +-------------------+                          |
-#      | rcsupervisor    8 |   work space (vi 등)     |
-#      +-------------------+                          |
-#      | postrun.sh      5 |                          |
+#      | rcsupervisor    8 |                          |
+#      +-------------------+--------------------------+
+#      | postrun.sh      5 |   dataflow            3  |
 #      +-------------------+--------------------------+
 #              46%                     54%
 #
-#      왼쪽 = DAQ 관련 3개(위에서부터 28 : 8 : 5), 오른쪽 = 작업용 하나
+#      왼쪽 = 수집·후처리 3개(위에서부터 28 : 8 : 5)
+#      오른쪽 = 작업용 셸 + 데이터 이동/백업 (7 : 3)
 #      비율이 어긋나면 scripts/daq-layout.sh (tmux 안에서는 Ctrl-B 다음 =)
 #
 #  사용 :
 #      scripts/daq-tmux.sh              화면만 구성 (DAQ 는 건드리지 않음)
 #      scripts/daq-tmux.sh --start      DAQ 가 안 돌고 있으면 같이 기동
 #      scripts/daq-tmux.sh --no-postrun 후처리 pane 없이 구성
+#      scripts/daq-tmux.sh --no-dataflow 데이터 이동 pane 없이 구성
 #      scripts/daq-tmux.sh --kill-layout   화면만 정리 (DAQ 는 그대로 둔다)
 #
 #  안전 규칙 :
@@ -38,18 +40,22 @@ SUP_LOG=${DAQ_SUP_LOG:-/Data/LOG/rcsupervisor.log}
 HB=${DAQ_HEARTBEAT:-/Data/LOG/rcterm.hb}
 DESC_FILE=$DIR/config/rundesc.txt      # 있으면 --desc 로 넘긴다
 
-START=0; POSTRUN=1
+START=0; POSTRUN=1; DATAFLOW=1
+DF_PARAMS=$DIR/config/dataflow.params
+while [ $# -gt 0 ]; do
 case "${1:-}" in
-   --start)       START=1 ;;
-   --no-postrun)  POSTRUN=0 ;;
+   --start)       START=1; shift ;;
+   --no-postrun)  POSTRUN=0; shift ;;
+   --no-dataflow) DATAFLOW=0; shift ;;
    --kill-layout) tmux kill-session -t "$SESSION" 2>/dev/null &&
                      echo "세션 '$SESSION' 정리함 (DAQ 프로세스는 그대로)"
                   echo "주의: rcsupervisor 가 이 세션 안에서 돌고 있었다면 같이 죽는다."
                   echo "      먼저 'pgrep -f install/bin/rcsupervisor' 로 확인할 것."
                   exit 0 ;;
-   "")            ;;
-   *)             echo "unknown option : $1"; sed -n '2,25p' "$0"; exit 1 ;;
+   "")            shift ;;
+   *)             echo "unknown option : $1"; sed -n '2,28p' "$0"; exit 1 ;;
 esac
+done
 
 command -v tmux >/dev/null || { echo "tmux 가 없다"; exit 1; }
 
@@ -90,6 +96,13 @@ if [ "$POSTRUN" -eq 1 ]; then
    tmux select-pane -t "$POSTPANE" -T "postrun ( production & merging) "
 fi
 
+# 오른쪽 아래에 데이터 이동/백업. rsync 진행 줄이 길어서 넓은 pane 이 낫다.
+FLOWPANE=""
+if [ "$DATAFLOW" -eq 1 ]; then
+   FLOWPANE=$(tmux split-window -v -p 30 -P -F '#{pane_id}' -t "$RIGHT" -c "$DIR")
+   tmux select-pane -t "$FLOWPANE" -T "dataflow (ssd -> data -> khu -> scratch)"
+fi
+
 tmux select-pane -t "$TOPLEFT" -T "monitor"
 tmux select-pane -t "$BOTLEFT" -T "supervisor"
 tmux select-pane -t "$RIGHT"   -T "work space"
@@ -120,11 +133,26 @@ fi
 # ---- 좌하 : merge + production 추적 ----
 #  DAQ 를 방해하지 않도록 nice 를 걸고, 기록 중인 서브런보다 3개(=약 3분) 뒤에서만
 #  처리한다. 이미 끝난 서브런은 건너뛰므로 바로 돌려도 안전하다.
-#  산출물은 로컬 NVMe 로 뺀다 — 병목이 NFS I/O 라서 41초/서브런이 29초로 줄었다.
-POSTRUN_OUT=${POSTRUN_OUTROOT:-/Data_ssd/RAW}
+#  RAW 가 이미 로컬 NVMe 에 있으므로(rcterm.params 의 rawdatadir) 처리도 그 자리에서
+#  한다. --outroot 는 필요 없다. 완료된 런은 scripts/dataflow.sh 가 옮긴다.
+POSTRUN_RAW=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
 if [ -n "$POSTPANE" ]; then
    tmux send-keys -t "$POSTPANE" \
-      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --outroot '$POSTRUN_OUT'" C-m
+      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot '$POSTRUN_RAW'" C-m
+fi
+
+# ---- 우하 : 데이터 이동 + 외부 백업 ----
+#  ssd -> data -> 경희대 -> scratch. 명령만 입력해 두지 않고 바로 띄운다 —
+#  이것이 멈추면 /Data_ssd 가 차서 DAQ 까지 멈추기 때문이다.
+#  읽고 옮기기만 하므로 수집 중에 시작해도 안전하다(수집 중인 런은 건드리지 않는다).
+if [ -n "$FLOWPANE" ]; then
+   if [ -r "$DF_PARAMS" ]; then
+      tmux send-keys -t "$FLOWPANE" \
+         "$DIR/scripts/dataflow.sh --params '$DF_PARAMS' --follow" C-m
+   else
+      tmux send-keys -t "$FLOWPANE" \
+         "echo '설정 파일이 없다: $DF_PARAMS  (config/dataflow.params.example 에서 복사할 것)'" C-m
+   fi
 fi
 
 # split-window -p 의 반올림은 창이 작을수록 크게 어긋난다. 만든 뒤 한 번 정규화한다.

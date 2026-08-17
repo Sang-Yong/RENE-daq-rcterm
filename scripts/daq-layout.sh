@@ -3,16 +3,17 @@
 #  daq-layout.sh - tmux pane 비율을 정해진 값으로 되돌린다.
 #
 #      +----------------+---------------------+
-#      | monitor   (28) |                     |
+#      | monitor   (28) |   work space    (7) |
 #      +----------------+                     |
-#      | supervisor (8) |   work space        |
-#      +----------------+                     |
-#      | postrun    (5) |                     |
+#      | supervisor (8) |                     |
+#      +----------------+---------------------+
+#      | postrun    (5) |   dataflow      (3) |
 #      +----------------+---------------------+
 #            46%                  54%
 #
 #      왼쪽 : 오른쪽 = 46 : 54
 #      왼쪽 열 높이   = monitor : supervisor : postrun = 28 : 8 : 5
+#      오른쪽 열 높이 = work space : dataflow          = 7 : 3
 #      (실제로 쓰면서 맞춘 값이다. 합으로 정규화하므로 비율만 맞으면 된다)
 #
 #  퍼센트로 지정한 크기는 '그 순간의 창 크기'로 계산되어 열/행 수로 굳는다.
@@ -22,13 +23,15 @@
 #          tmux 안에서는  Ctrl-B 다음 =
 #
 #  비율을 바꾸려면 환경변수로 :
-#          DAQ_LAYOUT_LR=45  DAQ_LAYOUT_H="6 2 2"  scripts/daq-layout.sh
+#          DAQ_LAYOUT_LR=45  DAQ_LAYOUT_H="6 2 2"  DAQ_LAYOUT_R="7 3"  \
+#             scripts/daq-layout.sh
 # ---------------------------------------------------------------------
 set -u
 
 S=${1:-daq}
 LR=${DAQ_LAYOUT_LR:-46}          # 왼쪽 열 너비 [%]
 HR=${DAQ_LAYOUT_H:-28 8 5}       # monitor : supervisor : postrun (실사용 배치)
+RR=${DAQ_LAYOUT_R:-7 3}          # work space : dataflow
 
 tmux has-session -t "$S" 2>/dev/null || { echo "세션 없음 : $S"; exit 1; }
 
@@ -46,6 +49,8 @@ height_of() {
 MON=$(pane_by_title monitor)
 SUP=$(pane_by_title supervisor)
 POST=$(pane_by_title postrun)
+WORK=$(pane_by_title "work space")
+FLOW=$(pane_by_title dataflow)
 
 [ -n "$MON" ] || { echo "monitor pane 을 찾을 수 없다 (pane 제목 확인)"; exit 1; }
 
@@ -78,6 +83,19 @@ elif [ -n "$SUP" ]; then
    # postrun pane 이 없는 구성(--no-postrun)
    LEFTH=$(( $(height_of "$MON") + $(height_of "$SUP") ))
    [ "$LEFTH" -gt 0 ] && tmux resize-pane -t "$MON" -y $(( LEFTH * RM / (RM + RS) ))
+fi
+
+# ---- 오른쪽 열 높이 (work space : dataflow) ----
+#  dataflow pane 이 없는 구성(--no-dataflow)이면 아무것도 하지 않는다.
+if [ -n "$WORK" ] && [ -n "$FLOW" ]; then
+   set -- $RR
+   RW=${1:-7}; RF=${2:-3}
+   RIGHTH=$(( $(height_of "$WORK") + $(height_of "$FLOW") ))
+   if [ "$RIGHTH" -gt 0 ]; then
+      FH=$(( (RIGHTH * RF + (RW+RF)/2) / (RW + RF) )); [ "$FH" -lt 3 ] && FH=3
+      tmux resize-pane -t "$FLOW" -y "$FH"
+      tmux resize-pane -t "$FLOW" -y "$FH"
+   fi
 fi
 
 tmux display-message "레이아웃 복원 : 좌우 ${LR}:$((100-LR)) / 왼쪽 ${RM}:${RS}:${RP}"

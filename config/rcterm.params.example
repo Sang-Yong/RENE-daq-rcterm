@@ -25,10 +25,22 @@ dbfile     = /Data/runcatalog.db
 # run        = 1000
 
 # ---- 사이트 (단일 PC) ----
+#  수집은 로컬 NVMe 에 한다. 스토리지(/scratch)로 가는 링크가 100 Mb 라
+#  (실측 7.7 MB/s) 수집·후처리를 NFS 위에서 하면 하루 약 565 GB 가 그 링크를
+#  지나 포화되고, DAQ 기록까지 밀린다.
+#
+#  rawdatadir 밑에 이렇게 생긴다.  이 세 가지를 scripts/dataflow.sh 가
+#  /data 를 거쳐 경희대 백업과 /scratch 장기보관으로 넘긴다.
+#      <rawdatadir>/RAW/<run>/     FADC/SADC + 후처리 산출물(Merged/PRD/PNG)
+#      <rawdatadir>/LOG/           TCB / FADCDAQ / SADCDAQ 로그
+#      <rawdatadir>/CONFIG/        <run>.config
+#
+#  **주의: /Data_ssd 가 차면 DAQ 가 멈춘다.** dataflow 가 도는지 반드시 확인할 것.
+#  config/dataflow.params 의 ssd_root 를 여기와 같은 값으로 맞출 것.
 daqserver  = localhost
 daqport    = 7809
 onldaqdir  = /home/frontend/DAQ/DAQ_cup/install
-rawdatadir = /Data
+rawdatadir = /Data_ssd
 # bindir     = /home/frontend/DAQ/DAQ_cup/install/bin   # executedaq.sh 직하
 # exescript  = executedaq.sh
 

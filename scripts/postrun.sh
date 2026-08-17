@@ -30,7 +30,9 @@ set -u
 
 # ---- 기본값 ---------------------------------------------------------
 PRODDIR=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
-RAWROOT=${POSTRUN_RAWROOT:-/scratch/RAW}
+# 수집이 로컬 NVMe 로 옮겨졌다(rcterm.params 의 rawdatadir = /Data_ssd).
+# 끝난 런을 /data 와 /scratch 로 넘기는 것은 scripts/dataflow.sh 가 한다.
+RAWROOT=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
 # 산출물(Merged/PRD)을 RAW 와 다른 저장소에 두고 싶을 때. 비우면 RAW 안에 만든다.
 #  병목이 NFS I/O 이므로 로컬 디스크를 지정하면 눈에 띄게 빨라진다(실측 41초 -> 28초).
 #  RAW 쪽에는 심볼릭 링크를 걸어 두므로 매크로와 기존 도구는 경로를 그대로 쓴다.
@@ -531,13 +533,22 @@ run_once() {             # run_num
    local rn=$1
    local rp; rp=$(pad6 "$rn")
    local dd="$RAWROOT/$rp"
-   [ -d "$dd" ] || die "데이터 디렉터리 없음 : $dd"
+   # 추적 모드에서는 die 하지 않는다. scripts/dataflow.sh 가 끝난 런을 다른
+   # 저장소로 옮기고 나면 여기가 사라지는데, 그 때문에 후처리 전체가 죽으면
+   # 수집을 뒤따라가던 것이 멈춰 버린다. 한 줄 알리고 다음 주기로 넘긴다.
+   if [ ! -d "$dd" ]; then
+      [ "$FOLLOW" -eq 1 ] && { log "${C_Y}[SKIP]${C_0} run=$rn : $dd 없음 (이미 옮겨졌나?)"; return 0; }
+      die "데이터 디렉터리 없음 : $dd"
+   fi
 
    local nf ns maxidx
    nf=$(find "$dd" -maxdepth 1 -name 'FADC_*.root.*' | wc -l)
    ns=$(find "$dd" -maxdepth 1 -name 'SADC_*.root.*' | wc -l)
    maxidx=$(max_file_index "$rp")
-   [ "$maxidx" -lt 0 ] && die "FADC 파일이 없다 : $dd"
+   if [ "$maxidx" -lt 0 ]; then
+      [ "$FOLLOW" -eq 1 ] && { log "${C_Y}[SKIP]${C_0} run=$rn : FADC 파일 없음"; return 0; }
+      die "FADC 파일이 없다 : $dd"
+   fi
    [ "$nf" -ne "$ns" ] && log "${C_Y}[WARN]${C_0} FADC($nf) 와 SADC($ns) 개수가 다르다"
 
    # 이 런이 지금 수집 중인가?

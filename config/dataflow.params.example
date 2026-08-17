@@ -1,0 +1,77 @@
+# =====================================================================
+#  dataflow / backup-khu 설정
+#    사용 : scripts/dataflow.sh   --params config/dataflow.params
+#           scripts/backup-khu.sh --params config/dataflow.params --run 4290
+#    형식 : 'key = value'  ( '#' 뒤는 주석 )
+#    두 스크립트가 같은 파일을 읽는다. 자기가 모르는 키는 서로 무시한다.
+#    커맨드라인으로 같은 값을 다시 주면 이 파일보다 이긴다(--params 를 앞에 둘 것).
+#
+#  데이터가 흐르는 길
+#
+#    DAQ 수집 + 후처리        백업 대기          외부 백업        장기 보관
+#    /Data_ssd     ──1──►     /data     ──2──►   khu 서버
+#    (NVMe 3.7T)              (32T)         └──3──►  /scratch (NFS 140T)
+#
+#    1단계는 rcterm 의 rawdatadir 과 짝을 이룬다. rcterm.params 에서
+#    rawdatadir 을 바꿨다면 여기 ssd_root 도 같이 바꿔야 한다.
+# =====================================================================
+
+# ---- 단계별 위치 ----
+ssd_root      = /Data_ssd     # 수집·후처리. rcterm 의 rawdatadir 과 같아야 한다
+mid_root      = /data         # 백업 대기
+nfs_root      = /scratch      # 최종 보관
+
+# 각 최상위 밑의 구조는 세 곳이 모두 같다
+#     <root>/RAW/<run>/{FADC,SADC}_*.root.*  +  Merged/ PRD/ PNG/
+#     <root>/LOG/{TCB,FADCDAQ,SADCDAQ}_<run>.log
+#     <root>/CONFIG/<run>.config
+
+heartbeat     = /Data/LOG/rcterm.hb   # rcterm.params 의 heartbeat 와 반드시 동일
+                                      # 수집 중인 런을 건드리지 않기 위해 읽는다
+
+# ---- 얼마나 남길 것인가 ----
+keep_ssd      = 2     # /Data_ssd 에 남길 런 수 (수집 중인 런 포함)
+                      #  2 인 이유 : postrun.sh 는 런이 바뀐 직후 '직전 런'의
+                      #  잔여 서브런을 마저 처리한다. 1 로 두면 그 사이에
+                      #  dataflow 가 직전 런을 옮겨가 후처리가 헛돈다.
+                      #  런당 약 338 GB 이고 /Data_ssd 가 3.7T 이므로 2 는 여유롭다.
+                      #  **여기가 차면 DAQ 가 멈춘다.** 3 을 넘기지 말 것.
+keep_mid      = 0     # 백업이 끝난 뒤에도 /data 에 남길 런 수.
+                      #  0 = 백업 끝나는 대로 /scratch 로 보낸다.
+                      #  로컬에서 분석할 일이 있으면 1~2 로.
+
+min_free_gb   = 700   # /Data_ssd 여유가 이 아래면 크게 경고한다
+
+drop_merged   = 0     # 1 이면 3단계에서 Merged 를 옮기지 않고 지운다.
+                      #  런당 115 GB 이고 RAW 에서 다시 만들 수 있지만,
+                      #  **데이터를 지우는 설정이므로 기본은 0 이다.**
+
+poll          = 600   # --follow 주기 [초]
+nice          = 10    # 수집·후처리를 방해하지 않도록 낮은 우선순위
+
+# ---- 외부 백업 (경희대) ----
+backup_enable = 1
+
+#  ~/.ssh/config 의 별칭을 쓴다. 'khu' 는 renecomm@hep.khu.ac.kr:2223 키 인증이며
+#  아래 7개 카테고리에 전부 쓰기 권한이 있다(실측 확인).
+#  ※ 비밀번호를 이 파일에 적지 말 것. 키 인증만 쓴다.
+backup_host   = khu
+backup_dest   = /store/cpnr-data/RENE
+
+#  런 카탈로그. sqlite3 .backup 으로 일관된 스냅샷을 떠서
+#  <dest>/db/runcatalog.<YYYY-MM-DD>.db 로 보낸다.
+backup_dbfile = /Data_ssd/runcatalog.db
+
+#  원격 Data/ 는 런 단위가 아니라 잡다한 보관함이다. 무엇을 보낼지는 사이트가
+#  정해야 하므로 기본은 비어 있고, 비워 두면 Data 카테고리를 건너뛴다.
+# backup_data_src = /home/frontend/DAQ/notes
+
+#  rsync 대역 제한 [KB/s]. 0 = 무제한.
+#  경희대로 가는 길은 100 Mb NFS 링크가 아니라 1 Gb 랜카드다(실측 15.7 MB/s).
+#  그래서 보통은 제한이 필요 없다.
+backup_bwlimit = 0
+
+#  보내지 않을 카테고리. 전체 = RAW PRD PNG DAQLOG config db Data
+#  Merged 는 목록에 아예 없다 — 원격 트리에 Merged 카테고리가 없고,
+#  런당 115 GB 인데 RAW 로부터 다시 만들 수 있기 때문이다.
+# backup_skip = PNG
