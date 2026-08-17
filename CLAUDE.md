@@ -46,7 +46,7 @@ scripts/dataflow.sh --params config/dataflow.params --once --dry-run
 | `docs/MANUAL.md` | rcterm / rcsupervisor 운용 상세 |
 | `docs/POSTRUN.md` | 병합·production 파이프라인의 구조와 성능 근거 |
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
-| `tools/monitor/README.md` | production 을 마친 런의 livetime·이벤트 수를 run_summary 로 누적 |
+| `tools/monitor/README.md` | 모니터링 3단계 — PRD 에서 livetime·이벤트 수 -> IBD 후보 -> 효율 보정 rate 추이 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
 | `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
 
@@ -58,9 +58,12 @@ scripts/dataflow.sh --params config/dataflow.params --once --dry-run
 3. 프로젝트 기록 페이지를 **같은 주소로** 갱신 (아래).
 4. 커밋하고 **`git push origin main`**. 푸시하지 않으면 저장한 것이 아니다.
 
-### 프로젝트 기록 페이지
+### 프로젝트 기록 페이지 (= 인수인계 문서)
 
-사용자 계정에 발행된 요약 페이지가 있다. 어느 PC 에서든 브라우저로 열 수 있다.
+사용자 계정에 발행된 요약 페이지가 있다. 어느 PC·서버에서든 브라우저로 열 수 있고,
+**2026-08-18 부터 인수인계 문서 구실을 하도록 구성했다** — 현재 상태, 데이터 흐름,
+모니터링 파이프라인, 서버가 바뀔 때 다시 확인할 경로 표, 먼저 읽을 문서 순서,
+놓치기 쉬운 것 넷.
 
 ```
 https://claude.ai/code/artifact/dbc5ca50-0165-42f6-9bbc-2008f9a8ca67
