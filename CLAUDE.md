@@ -46,6 +46,7 @@ scripts/dataflow.sh --params config/dataflow.params --once --dry-run
 | `docs/MANUAL.md` | rcterm / rcsupervisor 운용 상세 |
 | `docs/POSTRUN.md` | 병합·production 파이프라인의 구조와 성능 근거 |
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
+| `tools/monitor/README.md` | production 을 마친 런의 livetime·이벤트 수를 run_summary 로 누적 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
 | `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
 
@@ -631,6 +632,41 @@ sqlite3 /Data_ssd/runcatalog.db "select rundesc from runcatalog where runnum=428
 
 두 실행물의 성격과 주의사항은 §2 에 적었다. **둘 다 하드웨어를 직접 건드리므로
 수집 중에는 돌리지 말 것.** 경로가 이 PC 에 하드코딩되어 있다는 것도 함께.
+
+#### 11.25 run_summary — 분석 산출물에서 DAQ 운용 지표를 뽑는다
+
+사용자 요청으로 새 도구를 만들었다. 상세는 `tools/monitor/README.md`.
+
+```
+tools/monitor/run-summary.sh              -> /scratch/RunSummary/run_summary.{txt,tsv}
+tools/monitor/BuildRunSummary.C           (ROOT 매크로. 껍데기가 이것을 부른다)
+```
+
+**물리 분석 코드는 `/home/ojk/analysis3` 것을 그대로 읽는다.** 복제하지 않았다
+(§5.8 에서 production 매크로를 호출만 한 것과 같은 이유다). 1순위로
+`Monitor/monitor_Run<N>.root` 의 `T_Monitor` 를, 없으면
+`Step1/step1_Run<N>.root` 의 `T_LiveTime` 을 읽는다.
+
+**제약 — `/home/ojk/analysis3` 와 `/scratch/junkyo/SampleFiles` 는 `ojk` 소유
+755 라 `frontend` 가 쓸 수 없다.** 그래서 코드는 이 저장소에, 산출물은
+world-writable 인 `/scratch` 아래 두었다. 입력은 읽기만 한다.
+
+**설계에서 신경 쓴 것 — `0` 과 `-` 를 구분한다.** 계수가 없는 서브런이 섞이면
+합만으로는 '전부 더한 것'과 '있는 것만 더한 것'이 구분되지 않는다. 그래서
+계수마다 값이 있던 서브런 비율을 `cov[%]` 로 함께 낸다. 실제로 run 4237~4239 는
+`target` 이 `0` 이고 `cov` 는 100 이었다 — 누락이 아니라 그 production 에
+표적 계수기가 없었던 것이다. 이걸 구분하지 않았으면 조용히 틀린 표가 됐다.
+
+`muon`(Step2 `T_Muon`)은 **SADC veto 태그와 같은 것을 센다.** 실측으로 `veto`
+열과 수가 정확히 일치한다(4237~4240 네 런 모두). 별개 물리량이 아니다.
+
+**검증** — run 4063 · 4084 · 4221~4234 · 4237~4240 으로 monitor 경로 /
+Step1 대체 경로 / 이어붙이기 / 건너뛰기 / 정렬 / 미분석 런 무시를 전부 실측.
+현재 표에 15개 런, 누적 livetime 33.6일.
+
+**아직 안 한 것** — 자동화(지금은 수동 실행), 그리고 `runcatalog.db` 와의 대조.
+DB 의 `nfadc`/`tfadc` 는 DAQ 가 보고한 값이고 run_summary 의 `n_events`/`live` 는
+데이터에서 나온 값이라, 나란히 놓으면 수집과 저장 사이의 손실이 보인다.
 
 #### 11.24 pane 이름을 바꿨더니 레이아웃 복원이 깨졌다 ★교훈
 

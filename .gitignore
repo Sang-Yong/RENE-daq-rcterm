@@ -15,3 +15,9 @@ config/rundesc.txt
 
 # 발표 자료는 저장소 밖에 둔다. tools/slides 의 스크립트로 생성한다
 *.pptx
+
+# ROOT ACLiC 가 매크로 옆에 만드는 것들 (root ... 'X.C+' 로 컴파일할 때)
+*_C.so
+*_C.d
+*_C_ACLiC_dict_rdict.pcm
+.aclic_build/
