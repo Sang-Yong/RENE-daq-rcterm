@@ -23,6 +23,7 @@
 #      tools/monitor/ibd-summary.sh --force 4240     이미 있어도 다시 계산
 #      tools/monitor/ibd-summary.sh --max-subrun 200 서브런 200 까지만 (맛보기)
 #      tools/monitor/ibd-summary.sh --show           결과만 본다
+#      tools/monitor/ibd-summary.sh --allow-acquiring   수집 중인 런도 포함(권하지 않는다)
 #      tools/monitor/ibd-summary.sh --dry-run        무엇을 할지만 본다
 #      tools/monitor/ibd-summary.sh --missing        아직 안 센 런을 알려준다
 #
@@ -53,11 +54,12 @@ OUT=${RUNSUM_OUT:-/scratch/RunSummary}
 RAW=${RUNSUM_RAW:-/Data_ssd/RAW:/data/RAW:/scratch/RAW}
 SAMPLE=${RUNSUM_SAMPLE:-/scratch/junkyo/SampleFiles}
 COND=${RENE_COND:-/home/ojk/analysis3/essential/AnalysisCondition.h}
-FORCE=0; DRY=0; MISSING=0; LIST=""; LO=""; HI=""; NEWEST=0; MAXSUB=-1
+ALLOW_ACQ=0; FORCE=0; DRY=0; MISSING=0; LIST=""; LO=""; HI=""; NEWEST=0; MAXSUB=-1
 
 while [ $# -gt 0 ]; do
    case "${1:-}" in
       --force)   FORCE=1; shift ;;
+      --allow-acquiring) ALLOW_ACQ=1; shift ;;
       --dry-run) DRY=1; shift ;;
       --missing) MISSING=1; shift ;;
       --list)    LIST=${2:-}; shift 2 ;;
@@ -140,6 +142,60 @@ else
    echo "        -> 합계에서 전부 제외되므로 숫자가 비어 보일 수 있다"
 fi
 
+# ---- 지금 수집 중인 런은 건드리지 않는다 ★ ----
+#  이것이 없으면 자동화(--newest)가 **가장 먼저 진행 중인 런을 집는다.** 그러면
+#  미완성 런이 표에 박히고, 그 뒤로는 '이미 있다'고 건너뛰므로 영원히 반쪽짜리
+#  행으로 남는다. dataflow.sh 의 is_acquiring 과 같은 규칙이다 --
+#  heartbeat 의 run 이 그 런이고 heartbeat 가 120초 안에 갱신됐으면 수집 중.
+HB=${RUNSUM_HB:-/Data/LOG/rcterm.hb}
+acquiring_run() {
+   [ "$ALLOW_ACQ" -eq 1 ] && return 0
+   [ -r "$HB" ] || return 0
+   local now hbt age r
+   now=$(date +%s)
+   hbt=$(awk -F= '$1=="time"{print $2; exit}' "$HB" 2>/dev/null)
+   [ -n "$hbt" ] || return 0
+   age=$(( now - hbt ))
+   [ "$age" -lt 120 ] || return 0
+   r=$(awk -F= '$1=="run"{print $2; exit}' "$HB" 2>/dev/null)
+   [ -n "$r" ] && printf '%s\n' "$r"
+}
+
+# ---- PRD 가 아직 쓰이고 있으면 다음 주기로 미룬다 ★ ----
+#  수집 중 가드(위)만으로는 부족하다. 로테이션 직후에는 런이 끝났어도
+#  postrun 이 마지막 서브런들을 아직 만들고 있다. 그때 집으면 반쪽짜리 행이
+#  박히고 다시 계산되지 않는다.
+#  판정은 **가장 최근 PRD 파일의 mtime** 으로 한다 -- 개수 대조(FADC 대 PRD)로
+#  하면 예전에 일부만 처리된 옛 런이 영영 제외된다. 시간으로 보면 그런 런은
+#  mtime 이 오래됐으므로 통과한다.
+PRD_QUIET=${RUNSUM_PRD_QUIET:-600}     # 초. 이 시간 안에 쓰인 PRD 가 있으면 미룬다
+prd_is_settling() {                     # run
+   local rp r d newest age
+   rp=$(printf '%06d' "$1")
+   for r in $(printf '%s' "$RAW" | tr ':' '\n' | awk 'NF'); do
+      d="${r%/}/$rp/PRD"
+      [ -d "$d" ] || continue
+      newest=$(find "$d" -maxdepth 1 -name '*.root' -printf '%T@\n' 2>/dev/null |
+               sort -n | tail -1 | cut -d. -f1)
+      [ -n "$newest" ] || continue
+      age=$(( $(date +%s) - newest ))
+      [ "$age" -lt "$PRD_QUIET" ] && return 0
+      return 1
+   done
+   return 1
+}
+drop_settling() {                       # 목록을 stdin 으로, 남길 것을 stdout 으로
+   local n
+   while read -r n; do
+      [ -n "$n" ] || continue
+      if prd_is_settling "$n"; then
+         echo "후처리: run $n 은 PRD 가 아직 쓰이고 있다. 다음 주기로 미룬다" >&2
+      else
+         echo "$n"
+      fi
+   done
+}
+
 if [ -n "$LIST" ]; then
    TARGET=$(printf '%s' "$LIST" | tr ',' '\n' | awk 'NF')
 elif [ -n "$LO" ]; then
@@ -162,10 +218,21 @@ else
    NEW=$TARGET
 fi
 
+
+ACQ=$(acquiring_run)
+if [ -n "${ACQ:-}" ]; then
+   if printf '%s\n' "$NEW" | awk 'NF' | grep -qx "$ACQ"; then
+      echo "수집  : run $ACQ 은 지금 수집 중이라 뺀다 (--allow-acquiring 으로 강제)"
+      NEW=$(printf '%s\n' "$NEW" | awk 'NF' | grep -vx "$ACQ")
+   fi
+fi
+
 #  한 번에 다 하려 들면 며칠 물린다. 최신 것부터 조금씩 따라잡는다.
 if [ "$NEWEST" -gt 0 ]; then
    NEW=$(printf '%s\n' "$NEW" | awk 'NF' | sort -n | tail -n "$NEWEST")
 fi
+
+NEW=$(printf '%s\n' "$NEW" | awk 'NF' | drop_settling)
 
 # 새 런이 없어도 한 번은 돌린다 -- runtype.tsv 가 그 사이 생겼으면
 # 기존 행의 선원 칸을 채워야 하기 때문이다.
