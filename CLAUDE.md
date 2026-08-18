@@ -27,6 +27,8 @@ config/dotfiles/install.sh --all
 #      config/rundesc.txt  런 설명(HV 등). 없으면 daq-tmux.sh 가 --desc 를 안 넘겨
 #                        rundesc 가 이전 런들과 달라진다 (§11.20)
 #      ~/.ssh/config     백업 서버 별칭 'khu' + 키 교환 (docs/DATAFLOW.md §4)
+#      RENE_ANA_HELPERS  분석 헤더 경로. ★ 없으면 모니터링 2·3단계가 빌드 실패
+#      RENE_COND         (아래 '분석 트리 의존' 참조)
 
 # 4) 빌드
 ./build.sh
@@ -36,7 +38,28 @@ scripts/daq-tmux.sh
 
 # 6) 데이터 이동 체인이 도는지 확인. 이것이 멈추면 /Data_ssd 가 차고 DAQ 가 멈춘다
 scripts/dataflow.sh --params config/dataflow.params --once --dry-run
+
+# 7) 모니터링이 무엇을 고를지 확인 (아무것도 바꾸지 않는다)
+tools/monitor/run-summary.sh --dry-run
+tools/monitor/ibd-summary.sh --dry-run
 ```
+
+**★ 새 서버에서 가장 먼저 깨지는 것 — 분석 트리 의존.**
+2026-08-18 부터 `tools/monitor/RenePrdSingles.h` 가 분석 쪽 헤더 **두 개를
+컴파일 시점에 include** 한다. 물리를 복제하지 않으려고 그렇게 했고(§11.30),
+대가로 **그 경로가 없으면 아예 빌드가 안 된다.**
+
+```
+<분석트리>/essential/helper_functions.cc    파형 -> NPE
+<분석트리>/essential/AnalysisCondition.h    컷 상수 전부
+
+경로가 다르면          RENE_ANA_HELPERS=/새경로/essential/helper_functions.cc
+                       RENE_COND=/새경로/essential/AnalysisCondition.h
+```
+
+**rcterm · rcsupervisor · postrun · dataflow 는 이 의존이 없다.** 수집과 이동은
+분석 트리가 없어도 그대로 돈다. 못 도는 것은 모니터링 2·3단계뿐이므로, 새 서버에
+분석 트리가 없으면 그 둘은 미루고 수집부터 세우면 된다.
 
 **읽는 순서**
 
@@ -125,6 +148,9 @@ src/usbreset      20.0k   ★ 소스가 아니라 실행 파일이다. 아래 �
 src/NOTICE_CODE_RUN.sh    ★ rcterm 과 무관한 보드 점검 스크립트. 아래 설명 참조
 config/{rcterm.params.example, rcsupervisor.params.example, SERVER-block.example}
 scripts/{killdaq.sh, rcsupervisor.service.example}
+tools/monitor/RenePrdSingles.h   PRD -> clean single (= 분석 Step1 + Step2)
+tools/monitor/RenePairing.h      single -> 후보 수    (= 분석 Step3 + Step4)
+   ★ 위 둘은 분석 쪽 essential 헤더를 include 한다. §0.0 의 경고 참조
 docs/MANUAL.md      README.md(26k, 영)      README.ko.md(28k, 한)
 ```
 
