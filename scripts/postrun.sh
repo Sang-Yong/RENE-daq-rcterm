@@ -37,6 +37,7 @@ RAWROOT=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
 #  병목이 NFS I/O 이므로 로컬 디스크를 지정하면 눈에 띄게 빨라진다(실측 41초 -> 28초).
 #  RAW 쪽에는 심볼릭 링크를 걸어 두므로 매크로와 기존 도구는 경로를 그대로 쓴다.
 OUTROOT=${POSTRUN_OUTROOT:-}
+OUTROOT_WARN=0                 # --outroot 는 폐기됐다. 쓰면 알린다
 HB=${POSTRUN_HEARTBEAT:-/Data/LOG/rcterm.hb}
 JOBS=3                 # production 동시 실행 개수
 # 기록 중인 서브런에서 몇 개 뒤까지만 손대는가.
@@ -82,7 +83,7 @@ postrun.sh - DAQ 수집 뒤에 붙는 merge + production 파이프라인 드라�
   --max-retry N       좀비 파일 재시도 횟수               (${MAXRETRY})
   --prod-dir DIR      production 트리                     (${PRODDIR})
   --rawroot DIR       RAW 상위 디렉터리                   (${RAWROOT})
-  --outroot DIR       Merged/PRD 를 여기에 두고 RAW 에는 심볼릭 링크를 건다.
+  --outroot DIR       ★폐기됨★ Merged/PRD 를 여기에 두고 RAW 에는 심볼릭 링크를 건다.
                       병목이 NFS 이므로 로컬 디스크를 주면 빨라진다
                       (예: --outroot /Data_ssd/RAW)
   --keep-local N      --outroot 에 최근 N 개 런만 남기고 나머지 산출물을
@@ -112,7 +113,7 @@ while [ $# -gt 0 ]; do
       --max-retry)  MAXRETRY=$2; shift 2 ;;
       --prod-dir)   PRODDIR=$2; shift 2 ;;
       --rawroot)    RAWROOT=$2; shift 2 ;;
-      --outroot)    OUTROOT=$2; shift 2 ;;
+      --outroot)    OUTROOT=$2; OUTROOT_WARN=1; shift 2 ;;
       --keep-local) KEEPLOCAL=$2; shift 2 ;;
       --archive-now) ARCHNOW=1; shift ;;
       --no-rsync)   NORSYNC=1; shift ;;
@@ -171,6 +172,14 @@ dashboard() {            # run_num data_dir
 }
 
 # ---- 사전 점검 ------------------------------------------------------
+#  --outroot 는 폐기됐다. 조용히 되살아나면 심볼릭 링크가 다시 생긴다.
+if [ "$OUTROOT_WARN" -eq 1 ]; then
+   log "${C_Y}[DEPRECATED]${C_0} --outroot 는 폐기된 옵션이다 (2026-08-19)."
+   log "${C_Y}   RAW/Merged/PRD/PNG 는 전부 /Data_ssd 에 두고, 경희대 백업과 체크섬"
+   log "   대조가 끝난 뒤에 scripts/relocate-run.sh 로 /scratch 로 옮긴다."
+   log "   --outroot 를 주면 RAW 트리에 심볼릭 링크가 생겨 그 흐름이 깨진다.${C_0}"
+fi
+
 [ -d "$CODEDIR" ]  || die "Code 디렉터리 없음 : $CODEDIR"
 [ -d "$SHELLDIR" ] || die "Shell 디렉터리 없음 : $SHELLDIR"
 [ -f "$CODEDIR/$MERGE_MACRO" ]   || die "매크로 없음 : $CODEDIR/$MERGE_MACRO"
@@ -242,6 +251,19 @@ max_file_index() {       # run_pad
 #  --outroot 가 있으면 거기에 만들고 RAW 쪽에는 심볼릭 링크를 건다.
 #  매크로는 "$DataDir/Merged/..." 를 그대로 쓰므로 코드를 고칠 필요가 없고,
 #  audit_run.sh 같은 기존 도구도 경로가 그대로다.
+#
+#  ★ --outroot 는 폐기됐다. 쓰지 말 것. (2026-08-19)
+#     이것이 있었던 이유는 오직 하나 — 예전에는 RAW 가 /scratch 에 있어서
+#     산출물만이라도 로컬 NVMe 에 만들려 했기 때문이다(서브런당 41.0 -> 27.7초,
+#     CLAUDE.md §5.8). 매크로가 "$DataDir/Merged/..." 를 경로로 박아 쓰므로
+#     매크로를 고치지 않으려고 기대하는 자리에 링크를 걸었다.
+#
+#     2026-08-17 (§11.13) 부터 수집 자체가 /Data_ssd 로 오면서 그 이유가
+#     사라졌다. 지금 설계는 이렇다 :
+#         /Data_ssd 에서 수집하고 후처리한다 (RAW · Merged · PRD · PNG 전부)
+#            -> 경희대 백업, 체크섬 대조
+#               -> 대조를 통과한 것만 /scratch 로 옮긴다
+#     어느 단계에도 심볼릭 링크가 낄 자리가 없다.
 ensure_outdirs() {       # data_dir run_pad
    local dd=$1 rp=$2 sub
    # dry-run 은 파일시스템을 건드리지 않는다. 예전에는 여기서 빈 디렉터리를

@@ -21,3 +21,4 @@ config/rundesc.txt
 *_C.d
 *_C_ACLiC_dict_rdict.pcm
 .aclic_build/
+scripts/.*.sh.bak.*

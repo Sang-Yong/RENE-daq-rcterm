@@ -51,6 +51,7 @@ KEEP_SSD=${DATAFLOW_KEEP_SSD:-2}         # ssd 에 남길 런 수 (수집 중인
 KEEP_MID=${DATAFLOW_KEEP_MID:-0}         # 백업 뒤에도 mid 에 남길 런 수
 MINFREE_GB=${DATAFLOW_MINFREE_GB:-700}   # /Data_ssd 여유가 이 아래면 경고
 DROP_MERGED=${DATAFLOW_DROP_MERGED:-0}   # 3단계에서 Merged 를 버린다 (기본 아니오)
+VERIFY=${DATAFLOW_VERIFY:-1}             # 지우기 전에 체크섬으로 대조한다 (CLAUDE.md §8)
 POLL=${DATAFLOW_POLL:-600}
 NICE=${DATAFLOW_NICE:-10}
 BACKUP_SH=$REPO/scripts/backup-khu.sh
@@ -107,6 +108,7 @@ load_params() {
          KEEP_MID)       KEEP_MID=$v ;;
          MIN_FREE_GB)    MINFREE_GB=$v ;;
          DROP_MERGED)    DROP_MERGED=$v ;;
+         VERIFY|verify)  VERIFY=$v ;;
          POLL)           POLL=$v ;;
          NICE)           NICE=$v ;;
          BACKUP_ENABLE)  BACKUP_ENABLE=$v ;;
@@ -128,6 +130,8 @@ while [ $# -gt 0 ]; do
       --keep-ssd)     KEEP_SSD=$2; shift 2 ;;
       --keep-mid)     KEEP_MID=$2; shift 2 ;;
       --drop-merged)  DROP_MERGED=1; shift ;;
+      --no-verify)    VERIFY=0; shift ;;   # ★권장하지 않는다★
+      --verify)       VERIFY=1; shift ;;
       --min-free-gb)  MINFREE_GB=$2; shift 2 ;;
       --poll)         POLL=$2; shift 2 ;;
       --heartbeat)    HB=$2; shift 2 ;;
@@ -188,8 +192,12 @@ move_dir() {              # src dst 이름표 [추가 rsync 인자...]
    [ "$DRYRUN" -eq 1 ] && { log "    [DRY] rsync -a --remove-source-files $src/ $dst/"; return 0; }
 
    mkdir -p "$dst" || return 1
+
+   #  ★ 세 걸음으로 나눈다 : 보낸다 -> 체크섬으로 대조한다 -> 그제서야 지운다.
+   #     예전에는 --remove-source-files 로 보내면서 지웠는데, 그러면 내용이
+   #     깨졌는지 알기 전에 원본이 사라진다 (CLAUDE.md §8).
    # shellcheck disable=SC2086
-   nice -n "$NICE" rsync -a --remove-source-files --partial-dir=.rsync-partial \
+   nice -n "$NICE" rsync -a --partial-dir=.rsync-partial \
         --info=progress2 "$@" "$src"/ "$dst"/ 2>&1 | tail -1 | sed 's/^/    /'
    rc=${PIPESTATUS[0]}
    if [ "$rc" -ne 0 ]; then
@@ -202,8 +210,30 @@ move_dir() {              # src dst 이름표 [추가 rsync 인자...]
       log "${C_R}  $what : 불완전 ($n_dst / $n_src). 원본을 남긴다${C_0}"
       return 1
    fi
+
+   #  대조. -c -n -i 는 양쪽에서 각자 체크섬을 계산해 다른 파일만 한 줄씩 낸다.
+   if [ "$VERIFY" = "1" ]; then
+      local out n_diff
+      log "    체크섬 대조 중 ($n_src 개)..."
+      # shellcheck disable=SC2086
+      out=$(nice -n "$NICE" rsync -a -c -n -i "$@" "$src"/ "$dst"/ 2>&1) || {
+         log "${C_R}  $what : 체크섬 대조 실행 실패. 원본을 남긴다${C_0}"; return 1; }
+      n_diff=$(printf '%s\n' "$out" | grep -cE '^[<>]f|^\*deleting') || true
+      if [ "${n_diff:-0}" -ne 0 ]; then
+         log "${C_R}  $what : 체크섬 불일치 $n_diff 개. 원본을 남긴다${C_0}"
+         printf '%s\n' "$out" | grep -E '^[<>]f|^\*deleting' | head -5 | sed 's/^/      /'
+         return 1
+      fi
+      log "${C_G}    체크섬 일치${C_0}"
+   fi
+
+   #  이제 지운다. --remove-source-files 는 '이미 목적지와 같은' 파일도
+   #  전송 성공으로 보고 지우므로, 위에서 준 제외 규칙을 그대로 지킨다.
+   # shellcheck disable=SC2086
+   nice -n "$NICE" rsync -a --remove-source-files "$@" "$src"/ "$dst"/ >/dev/null 2>&1 || {
+      log "${C_R}  $what : 원본 삭제 단계 실패. 사람이 볼 것${C_0}"; return 1; }
    find "$src" -depth -type d -empty -delete 2>/dev/null
-   log "${C_G}  $what : 완료 ($n_dst 파일)${C_0}"
+   log "${C_G}  $what : 완료 ($n_dst 파일, 체크섬 대조함)${C_0}"
    return 0
 }
 
@@ -216,13 +246,17 @@ move_side_files() {       # run_pad src_root dst_root
    for f in "$s"/LOG/*"${rp}"*; do
       [ -f "$f" ] || continue
       base=$(basename "$f")
-      if rsync -a --remove-source-files "$f" "$d/LOG/$base" 2>/dev/null; then
-         moved=$((moved+1))
+      #  -c 로 보내고, 다시 -c -n 으로 대조가 깨끗할 때만 원본을 지운다.
+      if rsync -a -c "$f" "$d/LOG/$base" 2>/dev/null \
+         && [ -z "$(rsync -a -c -n -i "$f" "$d/LOG/$base" 2>/dev/null | grep -E '^[<>]f')" ]; then
+         rm -f "$f" && moved=$((moved+1))
       fi
    done
    if [ -f "$s/CONFIG/${rp}.config" ]; then
-      rsync -a --remove-source-files "$s/CONFIG/${rp}.config" "$d/CONFIG/" 2>/dev/null \
-         && moved=$((moved+1))
+      if rsync -a -c "$s/CONFIG/${rp}.config" "$d/CONFIG/" 2>/dev/null \
+         && [ -z "$(rsync -a -c -n -i "$s/CONFIG/${rp}.config" "$d/CONFIG/" 2>/dev/null | grep -E '^[<>]f')" ]; then
+         rm -f "$s/CONFIG/${rp}.config" && moved=$((moved+1))
+      fi
    fi
    [ "$moved" -gt 0 ] && log "  ${C_G}부속 파일${C_0} : $moved 개 (LOG / CONFIG)"
    return 0

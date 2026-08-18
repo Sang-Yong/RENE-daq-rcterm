@@ -55,6 +55,7 @@ CATS_ALL="RAW PRD PNG DAQLOG config db Data"
 CATS_DEF="RAW PRD PNG DAQLOG config db"  # Data 는 DATA_SRC 가 있을 때만
 ONLY=""; SKIP=""
 RUNS=""; ALL=0; DBONLY=0; DRYRUN=0; WITH_MERGED=0; FORCE=0; QUIET=0
+VERIFY=${BACKUP_VERIFY:-1}   # 보낸 뒤 체크섬으로 대조한다. 0 이면 개수만 본다
 
 C_R='\033[1;31m'; C_G='\033[1;32m'; C_Y='\033[1;33m'; C_C='\033[1;36m'; C_0='\033[0m'
 ts()   { date '+%Y-%m-%d %H:%M:%S'; }
@@ -69,6 +70,7 @@ usage() { sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; cat <<EOF
   --run N            런 하나 (여러 번 줄 수 있다)
   --all              --mid 밑에서 아직 백업 안 된 런을 전부
   --db-only          런 카탈로그 DB 만 보낸다
+  --no-verify        보낸 뒤 체크섬 대조를 건너뛴다 (개수만 확인)
   --only  A,B        이 카테고리만   (${CATS_ALL// /,})
   --skip  A,B        이 카테고리 제외
   --with-merged      Merged 도 보낸다 (런당 +115 GB. 기본은 보내지 않는다)
@@ -119,6 +121,8 @@ while [ $# -gt 0 ]; do
       --run)          RUNS="$RUNS $2"; shift 2 ;;
       --all)          ALL=1; shift ;;
       --db-only)      DBONLY=1; shift ;;
+      --verify)       VERIFY=1; shift ;;
+      --no-verify)    VERIFY=0; shift ;;
       --only)         ONLY=$(printf '%s' "$2" | tr ',' ' '); shift 2 ;;
       --skip)         SKIP=$(printf '%s' "$2" | tr ',' ' '); shift 2 ;;
       --with-merged)  WITH_MERGED=1; shift ;;
@@ -145,6 +149,7 @@ RSH="ssh -o BatchMode=yes -o ConnectTimeout=20"
 RSYNC_BASE="-a --partial-dir=.rsync-partial --mkpath"
 [ "$BWLIMIT" != "0" ] && RSYNC_BASE="$RSYNC_BASE --bwlimit=$BWLIMIT"
 [ "$QUIET" -eq 1 ] || RSYNC_BASE="$RSYNC_BASE --info=progress2"
+VERIFY_C=""; [ "$VERIFY" -eq 1 ] && VERIFY_C="-c"   # 파일 하나짜리는 전송에 바로 붙인다
 
 pad6() { printf '%06d' "$((10#$1))"; }
 
@@ -195,6 +200,37 @@ remote_count() {         # 원격 디렉터리
    $RSH "$HOST" "ls -1 '$1' 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9'
 }
 
+# ---- 체크섬 대조 ------------------------------------------------------
+#  왜 개수로 부족한가 : rsync 는 자기가 보낸 파일은 검사하지만, 이미 원격에
+#  있던 파일(예전에 끊긴 전송의 잔재)은 크기·시각만 같으면 손대지 않는다.
+#  원본을 지울 것이므로 내용까지 대조한다.
+#
+#  -c -n -i 로 다시 훑으면 rsync 가 양쪽에서 각자 체크섬을 계산해 결과만
+#  주고받는다. 링크 부담은 작고 비싼 것은 디스크 읽기다. 차이가 있는 파일만
+#  한 줄씩 나오므로, 나온 줄이 0 이면 내용이 같다는 뜻이다.
+verify_dir() {           # 이름표 로컬디렉터리 원격상대경로 [추가 rsync 인자...]
+   local what=$1 src=$2 rel=$3; shift 3
+   local out rc n_diff
+   log "  $what : 체크섬 대조 중..."
+   # shellcheck disable=SC2086
+   out=$(nice -n "$NICE" rsync -a -c -n -i "$@" -e "$RSH" \
+         "$src"/ "$HOST:$DEST/$rel"/ 2>&1); rc=$?
+   if [ "$rc" -ne 0 ]; then
+      err "  $what : 체크섬 대조 실행 실패 (rc=$rc). 미완료로 둔다"
+      return 1
+   fi
+   #  '>f' = 원격으로 보내야 할 파일, '<f' = 받아야 할 파일, '*deleting' = 여분.
+   #  디렉터리(.d, cd)와 시각만 다른 것은 내용이 같으므로 세지 않는다.
+   n_diff=$(printf '%s\n' "$out" | grep -cE '^[<>]f|^\*deleting') || true
+   if [ "${n_diff:-0}" -ne 0 ]; then
+      err "  $what : 체크섬 불일치 $n_diff 개. 원본을 지우면 안 된다"
+      printf '%s\n' "$out" | grep -E '^[<>]f|^\*deleting' | head -10 | sed 's/^/      /'
+      return 1
+   fi
+   log "  ${C_G}$what${C_0} : 체크섬 일치"
+   return 0
+}
+
 # ---- 한 덩어리 전송 --------------------------------------------------
 #  성공하면 로컬 개수를 돌려주고 0, 실패하면 1.
 push_dir() {             # 이름표 로컬디렉터리 원격상대경로 [추가 rsync 인자...]
@@ -226,6 +262,10 @@ push_dir() {             # 이름표 로컬디렉터리 원격상대경로 [추�
    if [ -z "$n_dst" ] || [ "$n_dst" -lt "$n_src" ]; then
       err "  $what : 원격 개수 부족 ($n_dst / $n_src). 미완료로 둔다"
       return 1
+   fi
+   #  개수가 맞아도 내용이 같다는 보장은 없다. 원본을 지울 것이므로 대조한다.
+   if [ "$VERIFY" -eq 1 ]; then
+      verify_dir "$what" "$src" "$rel" "$@" || return 1
    fi
    log "  ${C_G}$what${C_0} : 완료 (원격 $n_dst 개)"
    LAST_N=$n_src
@@ -279,8 +319,12 @@ bk_DAQLOG() {            # run_pad
       nice -n "$NICE" rsync $RSYNC_BASE -e "$RSH" \
            "$stage"/ "$HOST:$DEST/DAQLOG/$kind"/ >/dev/null 2>&1
       rc=$?
+      [ "$rc" -ne 0 ] && { rm -rf "$stage"; err "  DAQLOG/$kind : rsync 실패 (rc=$rc)"; return 1; }
+      #  대조가 끝난 뒤에 스테이지를 지운다. 먼저 지우면 대조할 원본이 없다.
+      if [ "$VERIFY" -eq 1 ]; then
+         verify_dir "DAQLOG/$kind" "$stage" "DAQLOG/$kind" || { rm -rf "$stage"; return 1; }
+      fi
       rm -rf "$stage"
-      [ "$rc" -ne 0 ] && { err "  DAQLOG/$kind : rsync 실패 (rc=$rc)"; return 1; }
       n=$((n+1))
    done
    [ "$any" -eq 0 ] && { log "  DAQLOG : ${MID}/LOG 에 run $rp 로그 없음, 건너뜀"; return 2; }
@@ -296,7 +340,7 @@ bk_config() {            # run_pad
       log "    [DRY] rsync $f $HOST:$DEST/config/"; LAST_N=1; return 0
    fi
    # shellcheck disable=SC2086
-   nice -n "$NICE" rsync $RSYNC_BASE -e "$RSH" "$f" "$HOST:$DEST/config"/ >/dev/null 2>&1
+   nice -n "$NICE" rsync $RSYNC_BASE $VERIFY_C -e "$RSH" "$f" "$HOST:$DEST/config"/ >/dev/null 2>&1
    rc=$?
    [ "$rc" -ne 0 ] && { err "  config : rsync 실패 (rc=$rc)"; return 1; }
    log "  ${C_G}config${C_0} : ${rp}.config 완료"
@@ -325,7 +369,7 @@ bk_db() {
    # mktemp 는 0600 으로 만든다. 그대로 보내면 원격에서 다른 사람이 못 읽는다.
    chmod 644 "$tmp" 2>/dev/null
    # shellcheck disable=SC2086
-   nice -n "$NICE" rsync $RSYNC_BASE -e "$RSH" "$tmp" "$HOST:$DEST/db/$name" >/dev/null 2>&1
+   nice -n "$NICE" rsync $RSYNC_BASE $VERIFY_C -e "$RSH" "$tmp" "$HOST:$DEST/db/$name" >/dev/null 2>&1
    rc=$?
    rm -f "$tmp"
    [ "$rc" -ne 0 ] && { err "  db : rsync 실패 (rc=$rc)"; return 1; }
