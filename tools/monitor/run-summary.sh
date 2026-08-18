@@ -23,7 +23,11 @@
 #
 #  경로는 환경변수로 바꾼다.
 #      RUNSUM_OUT  기본 /scratch/RunSummary
-#      RUNSUM_RAW  기본 /scratch/RAW        <- production 산출물이 있는 곳
+#      RUNSUM_RAW  기본 /Data_ssd/RAW:/data/RAW:/scratch/RAW
+#                  production 산출물이 있는 곳. ':' 로 여럿을 준다.
+#                  dataflow 가 런을 /Data_ssd -> /data -> /scratch 로
+#                  흘려보내므로 한 곳만 보면 옮겨진 런을 놓친다.
+#                  앞에 오는 것이 이긴다 -- 앞쪽이 빠른 디스크다.
 #
 #  주의 : RAW 트리는 읽기만 한다. 쓰는 곳은 RUNSUM_OUT 뿐이다.
 #         /scratch 는 100 Mb 링크라(CLAUDE.md §11.12) 런 하나에 몇 분 걸린다.
@@ -34,7 +38,7 @@ set -u
 DIR=$(cd "$(dirname "$0")" && pwd)
 MACRO=$DIR/BuildRunSummary.C
 OUT=${RUNSUM_OUT:-/scratch/RunSummary}
-RAW=${RUNSUM_RAW:-/scratch/RAW}
+RAW=${RUNSUM_RAW:-/Data_ssd/RAW:/data/RAW:/scratch/RAW}
 FORCE=0; DRY=0; LIST=""; LO=""; HI=""; NEWEST=0
 
 while [ $# -gt 0 ]; do
@@ -73,8 +77,10 @@ mkdir -p "$OUT" 2>/dev/null
 #  이 한 줄에 약 42초. /scratch 가 100 Mb 링크라 그렇다(CLAUDE.md §11.12).
 #  범위나 --list 를 주면 이 훑기를 건너뛴다.
 have_runs() {
-   ls -dU "$RAW"/[0-9][0-9][0-9][0-9][0-9][0-9]/PRD 2>/dev/null |
-      sed -n 's|.*/0*\([0-9][0-9]*\)/PRD$|\1|p' | sort -n -u
+   local r
+   printf '%s' "$RAW" | tr ':' '\n' | awk 'NF' | while read -r r; do
+      ls -dU "${r%/}"/[0-9][0-9][0-9][0-9][0-9][0-9]/PRD 2>/dev/null
+   done | sed -n 's|.*/0*\([0-9][0-9]*\)/PRD$|\1|p' | sort -n -u
 }
 already() {
    [ -r "$OUT/run_summary.tsv" ] || return 0
@@ -123,15 +129,15 @@ else
    SHOWN="$(printf '%s\n' "$NEW" | awk 'NF' | head -5 | paste -sd, -) ... $(printf '%s\n' "$NEW" | awk 'NF' | tail -3 | paste -sd, -)"
 fi
 echo "출력  : $OUT"
-echo "입력  : $RAW/<run>/PRD  (읽기 전용)"
+echo "입력  : <root>/<run>/PRD  (읽기 전용)  root = $RAW"
 echo "대상  : $NCNT 개 런 -> $SHOWN"
 
 if [ "$DRY" -eq 1 ]; then
-   echo "[DRY] root -l -b -q '$MACRO+(\"<위 $NCNT 개>\", $([ "$FORCE" -eq 1 ] && echo true || echo false), \"$OUT/\", \"$RAW/\")'"
+   echo "[DRY] root -l -b -q '$MACRO+(\"<위 $NCNT 개>\", $([ "$FORCE" -eq 1 ] && echo true || echo false), \"$OUT/\", \"$RAW\")'"
    exit 0
 fi
 
-root -l -b -q "$MACRO+(\"$CSV\", $([ "$FORCE" -eq 1 ] && echo true || echo false), \"$OUT/\", \"$RAW/\")"
+root -l -b -q "$MACRO+(\"$CSV\", $([ "$FORCE" -eq 1 ] && echo true || echo false), \"$OUT/\", \"$RAW\")"
 rc=$?
 [ $rc -eq 0 ] && echo "결과를 보려면 : $0 --show"
 exit $rc

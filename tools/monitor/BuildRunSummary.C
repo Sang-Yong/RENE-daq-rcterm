@@ -3,7 +3,9 @@
 //                      지표를 뽑아 run_summary 로 누적한다.
 //
 //  무엇을 읽나  ★ production 산출물이 정본이다
-//     <RawDir>/<NNNNNN>/PRD/PRD_<NNNNNN>.<SSSSS>.root  : TTree "Event"
+//     <root>/<NNNNNN>/PRD/PRD_<NNNNNN>.<SSSSS>.root  : TTree "Event"
+//     root 는 ':' 로 나눈 목록을 앞에서부터 찾는다. dataflow 가 런을 옮기므로
+//     한 곳만 보면 놓친다 -- 기본 /Data_ssd/RAW:/data/RAW:/scratch/RAW.
 //        TCBTRGTime  [ns]  TCB 트리거 시각 (되감긴다. 아래 참조)
 //        EventType   1 = target only (FADC)
 //                    2 = veto only   (SADC)
@@ -45,10 +47,11 @@
 //     root -l -b -q 'BuildRunSummary.C+("4237,4239")'        목록
 //     root -l -b -q 'BuildRunSummary.C+(4237, 4240, true)'   이미 있어도 다시
 //  경로를 바꾸려면 :
-//     root -l -b -q 'BuildRunSummary.C+(4237,4240,false,"/scratch/RunSummary/","/scratch/RAW/")'
+//     root -l -b -q 'BuildRunSummary.C+(4237,4240,false,"/scratch/RunSummary/","/scratch/RAW")'
 // ---------------------------------------------------------------------------
 #include <TFile.h>
 #include <TKey.h>
+#include <TObjString.h>
 #include <TSystem.h>
 #include <TSystemDirectory.h>
 #include <TString.h>
@@ -165,14 +168,47 @@ static double FileEpoch(const TString &path) {
 }
 
 // ---------------------------------------------------------------------------
-static bool BuildOneRun(int run, const TString &rawDir, RunSummaryRow &row) {
+//  런 디렉터리를 여러 root 에서 찾는다. 앞에 오는 것이 이긴다.
+//  dataflow 가 런을 /Data_ssd -> /data -> /scratch 로 흘려보내므로 한 곳만
+//  보면 옮겨진 런을 놓친다. 앞쪽이 빠른 디스크라 속도에서도 유리하다
+//  (실측 : 같은 서브런이 로컬 NVMe 1.1 s, /scratch 14.6 s).
+static TString FindRunDir(int run, const TString &roots) {
+   TString runS = RunStr(run);
+   TObjArray *parts = TString(roots).Tokenize(":");
+   TString found = "";
+   for (int i = 0; i < parts->GetEntries(); ++i) {
+      TString r = ((TObjString *)parts->At(i))->GetString().Strip(TString::kBoth);
+      if (r.IsNull()) continue;
+      if (!r.EndsWith("/")) r += "/";
+      if (!gSystem->AccessPathName(r + runS + "/PRD/")) { found = r + runS + "/"; break; }
+   }
+   delete parts;
+   return found;
+}
+
+//  FADC 원시 파일을 모든 root 에서 찾아 mtime 을 준다. 없으면 -1.
+static double FileEpochAnyRoot(const TString &runS, int sid, const TString &roots) {
+   TObjArray *parts = TString(roots).Tokenize(":");
+   double ep = -1;
+   for (int i = 0; i < parts->GetEntries() && ep <= 0; ++i) {
+      TString r = ((TObjString *)parts->At(i))->GetString().Strip(TString::kBoth);
+      if (r.IsNull()) continue;
+      if (!r.EndsWith("/")) r += "/";
+      ep = FileEpoch(TString::Format("%s%s/FADC_%s.root.%05d",
+                                     r.Data(), runS.Data(), runS.Data(), sid));
+   }
+   delete parts;
+   return ep;
+}
+
+static bool BuildOneRun(int run, const TString &roots, RunSummaryRow &row) {
    TString runS  = RunStr(run);
-   TString rdir  = rawDir + runS + "/";
-   TString pdir  = rdir + "PRD/";
-   if (gSystem->AccessPathName(pdir)) {
-      printf("  [SKIP] run %d : PRD 디렉터리가 없다 (%s)\n", run, pdir.Data());
+   TString rdir  = FindRunDir(run, roots);
+   if (rdir.IsNull()) {
+      printf("  [SKIP] run %d : PRD 디렉터리를 못 찾았다 (%s 아래)\n", run, roots.Data());
       return false;
    }
+   TString pdir  = rdir + "PRD/";
    std::vector<int> subs = ListSubruns(pdir, runS);
    if (subs.empty()) {
       printf("  [SKIP] run %d : PRD 파일이 없다\n", run);
@@ -226,7 +262,11 @@ static bool BuildOneRun(int run, const TString &rawDir, RunSummaryRow &row) {
       f->Close();
 
       //  수집 시각은 원시 FADC 파일 mtime. 없으면 PRD 파일 mtime 으로 대신한다.
-      double ep = FileEpoch(TString::Format("%sFADC_%s.root.%05d", rdir.Data(), runS.Data(), sid));
+      //  RAW 와 PRD 가 서로 다른 디스크에 있을 수 있다(예전 --outroot 구성은
+      //  RAW 가 /scratch, PRD 가 /Data_ssd 다). 그래서 FADC 는 root 전체에서
+      //  찾는다 -- 못 찾아 PRD mtime 으로 떨어지면 런마다 기준이 달라져
+      //  추이 그림의 x축이 어긋난다.
+      double ep = FileEpochAnyRoot(runS, sid, roots);
       if (ep <= 0) ep = FileEpoch(p);
       if (ep > 0) {
          if (row.epochStart < 0 || ep < row.epochStart) row.epochStart = ep;
@@ -406,10 +446,9 @@ static void WriteTxt(const TString &path, const std::map<int, RunSummaryRow> &ro
 
 // ---------------------------------------------------------------------------
 static void Impl(const std::vector<int> &runs, bool force,
-                 const char *outDir, const char *rawDir) {
-   TString out(outDir), raw(rawDir);
+                 const char *outDir, const char *rawRoots) {
+   TString out(outDir), raw(rawRoots);
    if (!out.EndsWith("/")) out += "/";
-   if (!raw.EndsWith("/")) raw += "/";
 
    if (gSystem->mkdir(out, kTRUE) != 0 && gSystem->AccessPathName(out, kWritePermission)) {
       printf("[FATAL] 출력 디렉터리에 쓸 수 없다 : %s\n", out.Data());
@@ -429,7 +468,7 @@ static void Impl(const std::vector<int> &runs, bool force,
       return;
    }
    printf("[INFO] 기존 run_summary : %zu 개 런\n", rows.size());
-   printf("[INFO] 입력 : %s<run>/PRD/  (읽기 전용)\n", raw.Data());
+   printf("[INFO] 입력 : <root>/<run>/PRD/  (읽기 전용)  root = %s\n", raw.Data());
 
    int nNew = 0, nSkip = 0, nMiss = 0;
    for (int run : runs) {
@@ -458,17 +497,17 @@ static void Impl(const std::vector<int> &runs, bool force,
 
 void BuildRunSummary(int runFirst, int runLast = -1, bool force = false,
                      const char *outDir = "/scratch/RunSummary/",
-                     const char *rawDir = "/scratch/RAW/") {
+                     const char *rawRoots = "/Data_ssd/RAW:/data/RAW:/scratch/RAW") {
    if (runLast < runFirst) runLast = runFirst;
    std::vector<int> runs;
    for (int r = runFirst; r <= runLast; ++r) runs.push_back(r);
-   Impl(runs, force, outDir, rawDir);
+   Impl(runs, force, outDir, rawRoots);
 }
 
 void BuildRunSummary(const char *runList, bool force = false,
                      const char *outDir = "/scratch/RunSummary/",
-                     const char *rawDir = "/scratch/RAW/") {
+                     const char *rawRoots = "/Data_ssd/RAW:/data/RAW:/scratch/RAW") {
    std::vector<int> runs = ParseRunList(runList);
    if (runs.empty()) { printf("[FATAL] 런 목록이 비어 있다\n"); return; }
-   Impl(runs, force, outDir, rawDir);
+   Impl(runs, force, outDir, rawRoots);
 }

@@ -1,19 +1,32 @@
 # DAQ 모니터링 요약 — livetime 부터 neutrino candidate 까지
 
+**세 단계 전부 production 산출물(PRD)만 읽는다.** 다른 계정의 분석 산출물에
+기대지 않으므로, production 이 끝난 런은 곧바로 표에 들어온다.
+
+```
+<root>/RAW/<런번호>/PRD/PRD_<런번호>.<서브런>.root      ← 이것이 유일한 입력
+root = /Data_ssd/RAW : /data/RAW : /scratch/RAW        앞에 오는 것이 이긴다
+```
+
+root 를 여럿 두는 이유는 두 가지다. dataflow 가 런을 `/Data_ssd → /data →
+/scratch` 로 흘려보내므로 한 곳만 보면 옮겨진 런을 놓치고, **앞쪽이 압도적으로
+빠르다** — 같은 서브런이 로컬 NVMe 1.1초, `/scratch` 14.6초다(100 Mb 링크,
+CLAUDE.md §11.12). `RUNSUM_RAW` 로 바꾼다. **읽기만 한다.**
+
 단계마다 코드 하나, 스크립트 하나다. 순서가 있고, 앞 단계가 없어도 죽지는 않는다
 (그 칸만 비고 나중에 다시 돌리면 채워진다).
 
 | 순서 | 스크립트 | 매크로 | 내는 것 |
 |---|---|---|---|
 | 1 | `run-summary.sh` | `BuildRunSummary.C` | livetime, 종류별 이벤트 수 → `run_summary.{txt,tsv}` |
-| 2 | `ibd-summary.sh` | `BuildPairSummary.C` | IBD 후보 수 (채널별) → `pair_summary.{txt,tsv}` |
+| 2 | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` |
 | 3 | `rate-trend.sh` | `BuildRateTrend.C` | 효율 보정 + 시간축 추이 그림 → `rate_trend.{pdf,tsv}`, `*.png` |
 | 전부 | `monitor-all.sh` | — | 위 셋을 순서대로. 자동화는 이것을 쓴다 |
 
 ```bash
 tools/monitor/monitor-all.sh              # 한 번 (1→2→3)
 tools/monitor/monitor-all.sh --follow     # 1시간마다 계속 갱신
-tools/monitor/ibd-summary.sh --missing    # 페어링이 안 된 런을 찾아준다
+tools/monitor/ibd-summary.sh --missing    # 아직 안 센 런을 알려준다
 ```
 
 **런이 하나 끝날 때마다 그림 오른쪽 끝에 점이 하나 붙는다.** x축은 그 런의 DAQ
@@ -26,16 +39,18 @@ tools/monitor/ibd-summary.sh --missing    # 페어링이 안 된 런을 찾아�
 
 # 1단계 : run_summary — production 산출물(PRD)에서 뽑는 DAQ 운용 지표
 
-**입력은 production 을 마친 데이터다.**
+**입력은 production 을 마친 데이터다.** 파형은 읽지 않고 두 가지만 본다.
 
 ```
-/scratch/RAW/<런번호>/PRD/PRD_<런번호>.<서브런>.root     TTree "Event"
+<root>/<런번호>/PRD/PRD_<런번호>.<서브런>.root     TTree "Event"
       TCBTRGTime  [ns]  TCB 트리거 시각
       EventType   1 = target only(FADC) · 2 = veto only(SADC) · 3 = both
-/scratch/RAW/<런번호>/FADC_<런번호>.root.<서브런>        수집 시각(mtime)
+<root>/<런번호>/FADC_<런번호>.root.<서브런>        수집 시각(mtime)
 ```
 
-경로는 `RUNSUM_RAW`(기본 `/scratch/RAW`)로 바꾼다. **읽기만 한다.**
+FADC 원시 파일은 **모든 root 에서 찾는다.** 예전 `--outroot` 구성은 RAW 가
+`/scratch`, PRD 가 `/Data_ssd` 라 둘이 다른 디스크에 있다. 못 찾아 PRD mtime
+으로 떨어지면 런마다 기준이 달라져 3단계 그림의 x축이 어긋난다.
 
 ## 1. EventType 의 뜻은 실측으로 확인했다
 
@@ -116,18 +131,105 @@ Step1 경유   run 4234  subrun 61  live 2486.5 s  total 14,627,857
 
 # 6단계 : pair_summary — neutrino candidate (개략)
 
-페어링 결과에서 IBD 후보 수를 채널별로 뽑는다. **여기서 페어링을 새로 하지
-않는다.** `RunBothChannels.C` 가 만든 것을 읽기만 한다.
+**★ 2026-08-18 에 입력이 바뀌었다.** 예전에는 분석 쪽
+`/scratch/junkyo/SampleFiles/Step3` 의 페어링 산출물을 읽기만 했다. 그러면
+저쪽이 그 런을 아직 안 돌렸을 때 이 표가 멈춘다 — 실제로 1단계가 run 4291 까지
+갔는데 2단계는 4240 에서 멎어 있었다. 이제 **1단계와 똑같이 PRD 를 읽고
+페어링까지 여기서 한다.**
 
 ```
-Step3/step3_Run<NNNNNN><tag>.root : T_Paired      coincidence 를 만족한 쌍
-                                    T_Paired_Acci off-window 대조 표본
-Step3/step4_Run<NNNNNN><tag>.root : T_IBD         + multiplicity(고립) 통과
-                                    T_IBD_Acci
+PRD ──► clean single ──► 페어링 ──► IBD 후보 수 + R_LL
+     RenePrdSingles.h   RenePairing.h
+     (= 분석 Step1+Step2) (= 분석 Step3+Step4)
 ```
 
-`tag` 는 `_nGd` / `_nH`. 없으면 `ibd-summary.sh --missing` 이 돌려야 할 명령을
-알려 준다(그 코드는 `ojk` 계정 것이라 그쪽에서 돌려야 한다).
+## 6.0 물리는 베끼지 않는다. 분석 코드를 include 한다
+
+파형 → NPE 변환, 보정 상수, 컷 값은 전부 분석 쪽 것을 그대로 쓴다.
+
+```c
+#include "/home/ojk/analysis3/essential/helper_functions.cc"   // GetPed/GetQsum/…
+#include "/home/ojk/analysis3/essential/AnalysisCondition.h"   // DT_*/S2_*/ISO_*
+```
+
+베껴 두면 저쪽이 바꿨을 때 이 표만 조용히 틀린 값이 된다(§5.8 에서 production
+매크로를 호출만 한 것과 같은 이유다). 경로는 `RENE_ANA_HELPERS` /
+`RENE_COND_HEADER` 로 바꾼다.
+
+**예외는 페어링 loop 하나뿐이다.** 분석 쪽 `RunBothChannels.C::PairAndSelect`
+는 결과를 파일로 쓰는 것이 목적이라 **세기만 하는 진입점이 없다.** 그래서
+`RenePairing.h` 에 loop 을 따로 두었고, 그만큼 갈라질 수 있다. 그래서
+`ibd-summary.sh` 는 분석 Step4 가 있는 런에서 **매번 수를 대조하고** 다르면
+알린다.
+
+## 6.0.1 재현하는 규칙 (분석 Step1/Step2 그대로)
+
+1. `globalTime = TCBTRGTime + offset`. TCB 시계가 되감기면 보정하고, carry 는
+   **런 전체에 이어 간다** — 서브런마다 0 부터 다시 세면 서브런 경계를 넘는
+   coincidence 창이 깨진다.
+2. muon veto : SADC 패널 15개 중 위/아래가 함께 켜진 것이 있으면 veto.
+   **`muonTime` 갱신이 `dt` 계산보다 먼저다.**
+3. FADC ch0·ch1 파형을 적분해 NPE 를 얻는다.
+4. Step2 컷을 **이 순서로** — muon → after-muon(`dt < 150 us`) → saturation.
+   순서를 바꾸면 범주별 수가 달라진다.
+5. `(q0<5 && q1<5)` 를 버리고 `q0+q1 > 610.6 NPE`(1.2 MeV) 인 것만 single 로
+   남긴다. **`float` 로 깎아서 비교한다** — Step2 가 float 로 저장하므로
+   그렇게 하지 않으면 경계에 걸친 이벤트에서 결과가 갈린다.
+
+## 6.0.2 검증 — 분석 체인과 수가 정확히 맞는다 ★
+
+두 토막으로 나눠 실측했다. 나누지 않으면 어디가 틀렸는지 알 수 없다.
+
+**(A) 재구성** — run 4237 서브런 98~100 을 순서대로 돌려 carry 를 세운 뒤,
+서브런 100 을 같은 서브런의 분석 Step2 part 와 대조했다.
+
+```
+single 개수   here 5,739   analysis 5,739     일치
+evt_id 어긋남  0
+pe 어긋남      0        (최대 0 NPE)
+간격 어긋남    0        (최대 0 us)
+```
+
+**single 목록이 비트 단위로 같다.** clean 11,356 개도 예전에 기록해 둔 값과
+같다.
+
+**(B) 페어링** — 분석 Step2 에서 읽은 **같은 입력**(run 4237 전체, single
+72,658,494 개)에 `RenePairing.h` 를 돌려 Step3/Step4 트리와 대조했다.
+
+| | `_nGd` here / analysis | `_nH` here / analysis |
+|---|---|---|
+| paired | 7,879 / 7,879 | 798,857 / 798,857 |
+| paired_acci | 3,023 / 3,023 | 664,641 / 664,641 |
+| ibd | 2,097 / 2,097 | 601,739 / 601,739 |
+| ibd_acci | 1,377 / 1,377 | 551,422 / 551,422 |
+
+**여덟 개 전부 일치.** (A)+(B) 로 PRD → single → 후보 전 구간이 분석 체인과
+같은 값을 낸다는 것이 확인됐다.
+
+## 6.0.3 비용과 캐시 ★ 여기가 실무에서 제일 중요하다
+
+파형을 읽으므로 1단계보다 훨씬 비싸다. **어느 디스크에 있느냐가 13배를 가른다.**
+
+| 위치 | 서브런당 | 24시간 런(1440) | 병목 |
+|---|---|---|---|
+| `/Data_ssd` (로컬 NVMe) | **1.1초** | 약 27분 | CPU |
+| `/scratch` (100 Mb NFS) | 14.6초 | 약 5.8시간 | 링크 |
+
+그래서 **런이 아직 `/Data_ssd` 에 있을 때 돌리는 것이 압도적으로 유리하다.**
+dataflow 가 `/scratch` 로 보내고 나면 13배가 된다.
+
+서브런마다 single 목록을 캐시한다(`<OUT>/cache/singles`). 실측 —
+
+```
+run 4290 (197 서브런)  처음 228초  →  캐시 재사용 0.7초   (수는 동일)
+캐시 크기 14 MB (서브런당 71 KB).  24시간 런이면 약 100 MB
+```
+
+중간에 끊겨도 한 것은 남고, 런 하나가 끝날 때마다 표를 쓴다. 캐시에는 그때 쓴
+문턱과 veto 창을 함께 적어 두고, 값이 바뀌면 무시하고 다시 만든다.
+
+자동화에서는 `--newest N` 으로 끊는다(`monitor-all.sh` 기본 2개). 끊지 않으면
+PRD 가 있는 런이 1,400개가 넘어 첫 실행이 며칠 물린다.
 
 ## 6.1 우발 빼기 — `DrawIBD.C` 규약을 그대로 따른다
 
@@ -145,14 +247,9 @@ err         = sqrt(N_IBD + acciScale² × N_IBD_Acci)      통계 오차만
 `DrawIBD.C:164` 의 `h_dt_sub->Add(h_dt_on, h_dt_acci, 1.0, -acciScale)` 와
 같은 양을 세는 것이 목적이므로, **규약을 바꾸려면 그쪽과 함께 바꿀 것.**
 
-## 6.2 컷 상수는 복제하지 않는다
+## 6.2 컷 상수는 복제하지 않는다 (§6.0 참조)
 
-`DT_MIN` / `DT_MAX` / `S2` 창 / `ISO` 는 분석 쪽
-`essential/AnalysisCondition.h` 를 **직접 include** 해서 쓴다. 베껴 두면 저쪽이
-컷을 바꿨을 때 이 표만 조용히 틀린 값이 된다. 경로는 `RENE_COND` 환경변수
-(또는 `-DRENE_COND_HEADER=`)로 바꾼다.
-
-그래서 표에 찍히는 컷은 **문서가 아니라 코드에서 읽은 값**이다. 둘이 다를 수
+표에 찍히는 컷은 **문서가 아니라 코드에서 읽은 값**이다. 그래서 표에 찍히는 컷은 **문서가 아니라 코드에서 읽은 값**이다. 둘이 다를 수
 있다 — `README_pipeline.md` 는 n-Gd S2 를 `[7.77, 9.36]` 이라 적었지만
 코드에서 그 줄은 주석이고 실제로는 **`[6.0, 10.0]`** 이 쓰인다(2026-08-18 확인).
 
@@ -177,19 +274,23 @@ AmBe · Cf252 를 넣고 받은 교정 런은 **후보 수가 백만 단위로 �
 
 ## 6.4 지금 나오는 값
 
-선원 없는 런 5개(4084 · 4237~4240), livetime 29.8일 기준.
+**입력이 바뀌면서 표를 처음부터 다시 만들고 있다.** 옛 표(분석 Step3/Step4 를
+읽던 것)는 열이 달라 `# schema 2` 검사에 걸려 자동으로 버려진다. 옛 값은
+`/scratch/RunSummary/old-schema1/` 에 남겨 두었다.
 
-| 채널 | ibd | acci | cand | S/B | cand/day |
-|---|---|---|---|---|---|
-| `_nGd` | 6,262 | 4,069.9 | 2,192 ± 101 | 0.54 | **73.5 ± 3.4** |
-| `_nH` | 1,989,144 | 1,822,510.7 | 166,633 ± 1,950 | 0.09 | 5,589 ± 65 |
+```
+run 4290  live 11,820 s  single 1,047,623  R_LL 88.63 Hz
+   _nGd   paired 103    ibd 26     acci 10.9     cand 15.1 ± 6.1
+   _nH    paired 9,490  ibd 8,019  acci 7,494.3  cand 524.7 ± 124.4
+```
+
+되채우는 순서는 **최신 런부터**다. 옛 런은 PRD 가 `/scratch` 에 있어 13배
+비싸고(§6.0.3), run 4237 처럼 12,720 서브런짜리는 51시간이 걸린다. 급하지 않다.
 
 **이 cand 는 개략값이다.** 우발만 뺀 것이고 검출 효율, 우주선 유발 배경
 (fast neutron, ⁹Li/⁸He), 컷 효율 보정이 들어 있지 않다. 물리 결과가 아니라
-**"수집이 정상이면 이만큼 나온다"는 운용 지표**로 볼 것. n-H 의 S/B 0.09 는
-이 채널에서 추가 컷 없이는 정상이다.
-
----
+**"수집이 정상이면 이만큼 나온다"는 운용 지표**로 볼 것. n-H 의 S/B 가 0.1
+언저리인 것은 이 채널에서 추가 컷 없이는 정상이다.
 
 # 8단계 : rate_trend — 시간축 추이와 효율 보정
 
@@ -227,28 +328,30 @@ rate_corr = rate_raw / (eps_T x eps_iso x eps_E)
 tools/monitor/rate-trend.sh --eps-e 0.85
 ```
 
-## 8.2 R_LL 은 추정하지 않고 잰다 ★
+## 8.2 R_LL 은 2단계가 전수로 준다 ★
 
 `run_summary` 의 `n_clean / live` 를 R_LL 로 쓰고 싶어지지만 **틀린다.**
-Step2 의 `T_Event` 에는 에너지 문턱이 없다(muon / after-muon / saturation 컷만).
-실측 — run 4237 의 서브런 100 에서 `T_Event` 11,356 개 중 1.2 MeV 이상은
-**5,740 개뿐**이었다. 그대로 쓰면 R_LL 이 두 배가 되고 ε_iso 가 낮아져
+clean 이벤트에는 에너지 문턱이 없다(muon / after-muon / saturation 컷만).
+실측 — run 4237 서브런 100 에서 clean 11,356 개 중 1.2 MeV 이상은
+**5,739 개뿐**이다. 그대로 쓰면 R_LL 이 두 배가 되고 ε_iso 가 낮아져
 보정 rate 가 부풀려진다.
 
-그래서 Step2 part 를 **서브런 20개쯤 표본으로 열어 직접 센다.** rate 라서
-전수 조사가 필요 없다. 결과는 `rll.tsv` 에 캐시하므로 런당 한 번만 잰다.
-다시 재려면 `--remeasure`.
+예전에는 여기서 분석 Step2 part 를 서브런 20개쯤 **표본으로** 열어 쟀다.
+이제 2단계가 PRD 에서 런 전체의 single 을 이미 세므로 `pair_summary.tsv` 의
+`r_ll` 열을 그대로 읽는다 — **표본이 아니라 전수**이고, `/scratch/junkyo` 에
+기대지 않는다. `rll.tsv` 는 더 이상 만들지 않는다(옛 파일이 있으면 `r_ll` 이
+비어 있는 행에만 예비로 쓴다).
 
-## 8.3 지금 나오는 값 (선원 없는 런 4개)
+다시 재려면 2단계를 다시 돌린다 : `ibd-summary.sh --force <런>`.
+
+## 8.3 지금 나오는 값
 
 ```
-run 4237  R_LL 95.03 Hz   eps_T 0.942  eps_iso 0.945  eps_tot 0.890
-   _nGd   rate 83.1 -> 보정 93.3 /day        _nH  6008.7 -> 7842.8 /day
-run 4240  R_LL 92.62 Hz
-   _nGd   rate 53.0 -> 보정 59.5 /day        _nH  6740.4 -> 8763.8 /day
+run 4290  R_LL 88.63 Hz   eps_T 0.942  eps_iso 0.948  eps_tot 0.893  (_nGd)
 ```
 
-R_LL 이 92~95 Hz 로 안정적이라 ε_iso 도 0.945 근처에서 거의 변하지 않는다.
+R_LL 은 지금까지 잰 런에서 88~95 Hz 로 안정적이라 ε_iso 도 0.945 근처에서
+거의 변하지 않는다.
 
 ## 9. 자동화
 
@@ -267,21 +370,26 @@ tmux new-window -t daq -n monitor 'tools/monitor/monitor-all.sh --follow'
 한 바퀴가 끝날 때마다 채널별 **가장 최근 점**을 한 줄로 찍는다. 그것만 봐도
 수집이 정상인지 감이 온다.
 
-**페어링 자체는 돌리지 않는다.** `RunBothChannels.C` 는 `ojk` 계정의 코드라
-그쪽에서 돌려야 한다. 빠진 런은 `ibd-summary.sh --missing` 이 명령까지 만들어
-준다.
+**페어링을 이제 여기서 한다.** 다른 계정의 산출물을 기다리지 않으므로
+production 이 끝난 런은 곧바로 표에 들어온다. 아직 안 센 런은
+`ibd-summary.sh --missing` 이 알려 준다.
+
+2단계가 1단계보다 비싸므로 `--newest` 는 **두 단계 모두에** 적용된다.
 
 ---
 
 ## 10. 지금 상태와 다음
 
-- 실측 검증 완료 — 1단계는 run 4063 · 4084 · 4221~4234 · 4237~4240,
-  2단계는 페어링된 13개 런 × 2채널 = 26행, 3단계는 선원 없는 런 4개의
-  R_LL 측정과 7쪽 그림. monitor 경로 / Step1 대체 경로 / 이어붙이기 /
-  건너뛰기 / 정렬 / 미분석 런 무시 / **되읽기 라운드트립** / R_LL 캐시를
-  모두 확인했다.
+- **입력을 PRD 로 일원화했다(2026-08-18).** 세 단계 모두 다른 계정의 분석
+  산출물 없이 돈다. 검증은 §6.0.2 — 재구성은 single 목록이 비트 단위로 같고,
+  페어링은 여덟 개 수가 전부 일치한다.
+- 표는 다시 채우는 중이다. 최신 런부터, `/Data_ssd` 에 있는 동안 돌리는 것이
+  13배 싸다(§6.0.3).
 - 하지 않은 것
   - `runcatalog.db` 의 `nfadc`/`tfadc`(DAQ 가 보고한 값) 대 `n_events`/`live`
     (데이터에서 나온 값) 대조. 나란히 놓으면 수집과 저장 사이의 손실이 보인다.
-  - 병합 런(`step4_Run004237+004238_nGd.root` 같은 것)은 건너뛴다. 단일 런만 센다.
-  - 시간에 따른 후보율 추이(그림). 지금은 표까지다.
+  - ε_E(에너지창 효율). 봉우리 fit 이 필요해 자동으로 못 구한다. 기본 1.0 이고
+    보정에서 빠져 있다.
+  - 병합 런은 다루지 않는다. 단일 런만 센다.
+  - 페어링 loop 은 분석 쪽에 세기 전용 진입점이 없어 따로 두었다. 저쪽이
+    `RunBothChannels.C` 를 고치면 여기도 고쳐야 한다 — 대조가 알려 준다.

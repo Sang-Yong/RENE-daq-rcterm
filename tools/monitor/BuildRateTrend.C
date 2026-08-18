@@ -6,11 +6,9 @@
 //     2) ibd-summary.sh   IBD 후보 수 (채널별)
 //     3) rate-trend.sh    효율 보정 + 추이 그림   <- 이 파일
 //
-//  읽는 것 : <OutDir>/pair_summary.tsv   후보 수·컷 창
+//  읽는 것 : <OutDir>/pair_summary.tsv   후보 수·컷 창·R_LL
 //            <OutDir>/run_summary.tsv    livetime·DAQ 시작 시각(x축)
-//            <SampleDir>/Step2/parts/... R_LL 측정용 (서브런 표본만)
 //  쓰는 것 : <OutDir>/rate_trend.tsv     한 줄 = 런 × 채널
-//            <OutDir>/rll.tsv            R_LL 측정값 캐시 (다시 재지 않는다)
 //            <OutDir>/rate_trend.pdf     여러 쪽
 //            <OutDir>/rate_trend_<이름>.png  쪽마다 하나 (화면에 띄우기 좋다)
 //
@@ -30,18 +28,21 @@
 //
 //    rate_corr = rate_raw / (eps_T * eps_iso * eps_E)
 //
-//  ---- R_LL 은 추정하지 않고 잰다 ----
-//  run_summary 의 n_clean 을 livetime 으로 나누고 싶어지지만 **틀린다.**
-//  Step2 의 T_Event 에는 에너지 문턱이 없어서(muon/afterMu/saturation 컷만)
-//  1.2 MeV 미만이 절반쯤 섞여 있다. 실측 : run 4237 서브런 100 에서
-//  T_Event 11,356 개 중 1.2 MeV 이상은 5,740 개뿐이었다. 그대로 쓰면 R_LL 이
-//  두 배가 되고 eps_iso 가 낮아져 보정 rate 가 부풀려진다.
-//  그래서 Step2 part 를 몇 개 표본으로 열어 직접 센다. rate 라서 전수 조사가
-//  필요 없다. 결과는 rll.tsv 에 캐시하므로 런당 한 번만 잰다.
+//  ---- R_LL 은 2단계가 준다. 여기서 재지 않는다 ----
+//  R_LL 은 1.2 MeV 이상 clean single 의 rate 다. **에너지 문턱이 있다는 것이
+//  핵심**이다 -- Step2 의 T_Event 에는 문턱이 없어서(muon/afterMu/saturation
+//  컷만) 1.2 MeV 미만이 절반쯤 섞여 있다. 실측 : run 4237 서브런 100 에서
+//  clean 11,356 개 중 1.2 MeV 이상은 5,739 개뿐이다. n_clean/live 를 그대로
+//  쓰면 R_LL 이 두 배가 되고 eps_iso 가 낮아져 보정 rate 가 부풀려진다.
+//
+//  예전에는 여기서 Step2 part 를 서브런 몇 개 표본으로 열어 쟀다. 이제
+//  2단계(BuildPairSummary.C)가 PRD 에서 런 전체의 single 을 이미 세므로
+//  pair_summary.tsv 의 r_ll 열을 그대로 쓴다 -- **표본이 아니라 전수**이고,
+//  /scratch/junkyo 에 기대지 않는다. 옛 rll.tsv 가 있으면 r_ll 이 비어 있는
+//  런에 한해 예비로 쓴다.
 //
 //  사용 :
 //     root -l -b -q 'BuildRateTrend.C+()'            전부 다시 그린다
-//     root -l -b -q 'BuildRateTrend.C+(true)'        R_LL 캐시를 무시하고 재측정
 // ---------------------------------------------------------------------------
 #ifndef RENE_COND_HEADER
 #define RENE_COND_HEADER "/home/ojk/analysis3/essential/AnalysisCondition.h"
@@ -127,59 +128,6 @@ struct TrendRow {
 // ---------------------------------------------------------------------------
 static TString RunStr(int run) { return TString::Format("%06d", run); }
 
-//  R_LL 을 서브런 표본으로 잰다. 전수 조사가 아니라 표본인 이유는 rate 이기
-//  때문이다. 표본 수는 nWant 개를 런 전체에 고르게 흩는다.
-static bool MeasureRLL(int run, const TString &sampleDir, double vetoCutUs,
-                       int nWant, double &rllOut, int &nUsed) {
-   //  서브런 번호와 그 livetime 은 monitor 요약에 있다.
-   TString mon = TString::Format("%sMonitor/monitor_Run%s.root",
-                                 sampleDir.Data(), RunStr(run).Data());
-   if (gSystem->AccessPathName(mon)) return false;
-   TFile *fM = TFile::Open(mon, "READ");
-   if (!fM || fM->IsZombie()) { if (fM) fM->Close(); return false; }
-   TTree *tM = (TTree *)fM->Get("T_Monitor");
-   if (!tM) { fM->Close(); return false; }
-   Int_t sid; Double_t dur;
-   tM->SetBranchAddress("subrun_id", &sid);
-   tM->SetBranchAddress("duration_sec", &dur);
-   std::vector<std::pair<int, double>> subs;
-   for (Long64_t i = 0; i < tM->GetEntries(); ++i) {
-      tM->GetEntry(i);
-      if (dur > 0) subs.push_back({sid, dur});
-   }
-   fM->Close();
-   if (subs.empty()) return false;
-
-   TString vtag = (vetoCutUs == 150.0) ? "_veto150"
-                                       : TString::Format("_veto%.0f", vetoCutUs);
-   //  q0+q1 >= LOWER_LIMIT [pe]. (q0<5 && q1<5) 는 Step2Reader 가 버리는 잡음이다.
-   TString cut = TString::Format("!(q0<5.0&&q1<5.0)&&(q0+q1)>=%.4f", LOWER_LIMIT);
-
-   int stride = (int)subs.size() / std::max(1, nWant);
-   if (stride < 1) stride = 1;
-   long long nSel = 0;
-   double liveSel = 0;
-   nUsed = 0;
-   for (size_t i = 0; i < subs.size(); i += stride) {
-      TString p = TString::Format("%sStep2/parts/step2_Run%s_sub%05d%s.root",
-                                  sampleDir.Data(), RunStr(run).Data(),
-                                  subs[i].first, vtag.Data());
-      if (gSystem->AccessPathName(p)) continue;
-      TFile *f = TFile::Open(p, "READ");
-      if (!f || f->IsZombie()) { if (f) f->Close(); continue; }
-      TTree *t = (TTree *)f->Get("T_Event");
-      if (t && t->GetBranch("q0")) {
-         nSel += t->GetEntries(cut);
-         liveSel += subs[i].second;
-         nUsed++;
-      }
-      f->Close();
-   }
-   if (nUsed == 0 || liveSel <= 0) return false;
-   rllOut = (double)nSel / liveSel;
-   return true;
-}
-
 // ---------------------------------------------------------------------------
 static std::map<int, std::pair<double, int>> LoadRllCache(const TString &p) {
    std::map<int, std::pair<double, int>> out;
@@ -193,11 +141,6 @@ static std::map<int, std::pair<double, int>> LoadRllCache(const TString &p) {
       if (ss >> run >> r >> n) out[run] = {r, n};
    }
    return out;
-}
-static void SaveRllCache(const TString &p, const std::map<int, std::pair<double, int>> &c) {
-   std::ofstream o(p.Data());
-   o << "# run\tR_LL[Hz]\tn_subrun_sampled   -- BuildRateTrend.C 가 잰 값\n";
-   for (const auto &kv : c) o << kv.first << '\t' << kv.second.first << '\t' << kv.second.second << '\n';
 }
 
 // ---------------------------------------------------------------------------
@@ -258,18 +201,14 @@ static void DrawPage(const TString &pdf, const TString &pngBase, const char *png
 }
 
 // ---------------------------------------------------------------------------
-void BuildRateTrend(bool remeasure = false,
-                    const char *outDir    = "/scratch/RunSummary/",
-                    const char *sampleDir = "/scratch/junkyo/SampleFiles/",
-                    double epsE = 1.0, int nSample = 20, double vetoCutUs = 150.0) {
+void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1.0) {
    gStyle->SetOptStat(0);
    gStyle->SetFrameLineWidth(2);
    gStyle->SetGridColor(kGray + 1);
    gStyle->SetGridStyle(3);
 
-   TString out(outDir), sample(sampleDir);
-   if (!out.EndsWith("/"))    out    += "/";
-   if (!sample.EndsWith("/")) sample += "/";
+   TString out(outDir);
+   if (!out.EndsWith("/")) out += "/";
 
    // ---- pair_summary ----
    std::vector<TrendRow> rows;
@@ -281,11 +220,16 @@ void BuildRateTrend(bool remeasure = false,
          if (line.empty() || line[0] == '#') continue;
          std::stringstream ss(line);
          TrendRow r;
-         long long nP, nPA;
+         long long nP, nPA, nSingle;
          double dtAcci, s2lo, s2hi;
+         int nSub;
+         //  pair_summary.tsv 열 순서 (schema 2). BuildPairSummary.C 의 WriteTsv
+         //  와 짝이다 -- 한쪽만 고치면 엉뚱한 열을 R_LL 로 읽는다.
          if (!(ss >> r.run >> r.tag >> r.src >> r.liveSec >> nP >> nPA
                   >> r.nIbd >> r.nIbdAcci >> r.dtMin >> r.dtMax >> dtAcci
-                  >> s2lo >> s2hi >> r.isoPre >> r.isoPost)) continue;
+                  >> s2lo >> s2hi >> r.isoPre >> r.isoPost
+                  >> nSingle >> r.rll >> nSub)) continue;
+         if (r.rll > 0) r.rllN = nSub;
          rows.push_back(r);
       }
    }
@@ -312,38 +256,24 @@ void BuildRateTrend(bool remeasure = false,
       if (r.liveSec <= 0) { auto il = live.find(r.run); if (il != live.end()) r.liveSec = il->second; }
    }
 
-   // ---- R_LL (캐시) ----
-   TString rllPath = out + "rll.tsv";
-   auto cache = LoadRllCache(rllPath);
-   //  한 런에 채널이 둘이라 그냥 두면 같은 런을 두 번 재려 든다. R_LL 은
-   //  채널과 무관하므로 런 단위로 한 번만 시도한다.
-   std::map<int, bool> tried;
-   int nMeasured = 0;
+   // ---- R_LL : 2단계가 pair_summary 에 넣어 준 전수 값 ----
+   //  옛 rll.tsv (표본으로 잰 값) 는 r_ll 이 없는 행에만 예비로 쓴다.
+   auto legacy = LoadRllCache(out + "rll.tsv");
+   int nFromPair = 0, nFromLegacy = 0, nNoRll = 0;
    for (auto &r : rows) {
-      if (r.src != "none") continue;           // 선원 런은 추이에 넣지 않는다
-      auto it = cache.find(r.run);
-      if (!remeasure && it != cache.end()) { r.rll = it->second.first; r.rllN = it->second.second; continue; }
-      if (tried.count(r.run)) continue;
-      tried[r.run] = true;
-      double v; int n;
-      if (MeasureRLL(r.run, sample, vetoCutUs, nSample, v, n)) {
-         cache[r.run] = {v, n};
-         r.rll = v; r.rllN = n; nMeasured++;
-         printf("  [R_LL] run %d : %.2f Hz  (서브런 %d 개 표본)\n", r.run, v, n);
-      } else {
-         printf("  [WARN] run %d : R_LL 을 재지 못했다 (Step2 part 없음). "
-                "eps_iso 를 비운다\n", r.run);
+      if (r.rll > 0) { nFromPair++; continue; }
+      auto it = legacy.find(r.run);
+      if (it != legacy.end() && it->second.first > 0) {
+         r.rll = it->second.first; r.rllN = it->second.second; nFromLegacy++;
+      } else if (r.src == "none") {
+         nNoRll++;
       }
    }
-   //  같은 런의 다른 채널에도 채워 준다 (R_LL 은 채널과 무관하다)
-   for (auto &r : rows) {
-      if (r.rll >= 0) continue;
-      auto it = cache.find(r.run);
-      if (it != cache.end()) { r.rll = it->second.first; r.rllN = it->second.second; }
-   }
-   if (nMeasured > 0) SaveRllCache(rllPath, cache);
-   printf("[INFO] R_LL : 새로 잰 런 %d, 캐시 %zu (%s)\n",
-          nMeasured, cache.size(), rllPath.Data());
+   printf("[INFO] R_LL : pair_summary %d 행, 옛 rll.tsv %d 행, 없음 %d 행\n",
+          nFromPair, nFromLegacy, nNoRll);
+   if (nNoRll > 0)
+      printf("[WARN] R_LL 이 없는 행이 있다. eps_iso 를 비운다 -- "
+             "ibd-summary.sh 를 다시 돌리면 채워진다\n");
 
    // ---- 추이에 쓸 행만 남긴다 ----
    std::vector<TrendRow> use;

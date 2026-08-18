@@ -16,9 +16,11 @@
 #      tools/monitor/monitor-all.sh --quiet      요약만 출력
 #      tools/monitor/monitor-all.sh --newest 3   한 바퀴에 새 런 3개까지만
 #
-#  1단계는 PRD 를 통째로 읽으므로 런당 몇 분~몇 시간이다(서브런 수에 비례).
-#  그래서 한 바퀴에 처리할 런 수를 --newest 로 끊는다. 기본 2 개다 --
-#  끊지 않으면 첫 실행이 며칠 물린다(지금 PRD 가 있는 런이 1,400 개가 넘는다).
+#  1·2단계 모두 PRD 를 통째로 읽으므로 런당 몇 분~몇 시간이다(서브런 수에
+#  비례). 특히 2단계는 파형까지 읽어 에너지를 재구성하므로 더 비싸다 --
+#  실측 서브런당 로컬 NVMe 1.1 s, /scratch 14.6 s. 그래서 한 바퀴에 처리할
+#  런 수를 --newest 로 끊는다. 기본 2 개다 -- 끊지 않으면 첫 실행이 며칠
+#  물린다(지금 PRD 가 있는 런이 1,400 개가 넘는다).
 #
 #  tmux pane 에 붙이려면 (화면 배치는 건드리지 않는다) :
 #      tmux new-window -t daq -n monitor \
@@ -27,9 +29,10 @@
 #      0 * * * * . /usr/local/bin/thisroot.sh; \
 #                /home/frontend/DAQ/RENE-daq-rcterm/tools/monitor/monitor-all.sh --quiet
 #
-#  주의 : 분석 산출물(SampleFiles)은 ojk 계정 소유다. 여기서는 읽기만 하고
-#         쓰는 곳은 RUNSUM_OUT 뿐이다. 페어링 자체는 돌리지 않는다 --
-#         빠진 런은 ibd-summary.sh --missing 이 알려 준다.
+#  주의 : 세 단계 모두 production 산출물(PRD)만 읽는다. 분석 쪽
+#         /scratch/junkyo/SampleFiles 에는 더 이상 기대지 않는다 --
+#         있으면 2단계가 수를 **대조**하는 데만 쓴다.
+#         쓰는 곳은 RUNSUM_OUT 뿐이다.
 # ---------------------------------------------------------------------
 set -u
 
@@ -70,8 +73,10 @@ one_pass() {
    else "$DIR/run-summary.sh" "${r1[@]}" 2>&1 | tail -4 || rc=1; fi
 
    say "-- 2/3 IBD 후보 --"
-   if [ "$QUIET" -eq 1 ]; then "$DIR/ibd-summary.sh" >/dev/null 2>&1 || rc=1
-   else "$DIR/ibd-summary.sh" 2>&1 | tail -4 || rc=1; fi
+   #  2단계도 --newest 로 끊는다. 1단계보다 비싸므로 여기를 안 끊으면
+   #  한 바퀴가 끝나지 않는다.
+   if [ "$QUIET" -eq 1 ]; then "$DIR/ibd-summary.sh" "${r1[@]}" >/dev/null 2>&1 || rc=1
+   else "$DIR/ibd-summary.sh" "${r1[@]}" 2>&1 | tail -6 || rc=1; fi
 
    say "-- 3/3 효율 보정과 그림 --"
    local args=()
