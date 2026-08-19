@@ -558,6 +558,92 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 - 장시간 운용은 `tmux` 또는 `nohup ... --quiet &`.
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
 
+## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
+
+대상 시트 — **RENE Offline Data GoodRuns**, 탭 `gid=0`
+
+```
+https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0/edit?gid=0#gid=0
+```
+
+### 절대 규칙 (어기지 말 것)
+
+1. **기존에 작성된 내용은 절대 수정하지 않는다.** 고치지도, 지우지도, 덮어쓰지도
+   않는다. 값이 틀려 보여도 손대지 않는다.
+2. **마지막으로 작성된 Run 번호 이후의 런만 추가한다.** 이미 있는 Run 번호는
+   건너뛴다. 중간에 빠진 번호를 메우려고 끼워 넣지 않는다.
+3. **마지막 작성 줄 다음의 빈 줄부터 이어 쓴다.**
+4. 파일로 건네지 말고 시트에 직접 쓴다. **현재 이 PC 에서는 불가능하다 — 아래
+   '쓰기 수단' 참조.**
+
+### 열별 채우는 법
+
+| 열 | 출처 |
+|---|---|
+| `Run` | `runcatalog.db` 의 `runnum` |
+| `Start Date` / `Start Time` | `stime` |
+| `Duration` | `etime - stime` |
+| **`Max subrun`** | **그 런 폴더의 서브런 개수**(번호가 아니다). `<런>/PRD` 안에서 런 번호를 포함하는 `.root` 파일 개수. 예 : `/scratch/RAW/004085/PRD` 에 47개 -> `47` |
+| `Event Rate (kHz)` | `nfadc / tfadc` |
+| **`RAW (GB)`** | `<런>` **바로 아래**(하위 폴더 제외)의 `FADC_<런>.root*` + `SADC_<런>.root*` 용량 합 |
+| **`PRD (GB)`** | `<런>/PRD` 의 `PRD_<런>.*.root` 용량 합 |
+| `Detector` `Source` `PMT-A HV (V)` `PMT-B HV (V)` `THR (mV)` `Coincidence (ns)` `Record length` `Time after HV ON` `TLT` | **비어 있는 런 바로 이전 행의 값을 그대로 복사**한다. 사용자가 나중에 직접 고치며, 고친 뒤에는 그 고친 값을 이어서 복사한다 |
+| `Description` | `runcatalog.db` 의 `rundesc`. DAQ 수집 때 사용자가 입력한 것을 **그대로** 옮긴다 |
+| `Data issue` | postrun 또는 DAQ 의 **비정상 종료 메시지**. 없으면 **비워 둔다** (`onlbit=0` 이면 `runlog` 를 본다) |
+
+런 디렉터리는 dataflow 가 옮기므로 **`/Data_ssd/RAW` -> `/data/RAW` ->
+`/scratch/RAW` 순서로 찾는다**(앞이 이긴다). 한 곳만 보면 놓친다.
+
+### 어느 런을 싣는가 — `onlbit=1` 만 ★ 실증으로 확정
+
+**추측하지 말 것. 기존 시트를 세어서 나온 규칙이다** (2026-08-19).
+
+```
+시트에 있는 282개 :  onlbit=1 272,  null 10,  onlbit=0   0개
+시트에 없는 180개 :  onlbit=0  67,  null 92,  onlbit=1  21개
+```
+
+**`onlbit=0` 인 런은 282행 중 단 하나도 없다.** `boot failed` / `aborted` 는
+데이터가 일부 있어도 싣지 않는다. 시트 이름이 GoodRuns 인 것과 일치한다.
+`stime` 이 없는 런(진행 중이거나 미마감)도 뺀다 — 기존 행은 Start Date 가
+빈 것이 하나도 없다.
+
+`Data issue` 는 **정상 런의 결함**을 적는 칸이다. 기존 25개 예 :
+`subrun 00010 FADC RAW not properly closed but recoverable`. 데이터가 없는
+런을 등재하는 칸이 아니다.
+
+**수집 중인 런은 넣지 않는다.** 기존 행은 절대 수정할 수 없으므로, 끝나지 않은
+런을 넣으면 그 행이 영영 틀린 채로 남는다. 런이 끝난 뒤에 넣는다.
+
+### 쓰기 수단 ✅ (2026-08-19 구축)
+
+```
+자격증명   .config/rene/rene-daq-rundata-log-sheet-e8e035ac9d81.json   (gitignore 됨)
+           서비스 계정 claude-json@rene-daq-rundata-log-sheet.iam.gserviceaccount.com
+라이브러리 gspread 6.2.1 + google-auth   (pip --user)
+도구       tools/sheetlog/append_runs.py   기본이 미리보기. --commit 이라야 쓴다
+           tools/sheetlog/khu_scan.sh      로컬에 없는 런을 경희대에서 실측
+```
+
+**대상 탭은 이름이 `Y2026B` 이고 gid=0 이다.** 문서에 탭이 10개 있으므로
+이름으로 찾지 말고 gid 로 찾을 것. **마지막 Run 번호는 반드시 실행 시점에
+읽어서 정한다** — 하드코딩하지 말 것. Drive 커넥터의 markdown 렌더링으로
+읽으면 탭이 전부 이어붙어 나와 엉뚱한 탭의 마지막 행을 읽는다(2026-08-19 에
+그렇게 '4037' 이라고 잘못 읽었다. 실제로는 4246 이었다).
+
+안전장치 — 마지막 Run 행 **아래에 내용이 하나라도 있으면 멈추고** 아무것도
+쓰지 않는다. 기존 행은 읽기만 한다.
+
+### 실측이 느릴 때 ★ `find` 대신 `ls -l`
+
+`/scratch` 는 100 Mb NFS 라(§11.12) **파일마다 stat 을 거는
+`find -printf '%s'` 는 못 쓴다** — 5,769개짜리 런 하나에 15분이 지나도 안 끝난다
+(`rpc_wait_bit_killable`). **`ls -lU` 는 readdirplus 로 이름과 크기를 한꺼번에
+받아오므로 같은 런이 1분이면 끝난다.** 값은 동일함을 확인했다(run 4085 :
+`47 / 1517150110 / 1467551134` 양쪽 일치).
+
+---
+
 ## 11. 세션 기록 (Claude Code)
 
 ### 2026-08-19 — 이동 규칙을 체크섬 기반으로 바꾸고, 심볼릭 링크 잔재를 걷어냈다 ★

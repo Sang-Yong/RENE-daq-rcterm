@@ -22,3 +22,12 @@ config/rundesc.txt
 *_C_ACLiC_dict_rdict.pcm
 .aclic_build/
 scripts/.*.sh.bak.*
+
+# ★ 자격증명은 절대 추적하지 않는다. 구글 서비스 계정 키 등
+# 이 저장소는 공개 GitHub 에 푸시되므로 여기 들어오면 키가 새어 나간다
+*.json
+!config/*.example.json
+sheets-sa.json
+*service*account*.json
+credentials.json
+token.json
