@@ -7,7 +7,7 @@
 
 기본은 미리보기다.  실제로 쓰려면 --commit 을 준다.
 """
-import argparse, os, sqlite3, subprocess, sys, datetime, re
+import argparse, glob, os, sqlite3, subprocess, sys, datetime, re
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
 GID      = 0
@@ -23,31 +23,68 @@ def norm(s):
     return re.sub(r"\s+", " ", (s or "").strip()).lower()
 
 
-def scan_run(run):
-    """Max subrun / RAW bytes / PRD bytes 를 디스크에서 실측한다."""
+def _dirs(run):
+    """그 런이 존재하는 모든 root 의 디렉터리. 앞이 이긴다."""
     rr = "%06d" % run
-    d = next((os.path.join(r, rr) for r in ROOTS if os.path.isdir(os.path.join(r, rr))), None)
-    if not d:
-        return None, None, None
-    raw = 0
+    return [os.path.join(r, rr) for r in ROOTS if os.path.isdir(os.path.join(r, rr))]
+
+
+def _tally(d, pred):
+    n = b = 0
     try:
         for f in os.scandir(d):
-            if f.is_file() and (f.name.startswith("FADC_%s.root" % rr)
-                                or f.name.startswith("SADC_%s.root" % rr)):
-                raw += f.stat().st_size
+            if f.is_file() and pred(f.name):
+                n += 1
+                b += f.stat().st_size
     except OSError:
         pass
-    n = pb = 0
-    pd = os.path.join(d, "PRD")
-    if os.path.isdir(pd):
-        try:
-            for f in os.scandir(pd):
-                if f.is_file() and f.name.endswith(".root") and rr in f.name:
-                    n += 1
-                    pb += f.stat().st_size
-        except OSError:
-            pass
-    return n, raw, pb
+    return n, b
+
+
+def scan_run(run):
+    """서브런 수 / RAW bytes / PRD 수 / PRD bytes 를 디스크에서 실측한다.
+
+    RAW 와 PRD 는 **각각 따로** root 를 고른다.  dataflow 가 옮기는 도중이거나
+    옛 --outroot 구성이면 한 런의 RAW 와 PRD 가 서로 다른 디스크에 있다
+    (run 4290 : RAW 는 /scratch, PRD 는 /Data_ssd).  한 디렉터리만 보면
+    RAW 를 0 GB 로 적는다.
+    """
+    rr = "%06d" % run
+    dirs = _dirs(run)
+    nf = raw = 0
+    for d in dirs:
+        nf, raw = _tally(d, lambda x: x.startswith("FADC_%s.root" % rr)
+                         or x.startswith("SADC_%s.root" % rr))
+        if nf:
+            # SADC 까지 합산했으므로 서브런 수는 FADC 만 다시 센다
+            nf, _ = _tally(d, lambda x: x.startswith("FADC_%s.root" % rr))
+            break
+    np = prd = 0
+    for d in dirs:
+        np, prd = _tally(os.path.join(d, "PRD"),
+                         lambda x: x.endswith(".root") and rr in x)
+        if np:
+            break
+    return nf, raw, np, prd
+
+
+CRED_HINTS = ["$RENE_SHEETS_SA",
+              "<저장소>/.config/rene/*.json",
+              "~/.config/rene/*.json"]
+
+
+def find_creds():
+    """자격증명 위치는 사이트마다 다르다. 환경변수 -> 저장소 -> 홈 순서로 찾는다."""
+    env = os.environ.get("RENE_SHEETS_SA")
+    if env and os.path.isfile(env):
+        return env
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for d in (os.path.join(here, ".config", "rene"),
+              os.path.expanduser("~/.config/rene")):
+        hit = sorted(glob.glob(os.path.join(d, "*.json")))
+        if hit:
+            return hit[0]
+    return None
 
 
 def gb(b):
@@ -71,7 +108,7 @@ def duration(st, et):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--creds", default=os.path.expanduser("~/.config/rene/sheets-sa.json"))
+    ap.add_argument("--creds", help="서비스 계정 json. 생략하면 아래 순서로 찾는다")
     ap.add_argument("--scan", help="미리 만들어 둔 스캔 결과 tsv (run/dir/n/raw/prd)")
     ap.add_argument("--commit", action="store_true", help="실제로 시트에 쓴다")
     ap.add_argument("--limit", type=int, default=0)
@@ -82,8 +119,13 @@ def main():
     import gspread
     from google.oauth2.service_account import Credentials
 
+    creds = a.creds or find_creds()
+    if not creds:
+        sys.exit("서비스 계정 json 을 찾지 못했다. --creds 로 지정하라\n  찾아본 곳 : "
+                 + ", ".join(CRED_HINTS))
+
     cr = Credentials.from_service_account_file(
-        a.creds, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        creds, scopes=["https://www.googleapis.com/auth/spreadsheets"])
     ws = gspread.authorize(cr).open_by_key(SHEET_ID).get_worksheet_by_id(GID)
     grid = ws.get_all_values()
     print("탭 '%s'  %d행 x %d열" % (ws.title, len(grid), max(len(r) for r in grid)))
@@ -150,20 +192,30 @@ def main():
 
     out = []
     for run, st, et, onl, log, desc, nf, tf in rows:
-        n, raw, prd = pre.get(run, (None, None, None))
-        if n is None:
-            n, raw, prd = scan_run(run)
+        if run in pre:
+            n_prd, raw, prd = pre[run]      # 원격 실측 -- FADC 수는 알 수 없다
+            n_fadc = 0
+        else:
+            n_fadc, raw, n_prd, prd = scan_run(run)
         rate = round(nf / tf / 1000.0, 2) if (nf and tf) else ""
         issue = "" if onl == 1 else (log or "").strip()
+        # 이 열은 개수가 아니라 '마지막 서브런 번호'다 = 개수-1.
+        # 기존 13개 런에서 실측 확인 (4085 4204 4207 4226 4232 4234 4237~4241 4243 4246).
+        # 기준은 RAW(FADC) 서브런이다 -- 후처리가 덜 끝난 런은 PRD 가 모자란다
+        # (4237 : FADC 12722 / PRD 12720, 시트 12721).  PRD 밖에 없으면 그것으로 센다.
+        base = n_fadc or n_prd
+        maxsub = base - 1 if base else ""
+        prd_gb = gb(prd) if n_prd else ""   # 없는 것은 0.0 이 아니라 빈 칸
+        raw_gb = gb(raw) if raw else ""
         rec = {
             "run": run,
             "start date (yyyy-mm-dd)": (st or "")[:10],
             "start time (hh:mm)": (st or "")[11:16],
             "duration": duration(st, et),
-            "max subrun": n if n is not None else "",
+            "max subrun": maxsub,
             "event rate (khz)": rate,
-            "raw (gb)": gb(raw),
-            "prd (gb)": gb(prd),
+            "raw (gb)": raw_gb,
+            "prd (gb)": prd_gb,
             "description": (desc or "").strip(),
             "data issue": issue,
         }
@@ -175,9 +227,11 @@ def main():
                 line[col[k]] = v
         out.append(line)
 
-    print("\n--- 처음 3행 미리보기 (Description 은 60자로 줄임) ---")
-    for l in out[:3]:
-        print([str(x)[:60] for x in l])
+    # 쓰기 전에는 전부 보여 준다. 20행이 넘으면 앞뒤만.
+    show = out if len(out) <= 20 else out[:10] + out[-10:]
+    print("\n--- 미리보기 %d/%d 행 (Description 은 40자로 줄임) ---" % (len(show), len(out)))
+    for l in show:
+        print([str(x)[:40] for x in l])
 
     if not a.commit:
         print("\n미리보기다. 실제로 쓰려면 --commit")
