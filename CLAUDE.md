@@ -74,7 +74,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `tools/monitor/README.md` | 모니터링 3단계 — PRD 에서 livetime·이벤트 수 -> IBD 후보 -> 효율 보정 rate 추이 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가. `claude-transcript` 도 여기 |
-| `docs/*.pptx` | 발표 자료 — 종합(한/영) · 운용자용(한). `tools/slides/` 에서 코드로 찍는다 |
+| `docs/*.pptx` | 발표 자료 — 종합(한/영) · 운용자용(한). **저장소에 없다** — `.gitignore` 대상이라 `tools/slides/make_*.py` 로 만들어 쓴다 |
 | `tools/slides/README.md` | 발표자료를 코드로 만드는 이유와 방법. `audit.py` 로 배치를 점검한다 |
 
 **작업을 마칠 때마다 해야 하는 것** — 이것을 빠뜨리면 다음 PC 에서 맥락이 끊긴다.
@@ -990,6 +990,14 @@ LibreOffice 가 없어 눈으로 볼 수 없으므로 `audit.py` 로 배치를 �
 docs/RENE-daq-2026-08-overview-ko.pptx     21장  구조/개선/실측/앞으로
 docs/RENE-daq-2026-08-overview-en.pptx     20장  같은 내용 영문
 docs/RENE-daq-2026-08-operations-ko.pptx   11장  화면·조작·알람·대처
+```
+
+**`.pptx` 는 추적하지 않는다** (`.gitignore` 에 `*.pptx`). 생성기가 저장소에
+있으므로 새 PC 에서는 만들어 쓴다 — 이쪽이 정본이고 산출물은 언제든 다시 나온다.
+
+```bash
+for f in overview_ko overview_en operations_ko; do python3 tools/slides/make_$f.py; done
+python3 tools/slides/audit.py docs/*.pptx
 ```
 
 옛 자료(`~/DAQ/presentations/`)는 2026-08-17 에서 멈춰 있어 데이터 흐름·모니터링·
