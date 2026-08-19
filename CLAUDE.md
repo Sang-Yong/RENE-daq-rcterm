@@ -687,6 +687,78 @@ RAW 가 이미 최종 목적지에 있다. 진짜 해소는 `relocate-run.sh` �
 `/Data_ssd` 에서 Merged/PRD 를 걷어내는 것이고, 그러면 `/Data_ssd/RAW` 에
 `keep_ssd`(=2) 개인 4292·4293 만 남아 1단계가 할 일이 없어진다.
 
+#### 11.41 ★★ run 4293 이 외부 접속 때문에 죽었다 — 사이트 조치 필요
+
+2026-08-19 03:15, run 4293 이 시작 1시간 31분 만에 죽고 감시자가 4294 로
+재시작했다. DB 는 `onlbit=0, 'aborted; run started but was not finalized'`.
+
+**감시자가 죽인 것이 아니다. rcterm 이 스스로 `exit=2` 로 빠졌다.**
+직전까지 완전히 정상이었다(03:15:01, sub=90, 1007 Hz).
+
+```
+TCB_004293.log
+03:15:01 [INFO]    [TCB]: new client connection, fd 15, ip: 78.142.18.222, port 63881
+03:15:11 [INFO]    [TCB]: adding to list of sockets at 1
+03:15:11 [WARNING] [TCB] Unknown command [788586541] received
+03:15:11 [INFO]    [TCB]: host disconnected, fd 9, ip: 78.142.18.222
+03:15:11 [WARNING] [TCB] Unknown command [1971156704] received
+03:15:26 FADCDAQ/SADCDAQ : host disconnected 127.0.0.1  ← rcterm 이 떨어져 나갔다
+```
+
+**`78.142.18.222` 는 외부 주소다.** DAQ 제어 포트가 인터넷에 열려 있다.
+
+```
+ss -ltn
+LISTEN 0 3 0.0.0.0:7809      ← TCB
+LISTEN 0 3 0.0.0.0:7814      ← FADCDAQ
+LISTEN 0 3 0.0.0.0:7815      ← SADCDAQ
+이 PC 의 공인 IP : 203.230.111.71 (enp0s31f6)
+```
+
+프로토콜(§3)에 인증이 없다. 32바이트를 보낼 수 있으면 누구나 `ENDRUN`(3)
+이나 `EXIT`(4)를 보낼 수 있다. **이번엔 쓰레기 값이라 연결만 끊고 끝났지만,
+우연히 유효한 명령이면 런을 세울 수 있다.**
+
+`/Data_ssd/LOG` 의 모든 DAQ 로그에서 외부 접속은 이 2건뿐이다(나머지 158건은
+전부 `127.0.0.1`). 표적 공격이 아니라 인터넷 스캐너로 보인다.
+
+**조치 (root 필요. Claude 가 할 수 없다)** — 세 포트를 로컬/실험망으로만 막는다.
+`firewalld` 가 active 이지만 설정을 읽을 권한이 없어 어느 존이 열어 두고 있는지
+확인하지 못했다.
+
+```bash
+sudo firewall-cmd --permanent --zone=public --remove-port=7809/tcp
+sudo firewall-cmd --permanent --zone=public --remove-port=7814/tcp
+sudo firewall-cmd --permanent --zone=public --remove-port=7815/tcp
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-all            # 확인
+```
+
+근본적으로는 `daq`/`tcb` 가 `0.0.0.0` 이 아니라 `127.0.0.1` 에만 bind 하는
+것이 옳다. 단일 PC 구성(`kISREMOTEDAQ=False`)이라 외부에서 붙을 이유가 없다.
+그것은 CUPDAQ 쪽 변경이다.
+
+#### 11.42 ★ 돌고 있는 스크립트를 제자리에서 고쳐 오류를 만들었다 (내 실수)
+
+`dataflow` pane 에 `backup-khu.sh: 줄 469: ====...====: 명령어를 찾을 수 없음`.
+
+```
+03:49:55  dataflow 가 backup-khu.sh 를 띄움 (run 4292, 325 GB — 7시간 걸린다)
+10:57:15  §11.39 의 점파일 버그를 고치며 파일을 제자리에서 덮어씀   ← 돌고 있는데
+11:07:49  그 인스턴스가 바이트 위치로 이어 읽다 주석 조각을 실행
+```
+
+**bash 는 스크립트를 바이트 위치로 이어 읽는다.** `dataflow.sh` 와
+`postrun.sh` 는 rename 으로 갈아끼웠으면서 `backup-khu.sh` 만 덮어썼다.
+
+피해는 제한적이다 — 이미 읽어 파싱한 `for` 루프 안(실제 백업)은 무사하고,
+아직 안 읽은 꼬리(마지막 db 스냅샷)만 깨진다. db 는 dataflow 가 주기마다
+다시 뜨므로 잃은 것이 없다. **run 4292 백업은 정상 완료됐다.**
+
+**규칙 — 스크립트를 고칠 때는 언제나 임시 파일에 쓰고 `mv` 로 갈아끼운다.**
+그러면 돌던 프로세스는 옛 inode 를 그대로 붙들어 무사하고, 다음 실행부터
+새 코드가 적용된다.
+
 #### 11.38 아직 열려 있는 것
 
 - **run 4288·4289 백업 — 사용자 승인, 큐에 넣었다 (2026-08-19 01:10).**
