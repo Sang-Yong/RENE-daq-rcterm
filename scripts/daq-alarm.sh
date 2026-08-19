@@ -24,10 +24,8 @@
 #    그룹이 아니라 '소유자'를 주면 그 문제가 사라진다. 재로그인도, DAQ 중단도
 #    필요 없고 재부팅에도 남는다 (root 로 한 번) :
 #
-#      sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules >/dev/null <<'RULE'
-#      SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", \
-#          OWNER="frontend", GROUP="input", MODE="0660"
-#      RULE
+#      (한 줄씩 복사할 것. 여러 줄 heredoc 은 붙여넣을 때 깨진다 -- 실제로 깨졌다)
+#      echo 'SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", OWNER="frontend", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules
 #      sudo udevadm control --reload
 #      sudo udevadm trigger --subsystem-match=input --action=change
 #

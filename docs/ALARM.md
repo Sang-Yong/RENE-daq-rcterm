@@ -103,20 +103,21 @@ tmux 서버와 감시자의 `/proc/<pid>/status` 는 여전히 `Groups: 18 1001`
 **그룹이 아니라 '소유자'를 주면 그 문제가 사라진다.** uid 로 판정되므로
 보조그룹과 무관하고, 재로그인도 DAQ 중단도 필요 없으며 재부팅에도 남는다.
 
+**★ 한 줄씩 그대로 복사할 것.** 여러 줄짜리 heredoc 은 터미널에 붙여넣을 때
+깨지기 쉽다 — 2026-08-20 에 실제로 깨져서, `tee` 가 규칙 내용을 파일 이름으로
+받아 저장소에 root 소유 빈 파일 여섯 개를 만들고 규칙은 생기지 않았다.
+
 ```bash
-sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules >/dev/null <<'RULE'
-# RENE DAQ 알람이 케이스 내부 비프를 쓸 수 있게 한다.
-# 그룹이 아니라 소유자를 지정하는 이유는 docs/ALARM.md 참조.
-SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", \
-    OWNER="frontend", GROUP="input", MODE="0660"
-RULE
+echo 'SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", OWNER="frontend", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules
 sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=input --action=change
 ```
 
-확인 — 소유자가 바뀌었으면 된 것이다.
+확인 — **소유자가 `frontend` 로 바뀌었으면** 된 것이다. `root input` 그대로면
+규칙이 안 걸린 것이니 위 첫 줄이 제대로 들어갔는지 다시 볼 것.
 
 ```bash
+cat /etc/udev/rules.d/99-rene-pcspkr.rules                    # 한 줄로 들어갔나
 ls -la $(readlink -f /dev/input/by-path/platform-pcspkr-event-spkr)
 scripts/daq-alarm.sh --test        # 이제 '권한 없음' 경고가 안 나와야 한다
 ```
