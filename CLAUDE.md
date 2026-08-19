@@ -583,7 +583,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 | `Run` | `runcatalog.db` 의 `runnum` |
 | `Start Date` / `Start Time` | `stime` |
 | `Duration` | `etime - stime` |
-| **`Max subrun`** | **그 런 폴더의 서브런 개수**(번호가 아니다). `<런>/PRD` 안에서 런 번호를 포함하는 `.root` 파일 개수. 예 : `/scratch/RAW/004085/PRD` 에 47개 -> `47` |
+| **`Max subrun`** | **마지막 서브런 번호 = 개수 − 1.** 기준은 **RAW(FADC)** 서브런이다 (`FADC_<런>.root*` 개수 − 1). 예 : run 4085 은 47개 -> `46`. ★ 2026-08-20 에 기존 13개 런으로 실증했다 — 그 전까지 이 표는 '개수'라고 적고 있었으나 **틀렸다**. PRD 로 세면 후처리가 덜 끝난 런에서 어긋난다(run 4237 : FADC 12722 / PRD 12720, 시트는 12721). RAW 가 없고 PRD 만 있는 런은 PRD 개수 − 1 로 센다 |
 | `Event Rate (kHz)` | `nfadc / tfadc` |
 | **`RAW (GB)`** | `<런>` **바로 아래**(하위 폴더 제외)의 `FADC_<런>.root*` + `SADC_<런>.root*` 용량 합 |
 | **`PRD (GB)`** | `<런>/PRD` 의 `PRD_<런>.*.root` 용량 합 |
@@ -618,8 +618,11 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ### 쓰기 수단 ✅ (2026-08-19 구축)
 
 ```
-자격증명   .config/rene/rene-daq-rundata-log-sheet-e8e035ac9d81.json   (gitignore 됨)
+자격증명   <저장소>/.config/rene/rene-daq-rundata-log-sheet-e8e035ac9d81.json  (gitignore 됨)
            서비스 계정 claude-json@rene-daq-rundata-log-sheet.iam.gserviceaccount.com
+           ★ 홈(~/.config/rene) 이 아니라 저장소 안이다. append_runs.py 가
+             $RENE_SHEETS_SA -> <저장소>/.config/rene/*.json -> ~/.config/rene/*.json
+             순서로 스스로 찾으므로 보통은 --creds 를 줄 필요가 없다
 라이브러리 gspread 6.2.1 + google-auth   (pip --user)
 도구       tools/sheetlog/append_runs.py   기본이 미리보기. --commit 이라야 쓴다
            tools/sheetlog/khu_scan.sh      로컬에 없는 런을 경희대에서 실측
@@ -645,6 +648,81 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ---
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-20 — 네트워크 끊김 뒤 전수 점검, 그리고 시트 기록 완료
+
+#### 11.45 끊김의 피해는 없었다 — 확인한 것
+
+세션 도중 네트워크가 끊겨 무엇이 상했는지 전수로 봤다. **수집·이동·백업 어느
+것도 죽지 않았다.** DAQ 는 세 노드가 전부 `localhost` 라(§3) 애초에 외부
+네트워크와 무관하다.
+
+```
+run 4294   heartbeat 나이 0초, phase=running, sub=1279, daqtime 21:20:03
+           FADC 1000.24 Hz / SADC 1000.18 Hz
+           FADC 1283 = SADC 1283,  Merged 1280 = PRD 1280   (--lag 3 그대로)
+supervisor health OK 가 10분마다 끊김 없이 280회. 공백 2건은 08-19 새벽 4293 건
+로그       [ERROR]/[WARN]/[FATAL] 0건. TCB 접속은 전부 127.0.0.1
+링크       ssh khu 정상, /scratch 마운트 정상, 커널 링크 이벤트 0건
+살아있는 것 backup-khu(4288 대조 중) · backup-trickle(양보 대기) ·
+           finish-4290-4291(대기) · dataflow(4292 대조 중) · postrun · IBD 되채우기
+```
+
+끊긴 것은 **내 작업 쪽뿐이었다** — 시트 기록이 `--commit` 직전에 멈춰 있었다.
+
+#### 11.46 ★ `Max subrun` 은 개수가 아니라 개수 − 1 이다 (§11.5 정정)
+
+§11.5 는 "그 런 폴더의 서브런 **개수**"라고 적고 있었다. **틀렸다.**
+기존 행 13개를 디스크와 맞대어 실측했다.
+
+```
+run   4085 4204 4207 4226 4232 4234 4237  4238  4239  4240  4241 4243 4246
+시트    46   11   19   32  160   60 12721 11148 13019 11436  803 1781 5103
+FADC    47   12   20   33  161   61 12722 11149 13020 11437  804 1782 5104
+                                                                  전부 개수 − 1
+```
+
+**기준은 PRD 가 아니라 RAW(FADC) 다.** 4237 은 PRD 가 12720 뿐인데 시트는
+12721 = FADC 12722 − 1 이다. 후처리가 덜 끝난 런에서 둘이 갈라지므로
+PRD 로 세면 조용히 어긋난다. RAW 가 없고 PRD 만 있는 런은 PRD 로 센다.
+
+**`RAW (GB)` · `PRD (GB)` 의 이진/십진 규약은 확정하지 못했다.** 기존 행이
+서로 어긋난다 — run 4234 는 십진(`bytes/1e9`)에 맞고 run 4232 는 이진(2³⁰)에
+가까우며, 4204·4207·4226 은 지금 디스크 값의 **절반쯤**이라 어느 규약으로도
+재현되지 않는다(그 뒤 재처리로 PRD 가 커진 것으로 보인다). 차이가 7% 뿐이라
+**기존 코드의 2³⁰ 을 그대로 뒀다.** 새로 쓰는 행끼리는 일관된다.
+
+#### 11.47 RAW 와 PRD 가 다른 디스크에 있으면 RAW 를 0 으로 적던 버그
+
+`append_runs.py` 는 런 디렉터리를 `/Data_ssd/RAW:/data/RAW:/scratch/RAW`
+순서로 **한 번만** 고르고 그 안에서 RAW 와 PRD 를 둘 다 셌다.
+
+```
+run 4290   /Data_ssd/RAW/004290   FADC 0    PRD 200    <- 먼저 잡힌다
+           /scratch/RAW/004290    FADC 200  PRD 200
+        -> RAW (GB) = 0.0 으로 기록될 뻔했다
+```
+
+§11.40 에 적어 둔 그 상태(4290 의 RAW 는 `/scratch`, 산출물은 `/Data_ssd`)가
+그대로 함정이 됐다. **RAW 와 PRD 가 각각 root 를 고르도록** 고쳤다. 고친 뒤
+4290 은 RAW 15.4 GB 로 나온다. dataflow 가 옮기는 도중인 런(4292 는 `/data`
+와 `/scratch` 양쪽)도 같은 이유로 안전해졌다.
+
+곁들여 — 자격증명을 `$RENE_SHEETS_SA` -> `<저장소>/.config/rene/*.json` ->
+`~/.config/rene/*.json` 순서로 **스스로 찾게** 했다. 기본값이
+`~/.config/rene/sheets-sa.json` 이라 실제 위치(저장소 안)와 달라 `--creds`
+없이는 언제나 `FileNotFoundError` 였다. 미리보기도 전부 보여 준다(전엔 3행).
+
+#### 11.48 시트 기록 — run 4280~4292, 10개 행
+
+```
+기록 범위  A284:S293   (10행).  282 -> 292 행
+검증       쓰기 전에 받아 둔 기존 282행과 쓴 뒤를 대조 -> 차이 0
+제외       38개 런 (onlbit!=1 또는 stime 없음). 진행 중인 4294 도 뺐다
+빈 칸      4280 은 PRD 가 없어 PRD (GB) 를 비웠다 (0.0 이 아니다)
+```
+
+`Max subrun` 은 1439 / 199 / 64 처럼 **개수 − 1** 로 들어갔다.
 
 ### 2026-08-19 — 이동 규칙을 체크섬 기반으로 바꾸고, 심볼릭 링크 잔재를 걷어냈다 ★
 
