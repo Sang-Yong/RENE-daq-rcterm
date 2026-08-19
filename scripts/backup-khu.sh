@@ -238,7 +238,12 @@ push_dir() {             # 이름표 로컬디렉터리 원격상대경로 [추�
    local n_src n_dst rc
    # -L 로 심볼릭 링크를 따라간다. 예전 --outroot 구성에서는 RAW/<run>/PRD 가
    # /Data_ssd 를 가리키는 링크다. 안 따라가면 '파일 없음'으로 건너뛴다(실측).
-   n_src=$(find -L "$src" -maxdepth 1 -type f 2>/dev/null | wc -l)
+   #  ★ 점파일을 빼고 센다. 호출자가 모두 --exclude='.*' 를 주므로 rsync 는
+   #     점파일을 보내지 않는데, 여기서 세면 원격보다 항상 하나 많아진다.
+   #     하필 그 점파일이 이 스크립트가 만드는 마커(.backup_done)라, 두 번째
+   #     카테고리부터 "원격 개수 부족" 으로 매번 실패했다 (run 4290/4291 실측:
+   #     400/401, 1740/1741 — 실제로는 전부 전송돼 있었다).
+   n_src=$(find -L "$src" -maxdepth 1 -type f ! -name '.*' 2>/dev/null | wc -l)
    if [ "$n_src" -eq 0 ]; then
       log "  $what : 파일 없음, 건너뜀"
       return 2
