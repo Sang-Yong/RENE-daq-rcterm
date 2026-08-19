@@ -117,10 +117,13 @@ sudo udevadm trigger --subsystem-match=input --action=change
 규칙이 안 걸린 것이니 위 첫 줄이 제대로 들어갔는지 다시 볼 것.
 
 ```bash
-cat /etc/udev/rules.d/99-rene-pcspkr.rules                    # 한 줄로 들어갔나
+grep -rn 'PC Speaker' /etc/udev/rules.d/     # 규칙이 들어갔나 (파일명은 아무거나 된다)
 ls -la $(readlink -f /dev/input/by-path/platform-pcspkr-event-spkr)
 scripts/daq-alarm.sh --test        # 이제 '권한 없음' 경고가 안 나와야 한다
 ```
+
+udev 는 **파일 이름을 따지지 않는다** — `.rules` 로 끝나기만 하면 된다.
+이 사이트에는 `99-rene-pscpkr.rules` 로 들어갔고 그대로 잘 돈다.
 
 ### 감시자에 붙이기
 

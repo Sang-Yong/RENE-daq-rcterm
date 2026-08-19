@@ -1,44 +1,60 @@
-# 발표 자료 생성 스크립트
+# 발표자료 — 코드로 찍는다
 
-`.pptx` 는 저장소에 넣지 않는다. 바이너리라 diff 가 되지 않고 갱신할 때마다
-저장소가 무거워진다. 대신 **만드는 스크립트를 두고 필요할 때 생성한다.**
+슬라이드를 손으로 그리지 않는다. 수치가 바뀌면 다시 돌리면 되고, 무엇이 왜
+그렇게 적혔는지가 `git log` 에 남는다. 이 저장소의 다른 것들과 같은 이유다.
 
 ```bash
-pip install --user python-pptx        # 한 번만
-
-python3 tools/slides/make_deck_en.py      ~/DAQ/presentations/RENE-run-control.pptx
-python3 tools/slides/make_deck_ko.py      ~/DAQ/presentations/RENE-run-control-ko.pptx
-python3 tools/slides/make_deck_ops_ko.py  ~/DAQ/presentations/RENE-daq-operations-ko.pptx
+python3 tools/slides/make_overview_ko.py      # 종합 (한글)   21장
+python3 tools/slides/make_overview_en.py      # 종합 (영문)   20장
+python3 tools/slides/make_operations_ko.py    # 운용자용 (한글) 11장
+python3 tools/slides/audit.py docs/*.pptx     # 배치 점검
 ```
 
-| 스크립트 | 내용 | 대상 |
-|---|---|---|
-| `make_deck_en.py` | 종합 23장 (영문) | 국제 협력자, 자료 공유 |
-| `make_deck_ko.py` | 종합 23장 (한글) | 국내 협력자 |
-| `make_deck_ops_ko.py` | 운영 중심 12장 (한글) | 실제로 DAQ 를 돌리는 사람 |
+산출물은 `docs/` 에 떨어진다. `python-pptx` 만 있으면 되고 다른 의존은 없다.
 
-생성된 파일은 `~/DAQ/presentations/` 에 둔다(저장소 밖).
+## 파일
 
----
+| 파일 | 하는 일 |
+|---|---|
+| `deck.py` | 색·글꼴·배치·그림 조각. 새 발표자료는 이것만 import 하면 된다 |
+| `make_overview_ko.py` · `_en.py` | 종합 — 구조 / 개선한 것 / 실측 / 앞으로 |
+| `make_operations_ko.py` | 운용자용 — 화면 읽는 법, 조작, 알람, 대처 |
+| `audit.py` | 슬라이드 밖으로 나간 도형과 넘치는 글상자를 찾는다 |
 
-## 고칠 때
+## `audit.py` 가 필요한 이유
 
-내용은 각 스크립트 아래쪽의 슬라이드 정의부에 순서대로 들어 있다.
-`new(kicker, title)` 로 슬라이드를 열고 `bullets` / `codebox` / `table` /
-`metric_row` 로 채운다. 위쪽 절반은 배치 헬퍼라 건드릴 일이 드물다.
+이 서버에는 LibreOffice 가 없어서 **만든 것을 눈으로 볼 수가 없다.** 대신
+① 슬라이드 밖으로 나간 도형 ② 글이 상자보다 길어 넘칠 곳 ③ 글상자끼리
+겹치는 곳을 글자 폭으로 추정해 잡는다. 한글은 1 em, 라틴은 약 0.52 em 으로
+센다. 추정이라 완벽하지 않지만 **제목이 잘리거나 표가 밖으로 나가는 종류의
+사고는 거의 다 걸린다.** 실제로 만드는 동안 여섯 군데를 이것으로 잡았다.
 
-**수치는 실측값만 쓴다.** 이 자료의 모든 숫자는 이 시스템에서 직접 측정한 것이고,
-근거는 `CLAUDE.md` 와 `docs/POSTRUN.md` 에 있다. 값을 바꿀 때는 근거도 함께 갱신할 것.
+새 슬라이드를 넣었으면 반드시 돌릴 것. `문제 없음` 이 나와야 한다.
 
-## 한글 자료의 글꼴
+## `deck.py` 의 그림 조각
 
-python-pptx 는 기본적으로 latin 타이프페이스만 지정한다. 그대로 두면 PowerPoint 가
-한글을 임의의 글꼴로 대체한다. `make_deck_ko.py` / `make_deck_ops_ko.py` 는
-XML 에 East Asian(`a:ea`) 타이프페이스를 직접 넣어 **맑은 고딕**으로 고정한다.
-`_set_font()` 가 그 일을 한다 — 한글이 들어가는 자료를 새로 만들 때 이 함수를 쓸 것.
+글머리 기호만 늘어놓지 않기 위해 갖춘 것들이다.
 
-## 배치 검증
+| 조각 | 무엇 |
+|---|---|
+| `flow()` | 가로 흐름도. 상자 사이에 화살표를 자동으로 놓는다 |
+| `node()` | 흐름도의 상자 하나 (제목 + 부제 + 색) |
+| `table()` | 머리글이 어두운 표. 얼룩무늬 |
+| `code()` | 어두운 코드 패널. 줄마다 색을 줄 수 있다 |
+| `note()` | 왼쪽에 색 띠가 있는 강조 상자 (ok / warn / crit / info) |
+| `bar()` | 가로 막대. 성능 비교에 쓴다 |
+| `chip()` | 둥근 꼬리표 |
 
-이 환경에는 LibreOffice 가 없어 렌더링을 눈으로 확인할 수 없다. 대신 도형 좌표로
-넘침과 겹침을 계산해 검사했다. 한글은 라틴 문자보다 넓으므로(약 1.8배) 줄 수
-추정에 그 가중치가 들어가 있다. 문구를 크게 늘렸다면 생성 후 한 번 열어볼 것.
+## 디자인
+
+2026-08 의 첫 발표자료가 쓰던 것을 이어받았다.
+
+```
+강조   #0E5C73 (청록)      본문   #161B22
+보조   #1B8AA8             흐린   #8C98A4
+정상   #1B6B45             주의   #8A5A00       위험   #A3281F
+글꼴   D2Coding (고정폭) + 맑은 고딕 (본문)      16:9  13.33 x 7.5 in
+```
+
+**본문 슬라이드의 골격은 하나다** — 눈썹줄(고정폭 소문자) → 제목 → 짧은 강조선
+→ 내용. `head()` 가 여기까지 그려 주므로 내용은 `y=2.10` 부터 쓰면 된다.
