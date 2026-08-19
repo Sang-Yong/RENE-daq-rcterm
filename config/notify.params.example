@@ -39,7 +39,10 @@ smtp_host       = smtp.gmail.com
 smtp_port       = 587
 smtp_security   = starttls    # starttls | ssl | none
 smtp_user       =             # 보내는 계정 (Gmail 이면 전체 주소)
-smtp_pass       =             # ★ 앱 비밀번호. 계정 비밀번호가 아니다
+smtp_pass       =             # ★ 앱 비밀번호. 계정 비밀번호가 아니다.
+                              #   Gmail 은 계정 비밀번호로 SMTP 를 받지 않는다
+                              #   (535 5.7.8). 2단계 인증을 켠 뒤 발급받는다.
+                              #   구글이 보여주는 대로 띄어 써도 된다 -- 공백은 걷어낸다
 mail_from       =             # 비우면 smtp_user 를 쓴다
 
 #  책임자 — 일상 알림(재시작·stale·복구 성공)을 받는다. 쉼표로 여러 명.

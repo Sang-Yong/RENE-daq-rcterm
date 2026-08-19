@@ -58,7 +58,9 @@ def main():
 
     host = cfg.get("smtp_host", "").strip()
     user = cfg.get("smtp_user", "").strip()
-    pwd = cfg.get("smtp_pass", "").strip()
+    #  구글은 앱 비밀번호를 'abcd efgh ijkl mnop' 처럼 네 자씩 띄어 보여준다.
+    #  보이는 대로 붙여넣어도 되게 공백을 전부 걷어낸다. 실제 값은 16자다.
+    pwd = "".join(cfg.get("smtp_pass", "").split())
     sender = cfg.get("mail_from", "").strip() or user
     to = recipients(cfg, a.to)
 
