@@ -163,6 +163,10 @@ docs/MANUAL.md      README.md(26k, 영)      README.ko.md(28k, 한)
 
 > 실행하면 USB 보드가 리셋된다. **수집 중에는 절대 돌리지 말 것.**
 > DAQ 를 먼저 내리고(`scripts/killdaq.sh`) 쓴다.
+>
+> **★ `--help` 가 없다. 인자 없이 실행하면 그 자리에서 보드 3개를 리셋한다.**
+> 사용법을 보려는 목적으로도 실행하지 말 것 (2026-08-20 에 한 번 겪었다, §11.51).
+> 언제 어떻게 쓰는지는 §11.50 의 복구 절차에 순서대로 적혀 있다.
 
 **`src/NOTICE_CODE_RUN.sh` 도 rcterm 과 무관하다.** NOTICE 벤더 코드
 (`~/DAQ/NOTICE/nkfadc500_CNU/notice`)의 보드 점검 매크로를 순서대로 부르는
@@ -557,6 +561,12 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   `--no-stall-check`. 안 그러면 정상 런을 이상으로 판정해 재시작한다.
 - 장시간 운용은 `tmux` 또는 `nohup ... --quiet &`.
 - Ctrl-C/SIGTERM 시 현재 런을 정상 종료하고 DB 기록 후 종료한다.
+- **감시자가 `FATAL too many consecutive failures` 로 포기했으면 하드웨어를 의심할 것.**
+  같은 노드가 같은 오류로 5번 연속 실패한 것이므로 재기동만 해서는 또 5개를 태운다.
+  FADC USB 보드가 걸린 사례와 복구 절차는 §11.49~11.51.
+- **postrun 의 `[FAIL] Producing FAILED (0초)` 는 데이터 문제가 아니다.**
+  0초짜리 실패는 로그 파일을 못 열어 ROOT 매크로가 아예 안 돈 것이다 (§11.52).
+  이 경우 PRD 가 조용히 하나 빈다. 런 끝에 FADC 개수와 PRD 개수를 대조할 것.
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -723,6 +733,154 @@ run 4290   /Data_ssd/RAW/004290   FADC 0    PRD 200    <- 먼저 잡힌다
 ```
 
 `Max subrun` 은 1439 / 199 / 64 처럼 **개수 − 1** 로 들어갔다.
+
+### 2026-08-20 (새벽) — FADC 보드가 먹통이 되어 DAQ 가 2시간 9분 멎었다 ★★
+
+#### 11.49 무슨 일이 있었나 — 로테이션 직후 5연속 부팅 실패
+
+**run 4294 는 24시간을 정상으로 채웠다**(`onlbit=1`, 86,362,424 ev, `ENDED`/exit=0).
+문제는 그 다음 런부터다.
+
+```
+03:16:08  [SUP] rotation time reached; ending run gracefully
+03:16:09  ENDED run=004294          <- 4294 자체는 깨끗하다
+03:16:21  cycle 4 launch -> run 4295 ... 03:16:33  exit=code 2
+          4296 · 4297 · 4298 · 4299 도 똑같이 12초 만에 exit=2
+03:20:17  [SUP] FATAL too many consecutive failures; giving up
+```
+
+**다섯 번 전부 같은 자리, 같은 오류다. FADC 한 장만 먹통이었다.**
+
+```
+FADCDAQ_0042xx.log   (4295~4299 전부 동일)
+  STARTRUN 수신 -> trigger started
+  [ERROR] USB3Read: read error:LIBUSB_ERROR_IO [sid=3]
+  [ERROR] USB3ReadReg: read error:LIBUSB_ERROR_IO [sid=3]
+  [ERROR] CupDAQManager::ReadBCount: error in reading buffer count [sid=3]
+  [WARNING] daq will be ended by error
+```
+
+- **SADC 는 다섯 런 모두 `LIBUSB_ERROR` 0건.** TCB 도 pedestal 측정까지 정상으로
+  끝낸다(FADC/SADC pedestal 값이 로그에 정상 출력됨). 죽은 것은 FADC 뿐이다.
+- **`dmesg` 에 FADC 보드의 disconnect/re-enumerate 기록이 없다.** 선이 빠지거나
+  전원이 나간 것이 아니라 **펌웨어/엔드포인트가 걸린 상태**다. `usbreset` 이
+  다루는 바로 그 경우다.
+- run 4294 자신의 로그에도 `LIBUSB_ERROR_TIMEOUT` 이 하나 있는데 **03:16:09,
+  ENDRUN 직후 정리 단계**라 성격이 다르다. 정상 마감을 방해하지 않았다.
+- **네트워크와 무관하다.** 이 시각 `ssh khu` 정상, `/scratch` 마운트 정상,
+  100 Mb 링크는 dataflow 대조로 12.3 MB/s 포화 가동 중이었다.
+
+**감시자는 설계대로 동작했다.** 5회까지 재시도하고 포기했다. 다만 **재시도마다
+런 번호를 하나씩 태운다** — 4295~4299 다섯 개가 그렇게 없어졌다. 하드웨어가
+물리적으로 고장난 경우에는 재시도가 번호만 갉아먹으므로, 같은 노드가 같은
+오류로 연속 실패하면 더 일찍 멈추는 편이 나을 수 있다(미구현).
+
+#### 11.50 복구 절차 — 이 순서 그대로 하면 된다
+
+```bash
+# 1) 아무것도 안 돌고 있는지 확인. 하나라도 살아 있으면 usbreset 금지
+pgrep -af 'rcsupervisor|rcterm|install/bin/(daq|tcb|merger)'
+ss -ltn | grep -E '7809|7814|7815'          # 둘 다 비어야 한다
+
+# 2) 보드 리셋 (NOTICE 보드 3개를 전부 리셋한다)
+src/usbreset
+
+# 3) 짧은 런으로 확인. 감시자를 바로 띄우면 또 5번 실패하고 번호만 태운다
+install/bin/rcterm --params config/rcterm.params --max-runs 1 --run-length 0.05 \
+    --quiet --desc 'FADC board check'
+#    합격 기준 : exit=0, onlbit=1, nfadc/tfadc 가 약 1000 Hz,
+#                FADC 서브런이 70 MB 대, FADCDAQ 로그에 LIBUSB_ERROR 0건
+
+# 4) 감시자 기동. desc 는 반드시 config/rundesc.txt 것을 쓴다 (§11.20)
+install/bin/rcsupervisor --params config/rcsupervisor.params -- --desc '<rundesc.txt 첫 줄>'
+```
+
+**실측 결과** — 리셋 뒤 run 4300(3분)이 `onlbit=1` / 180,152 ev / 180.34 s =
+**999.0 Hz** / `LIBUSB_ERROR` 0건. 이어서 감시자를 띄워 run 4301 이 1007.5 Hz 로
+가동. `rundesc` 가 run 4294 와 **바이트 단위로 일치**함을 확인했다(4288~4294 와
+한 측정으로 묶인다). **공백 03:16~05:25, 2시간 9분.**
+
+세션이 이미 있으면 `daq-tmux.sh --start` 는 재구성하지 않고 그냥 붙는다
+(살아있는 런 보호). 그때는 위 명령을 `tmux send-keys -t daq:1.2` 로 supervisor
+pane 에 직접 보내면 된다.
+
+#### 11.51 ★ `src/usbreset` 는 인자가 없으면 곧바로 리셋한다 — `--help` 가 없다
+
+사용법을 보려고 인자 없이 실행했더니 **NOTICE 보드 3개를 찾아 그대로 리셋**했다.
+
+```
+[INFO] %s: %d NOTICE devices found: searchnotice     <- 서식 문자열이 그대로 찍힌다
+[INFO] %s: reset USB device %s: main                 x 3
+dmesg :  usb 2-1.2 (NKFADC500) · 2-6 (TCB) · 2-1.4 (M64ADC)  reset SuperSpeed USB device
+```
+
+이번엔 수집이 멎어 있어 피해가 없었고 오히려 필요한 조치였지만, **돌고 있는
+런이 있었으면 그 자리에서 깨졌다.** `--help` / `-h` 도 없다.
+
+**규칙 — 이 파일은 사용법 확인 목적으로도 실행하지 말 것.** 무엇을 하는지는
+§2 와 이 절에 적혀 있다. 실행은 위 §11.50 의 1번을 통과한 뒤에만.
+
+#### 11.52 ★ `/scratch/LOG` 의 파일명 하나가 EIO 라 PRD 가 조용히 누락됐다
+
+run 4294 는 FADC/SADC/Merged 가 1440인데 **PRD 만 1439** 였다. 빠진 것은
+서브런 **01381** 하나. 추적해 보니 원인이 데이터가 아니라 **로그 파일**이었다.
+
+```
+production_from_merged_v3_5v.sh:44   date > $LOG
+    $LOG = /scratch/LOG/log_production_v3_5v_run4294_subrun1381.txt
+    -> Input/output error
+
+같은 디렉터리에 다른 이름은 전부 정상 생성된다 (short / 인접 서브런 이름 / 긴 이름 모두 OK)
+그 이름만 :  ls -> No such file or directory   /   create -> Input/output error
+인접 파일  :  subrun 1379 · 1380 · 1382 · 1383 은 전부 존재
+```
+
+**NFS 서버(10.0.0.10) 쪽 디렉터리 엔트리가 깨진 것이다.** `/scratch/LOG` 는
+348,592개짜리 디렉터리다. 조회는 ENOENT, 생성은 EIO 라 어느 쪽으로도 손댈 수 없다.
+
+**왜 조용히 넘어갔나** — 스크립트가 `root ... >> $LOG 2>&1` 로 매크로를 부른다.
+리다이렉트가 EIO 로 실패하면 **매크로가 아예 실행되지 않는다.** postrun 은
+`[FAIL] Producing FAILED : Subrun 1381 (0초)` 한 줄만 내고 다음으로 간다.
+0초짜리 FAIL 은 데이터 문제가 아니라 **이 종류의 문제**라고 보면 된다.
+
+**우회 — 껍데기를 건너뛰고 매크로를 직접 부른다.** postrun 의 완료 판정은
+산출물 파일 stat 이므로(§5.8) 로그가 없어도 정상으로 인식된다.
+
+```bash
+cd /home/frontend/DAQ/DAQ_cup/production/Code
+root -l -b -q 'production_from_merged_v3_5v.cc(4294,1381,"/Data_ssd/RAW/004294")'
+```
+
+76.4 MB 짜리 PRD 가 정상 생성됐고 **run 4294 는 FADC 1440 = SADC 1440 =
+Merged 1440 = PRD 1440 으로 완결**됐다. 그 로그 파일 하나는 끝내 못 만들었다 —
+서버 쪽 fsck 가 필요하며 사이트 조치 사항이다.
+
+**곁들여 확인** — `dmesg` 의 `sde1` EXT4 aborted journal / superblock I/O error
+(08-18, 08-19)는 **마운트돼 있지 않은 유령 장치**다. 우리가 쓰는 것은
+`nvme0n1(/Data_ssd)` · `md126p1(/data)` · `10.0.0.10:/data(/scratch)` ·
+`sdf1(/backup_hdd)` 이고 이 장애와 무관하다.
+
+#### 11.53 정리한 것
+
+| 대상 | 처리 |
+|---|---|
+| run 4294 PRD 01381 | 매크로 직접 호출로 생성. **1440/1440 완결** |
+| `/Data_ssd/RAW/004295~004299` | 삭제. 전부 빈 ROOT 헤더(FADC 8,157 B = 이벤트 0, PRD 547 B) |
+| `/Data_ssd/LOG/*_00429[5-9].log` | **남겼다.** 장애 증거다 |
+| 구글시트 | run 4294 한 행 추가 (`A294:S294`). 기존 293행 무결 확인 |
+| run 4300 | 3분짜리 보드 점검 런. 시트 등재 여부는 사용자 판단 대기 |
+
+`/Data_ssd/RAW` 최상위의 빈 `Merged`/`PNG` 디렉터리는 2024-11 자 잔재이며 무해하다.
+
+#### 11.54 아직 열려 있는 것
+
+- **FADC 보드가 왜 걸렸는지는 모른다.** 6개월치 로그에서 이 증상은 처음이다
+  (`/Data_ssd/LOG` 기준 4295~4299 뿐). 재발하면 §11.50 으로 복구하고, 잦아지면
+  보드/케이블/USB 허브를 의심할 것.
+- **감시자가 같은 오류로 5번 재시도하며 런 번호를 태운다.** 노드별 오류가
+  동일하면 더 일찍 멈추는 편이 낫다. 미구현.
+- `/scratch/LOG` 의 깨진 dirent (§11.52). 서버 쪽 조치 필요.
+- NFS 가 아직 인터넷에 열려 있다 (§11.41 의 남은 항목). 그대로다.
 
 ### 2026-08-19 — 이동 규칙을 체크섬 기반으로 바꾸고, 심볼릭 링크 잔재를 걷어냈다 ★
 
