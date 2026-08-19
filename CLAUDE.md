@@ -73,7 +73,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `tools/monitor/README.md` | 모니터링 3단계 — PRD 에서 livetime·이벤트 수 -> IBD 후보 -> 효율 보정 rate 추이 |
-| `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
+| `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가. `claude-transcript` 도 여기 |
 | `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
 
 **작업을 마칠 때마다 해야 하는 것** — 이것을 빠뜨리면 다음 PC 에서 맥락이 끊긴다.
@@ -891,6 +891,41 @@ udev 규칙은 `docs/ALARM.md`. DAQ 를 세우지 않아도 되고 재부팅에�
 여섯 개(`SUBSYSTEM==input,` `MODE=0660` 등)가 생기고 정작 규칙은 만들어지지
 않았다. 치우고 **한 줄짜리 `echo ... | sudo tee`** 로 바꿨다.
 **사람이 터미널에 붙여넣을 명령은 한 줄로 줄 것.**
+
+#### 11.60 화면 복사가 안 되는 이유, 그리고 `claude-transcript`
+
+사용자가 "화면을 드래그해 복사하면 제대로 안 된다"고 해서 추적했다.
+**tmux 문제가 아니었다** — Claude Code 는 tmux 밖에서 돈다(`sshd -> bash ->
+claude`, `TMUX` 없음). tmux 는 애초에 `mouse off` 다.
+
+원인은 **Claude Code 의 TUI 가 마우스 추적을 켜는 것**이다. 그러면 터미널이
+드래그를 '글자 선택'이 아니라 '앱에 보낼 마우스 이벤트'로 넘긴다.
+`Shift` 를 누른 채 드래그하면 우회된다(macOS Terminal.app 은 `Fn`).
+
+화면과 씨름하는 대신 **원본을 파일로 뽑는** 도구를 만들었다. 대화는
+`~/.claude/projects/<경로>/*.jsonl` 에 그대로 쌓인다.
+
+```
+config/dotfiles/bin/claude-transcript   -> install.sh 가 ~/bin/ 에 설치
+   --list / --last N / --all / -o 파일 / --redact 문자열 / --dir 경로
+```
+
+생각과 도구 호출은 빼고 **화면에 낸 글만** 뽑는다. 붙여넣을 수 있는 마크다운이
+나온다.
+
+**★ 뽑으면 비밀번호도 딸려 나온다.** 만들자마자 확인해 보니 앱 비밀번호가
+섞여 있었다 — 어시스턴트가 답변에서 인용만 해도 그렇다. 견본 파일은 바로
+지웠고, `--redact` 를 넣고 저장할 때마다 경고하도록 했다.
+**남에게 넘기기 전에 훑어볼 것.**
+
+**곁들여 고친 것 — CMake 가 dotfiles 스크립트의 실행 권한을 죽이고 있었다.**
+`install(DIRECTORY ...)` 는 `USE_SOURCE_PERMISSIONS` 가 없으면 전부 644 로
+깎는다. 그래서 설치 트리의 `dotfiles/install.sh` 를 §0.0 대로 바로 실행하면
+`Permission denied` 였다. 원본 저장소에서 실행하면 되니 여태 안 드러났다.
+
+검증 — 가짜 홈(`HOME=<임시>`)으로 설치해 **다른 PC 를 흉내냈다.** 권한 755 로
+들어가고, `~/bin` 이 PATH 에 없으면 알려 주며, 그 홈에서 바로 실행된다.
+
 
 ### 2026-08-20 (새벽) — FADC 보드가 먹통이 되어 DAQ 가 2시간 9분 멎었다 ★★
 

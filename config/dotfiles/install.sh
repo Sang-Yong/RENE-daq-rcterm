@@ -44,12 +44,33 @@ install_one() {          # src dst
    echo "  설치 : $dst"
 }
 
+#  실행 파일은 권한까지 맞춰 준다. cp 가 원본 모드를 따라가긴 하지만
+#  umask 나 배포 경로에 따라 떨어질 수 있어 명시적으로 걸어 둔다.
+install_exec() {         # src dst
+   install_one "$1" "$2"
+   [ -f "$1" ] && run "chmod 755 '$2'"
+}
+
 echo "== 설정 파일 =="
 install_one "$HERE/tmux.conf"              "$HOME/.tmux.conf"
 install_one "$HERE/dircolors"              "$HOME/.dircolors"
 install_one "$HERE/vimrc"                  "$HOME/.vimrc"
 install_one "$HERE/vim/colors/rene.vim"    "$HOME/.vim/colors/rene.vim"
 install_one "$HERE/fontconfig/fonts.conf"  "$HOME/.config/fontconfig/fonts.conf"
+
+echo "== 도구 =="
+#  claude-transcript : Claude Code 대화를 평범한 텍스트로 뽑는다.
+#  TUI 가 마우스 추적을 켜는 탓에 화면을 드래그해 복사하기가 어려운데,
+#  화면과 씨름하는 대신 원본을 파일로 받는 편이 확실하다.
+install_exec "$HERE/bin/claude-transcript" "$HOME/bin/claude-transcript"
+
+#  Rocky/RHEL 기본 .bashrc 가 ~/bin 을 PATH 에 넣어 주지만, 배포판이 다르면
+#  없을 수 있다. 조용히 안 되는 것보다 알려 주는 편이 낫다.
+case ":${PATH}:" in
+   *":$HOME/bin:"*) : ;;
+   *) echo "  주의: ~/bin 이 PATH 에 없다. ~/.bashrc 에 아래를 넣을 것"
+      echo "        export PATH=\"\$HOME/bin:\$PATH\"" ;;
+esac
 
 # vim 이 스왑/백업/undo 를 여기에 모은다 (데이터 디렉터리 오염 방지)
 run "mkdir -p '$HOME/.vim/swap' '$HOME/.vim/backup' '$HOME/.vim/undo'"

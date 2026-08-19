@@ -49,4 +49,7 @@ endforeach()
 
 install(TARGETS rcterm rcsupervisor RUNTIME DESTINATION bin)
 install(PROGRAMS scripts/killdaq.sh DESTINATION bin)
-install(DIRECTORY config/ DESTINATION share/rcterm)
+#  USE_SOURCE_PERMISSIONS 가 없으면 CMake 가 전부 644 로 깎는다.
+#  그러면 설치 트리에서 dotfiles/install.sh 나 bin/claude-transcript 를
+#  바로 실행할 수 없다 (2026-08-20 에 실제로 그런 상태였다).
+install(DIRECTORY config/ DESTINATION share/rcterm USE_SOURCE_PERMISSIONS)

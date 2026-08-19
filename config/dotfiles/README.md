@@ -91,3 +91,41 @@ vim 이 가로채서 터미널 복사가 안 된다. RHEL 기본 `defaults.vim` 
   `daq-layout.sh` 가 제목 안의 열쇠말로 pane 을 찾는다 — `monitor` ·
   `supervisor` · `postrun` · `work space` · `dataflow`. 제목을 바꾸는 것은
   자유지만 해당 낱말은 남겨 둘 것. 빼면 레이아웃 복원이 pane 을 못 찾는다.
+
+---
+
+## `bin/claude-transcript` — 화면 대신 원본을 파일로 받는다
+
+Claude Code 의 TUI 는 **마우스 추적을 켠다.** 그러면 터미널이 드래그를
+'글자 선택'이 아니라 '앱에 보낼 마우스 이벤트'로 넘기기 때문에, 화면을 끌어
+복사하면 제대로 잡히지 않는다. tmux 와는 무관하다 — tmux 없이 SSH 로 붙어도
+똑같다.
+
+**당장 필요하면 `Shift` 를 누른 채 드래그**한다. Shift 는 마우스 추적을 우회해
+터미널 자신의 선택을 강제한다(macOS Terminal.app 은 `Fn`). 다만 긴 표나 코드
+블록은 줄바꿈과 테두리가 함께 딸려 와 여전히 지저분하다.
+
+대화는 `~/.claude/projects/<경로>/…jsonl` 에 그대로 쌓이므로, 화면과 씨름하는
+대신 원본을 뽑는 편이 확실하다.
+
+```bash
+claude-transcript --list                 이 디렉터리의 대화 목록
+claude-transcript --last 1               마지막 답변 하나만 (화면으로)
+claude-transcript --last 3 -o 답변.txt   파일로
+claude-transcript --all -o 전체.txt      내 질문까지 함께
+```
+
+작업 디렉터리에 맞는 프로젝트를 스스로 찾는다. 생각 과정과 도구 호출은 빼고
+**화면에 낸 글만** 뽑으므로 그대로 문서에 붙여넣을 수 있는 마크다운이 나온다.
+
+> **⚠️ 대화에 오간 것은 전부 들어간다.** 비밀번호나 키를 주고받았다면 그것도
+> 딸려 나온다 — 어시스턴트가 인용만 해도 그렇다. 실제로 2026-08-20 에 뽑아
+> 보니 앱 비밀번호가 섞여 있었다. 남에게 넘기기 전에 반드시 훑어볼 것.
+> 아는 비밀은 가릴 수 있다.
+>
+> ```bash
+> claude-transcript --redact '앱비밀번호' --redact '계정비밀번호' -o 답변.txt
+> ```
+
+`~/bin/` 에 설치된다. Rocky/RHEL 기본 `.bashrc` 가 `~/bin` 을 PATH 에 넣어
+주지만, 다른 배포판이면 `install.sh` 가 없다고 알려 준다.

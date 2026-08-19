@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+Claude Code 대화를 평범한 텍스트 파일로 뽑는다.
+
+터미널에서 드래그 복사가 잘 안 될 때 쓴다 -- TUI 가 마우스 추적을 켜기
+때문인데, 화면과 씨름하는 대신 원본을 파일로 받는 편이 확실하다.
+
+    claude-transcript                     최근 대화를 stdout 으로
+    claude-transcript -o 답변.txt         파일로
+    claude-transcript --last 1            마지막 답변 하나만
+    claude-transcript --all               사용자 질문까지 함께
+    claude-transcript --list              이 디렉터리의 대화 목록
+    claude-transcript --redact '비밀번호'  주어진 문자열을 가린다 (여러 번 가능)
+
+기본은 '어시스턴트가 화면에 낸 글'만 뽑는다. 생각과 도구 호출은 뺀다 --
+복사해서 쓰려는 것은 대개 그 부분이다.
+
+★ 대화에 오간 것은 전부 들어간다. 비밀번호나 키를 대화 중에 주고받았다면
+  그것도 딸려 나온다 -- 어시스턴트가 인용만 해도 그렇다. 남에게 넘기기 전에
+  반드시 훑어볼 것. 아는 비밀은 --redact 로 가릴 수 있다.
+"""
+import argparse, json, os, sys
+from datetime import datetime
+
+BASE = os.path.expanduser("~/.claude/projects")
+
+
+def project_dir(cwd=None):
+    """현재 작업 디렉터리에 대응하는 프로젝트 폴더. Claude Code 의 명명 규칙을 따른다."""
+    cwd = os.path.abspath(cwd or os.getcwd())
+    return os.path.join(BASE, cwd.replace("/", "-"))
+
+
+def sessions(d):
+    if not os.path.isdir(d):
+        return []
+    fs = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".jsonl")]
+    return sorted(fs, key=os.path.getmtime, reverse=True)
+
+
+def blocks(path, want_user):
+    """(역할, 글) 을 순서대로 낸다."""
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = o.get("type")
+            if t not in ("assistant", "user"):
+                continue
+            if t == "user" and not want_user:
+                continue
+            content = o.get("message", {}).get("content")
+            if isinstance(content, str):
+                if content.strip():
+                    out.append((t, content))
+                continue
+            if not isinstance(content, list):
+                continue
+            for b in content:
+                if not isinstance(b, dict) or b.get("type") != "text":
+                    continue
+                txt = b.get("text", "")
+                if txt.strip():
+                    out.append((t, txt))
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("-o", "--out", help="파일로 저장 (없으면 화면)")
+    ap.add_argument("--last", type=int, metavar="N", help="마지막 답변 N개만")
+    ap.add_argument("--all", action="store_true", help="사용자 질문도 포함")
+    ap.add_argument("--list", action="store_true", help="대화 목록만 보여준다")
+    ap.add_argument("--session", help="특정 대화 파일 (기본: 가장 최근)")
+    ap.add_argument("--dir", help="작업 디렉터리 (기본: 지금 여기)")
+    ap.add_argument("--redact", action="append", default=[], metavar="STR",
+                    help="이 문자열을 가린다. 여러 번 줄 수 있다")
+    a = ap.parse_args()
+
+    d = project_dir(a.dir)
+    ss = sessions(d)
+    if not ss:
+        print(f"대화 기록이 없다 : {d}", file=sys.stderr)
+        return 1
+
+    if a.list:
+        for f in ss:
+            when = datetime.fromtimestamp(os.path.getmtime(f))
+            print(f"{when:%F %H:%M}  {os.path.getsize(f)/1024:8.0f} KB  {os.path.basename(f)}")
+        return 0
+
+    path = a.session or ss[0]
+    items = blocks(path, a.all)
+    if a.last:
+        # 어시스턴트 답변 기준으로 센다
+        idx = [i for i, (r, _) in enumerate(items) if r == "assistant"]
+        if idx:
+            items = items[idx[-a.last]:]
+
+    lines = []
+    for role, txt in items:
+        if a.all:
+            lines.append("=" * 70)
+            lines.append("나" if role == "user" else "Claude")
+            lines.append("=" * 70)
+        lines.append(txt.rstrip())
+        lines.append("")
+    text = "\n".join(lines)
+
+    for secret in a.redact:
+        if secret:
+            text = text.replace(secret, "[가림]")
+
+    if a.out:
+        with open(a.out, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        print(f"저장 : {a.out}  ({len(text):,} 자, 답변 "
+              f"{sum(1 for r, _ in items if r == 'assistant')}개)")
+        print("  ※ 대화에 오간 비밀번호·키가 들어 있을 수 있다. "
+              "넘기기 전에 훑어볼 것 (가리려면 --redact).", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
