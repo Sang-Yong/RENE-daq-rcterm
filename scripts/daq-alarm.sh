@@ -13,9 +13,23 @@
 #     사운드카드  aplay 로 경보음 WAV 를 반복 재생 (외부 스피커)
 #     PC 스피커   /dev/input/... 에 EV_SND 를 써서 케이스 내부 비프
 #
-#  ★ PC 스피커는 'input' 그룹 권한이 필요하다. 없으면 조용히 건너뛰지 않고
-#    한 줄 알린 뒤 사운드카드만 쓴다. 한 번만 해 두면 되는 조치 :
-#         sudo usermod -aG input $USER      (다시 로그인해야 적용된다)
+#  ★ PC 스피커는 /dev/input/... 쓰기 권한이 필요하다. 없으면 조용히 건너뛰지
+#    않고 한 줄 알린 뒤 사운드카드만 쓴다.
+#
+#    ★★ 'usermod -aG input' 로는 안 된다.  알람을 띄우는 것은 감시자이고,
+#    감시자는 tmux 서버에서 뻗어나온다. 이미 떠 있는 tmux 서버는 usermod
+#    이전의 보조그룹을 그대로 붙들고 있어서, 재로그인해도 tmux 서버를 다시
+#    띄우지 않는 한(=수집 중단) 적용되지 않는다. 실측으로 확인했다.
+#
+#    그룹이 아니라 '소유자'를 주면 그 문제가 사라진다. 재로그인도, DAQ 중단도
+#    필요 없고 재부팅에도 남는다 (root 로 한 번) :
+#
+#      sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules >/dev/null <<'RULE'
+#      SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", \
+#          OWNER="frontend", GROUP="input", MODE="0660"
+#      RULE
+#      sudo udevadm control --reload
+#      sudo udevadm trigger --subsystem-match=input --action=change
 #
 #  이 스크립트는 하드웨어(DAQ)를 건드리지 않는다. 소리만 낸다.
 # ---------------------------------------------------------------------
@@ -186,7 +200,7 @@ os.write(fd,struct.pack('llHHi',0,0,0x12,0x02,0)); os.close(fd)" "$d" 2>/dev/nul
 
    test)
       echo "소리 시험 (설정: alarm_sound = $ALARM_SOUND)"
-      have_pcspkr || echo "  주의: PC 스피커 권한 없음 -> 사운드카드만 쓴다. 'sudo usermod -aG input $USER' 후 재로그인"
+      have_pcspkr || echo "  주의: PC 스피커 권한 없음 -> 사운드카드만 쓴다 (docs/ALARM.md 의 udev 규칙 참조)"
       if sound_once; then echo "  소리를 냈다."; else echo "  ★ 어느 경로로도 소리를 내지 못했다."; exit 1; fi
       exit 0 ;;
 
@@ -201,7 +215,7 @@ os.write(fd,struct.pack('llHHi',0,0,0x12,0x02,0)); os.close(fd)" "$d" 2>/dev/nul
          echo "이미 알람이 울리는 중이다. 사유를 덧붙였다."
          exit 0
       fi
-      have_pcspkr || warn "PC 스피커 권한 없음 -> 사운드카드만 쓴다 (sudo usermod -aG input $USER 후 재로그인)"
+      have_pcspkr || warn "PC 스피커 권한 없음 -> 사운드카드만 쓴다 (docs/ALARM.md 의 udev 규칙 참조)"
       {
          printf 'since=%s\n' "$(date '+%F %T')"
          printf 'reason=%s\n' "$MSG"

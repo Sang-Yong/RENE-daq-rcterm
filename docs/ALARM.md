@@ -64,6 +64,17 @@ vi config/notify.params        # smtp_user / smtp_pass / mail_to / mail_to_exper
 
 **Gmail 을 쓴다면 계정 비밀번호가 아니라 '앱 비밀번호'여야 한다.**
 2단계 인증을 켠 뒤 Google 계정 > 보안 > 앱 비밀번호에서 발급받는다.
+16자 소문자이고 계정 비밀번호와 전혀 다르게 생겼다.
+
+계정 비밀번호를 넣으면 Gmail 이 이렇게 거절한다(2026-08-20 실측) :
+
+```
+535 5.7.8 Username and Password not accepted.
+https://support.google.com/mail/?p=BadCredentials
+```
+
+**메일이 실패해도 알람은 울린다.** 일부러 그렇게 나눠 두었다 —
+소리는 소리대로 나야 한다. 실측으로 확인했다.
 
 **값 안에 `#` 을 쓰지 말 것.** 파서가 주석으로 보고 잘라낸다.
 
@@ -77,13 +88,37 @@ python3 tools/notify/send_mail.py --params config/notify.params \
 scripts/usb-recover.sh --diagnose               # 지금 USB 문제로 보이는가 (읽기 전용)
 ```
 
-### PC 스피커는 root 조치가 한 번 필요하다
+### PC 스피커는 root 조치가 한 번 필요하다 — ★ `usermod` 로는 안 된다
 
 케이스 내부 비프는 `/dev/input/...` 쓰기 권한이 있어야 한다. 없으면
 `daq-alarm.sh` 가 한 줄 알리고 **사운드카드만** 쓴다(동작은 한다).
 
+**`sudo usermod -aG input <계정>` 은 이 상황에서 통하지 않는다.** 알람을
+띄우는 것은 감시자이고, 감시자는 tmux 서버에서 뻗어나온다. 이미 떠 있는
+tmux 서버는 `usermod` 이전의 보조그룹을 그대로 붙들고 있어서, **재로그인을
+해도 tmux 서버를 다시 띄우지 않는 한(= 수집 중단) 적용되지 않는다.**
+2026-08-20 에 실측으로 확인했다 — 계정에는 `input` 이 들어갔는데
+tmux 서버와 감시자의 `/proc/<pid>/status` 는 여전히 `Groups: 18 1001` 이었다.
+
+**그룹이 아니라 '소유자'를 주면 그 문제가 사라진다.** uid 로 판정되므로
+보조그룹과 무관하고, 재로그인도 DAQ 중단도 필요 없으며 재부팅에도 남는다.
+
 ```bash
-sudo usermod -aG input $USER      # 그 뒤 다시 로그인해야 적용된다
+sudo tee /etc/udev/rules.d/99-rene-pcspkr.rules >/dev/null <<'RULE'
+# RENE DAQ 알람이 케이스 내부 비프를 쓸 수 있게 한다.
+# 그룹이 아니라 소유자를 지정하는 이유는 docs/ALARM.md 참조.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PC Speaker", \
+    OWNER="frontend", GROUP="input", MODE="0660"
+RULE
+sudo udevadm control --reload
+sudo udevadm trigger --subsystem-match=input --action=change
+```
+
+확인 — 소유자가 바뀌었으면 된 것이다.
+
+```bash
+ls -la $(readlink -f /dev/input/by-path/platform-pcspkr-event-spkr)
+scripts/daq-alarm.sh --test        # 이제 '권한 없음' 경고가 안 나와야 한다
 ```
 
 ### 감시자에 붙이기
