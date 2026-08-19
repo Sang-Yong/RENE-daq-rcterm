@@ -250,3 +250,29 @@ scripts/backup-khu.sh --params config/dataflow.params --mid /scratch --run 4290
 
 **막힌 채로 오래 두면 `/Data_ssd` 가 차고, 차면 DAQ 가 멈춘다.** dataflow 는
 장식이 아니라 수집 체인의 일부다.
+
+---
+
+## 백업이 밀렸는지 확인하기 — `scripts/backup-audit.sh`
+
+로컬이 우선이고 경희대는 크로스체크다. 이 도구가 셋을 갈라 보고한다.
+
+```bash
+scripts/backup-audit.sh                       화면으로
+scripts/backup-audit.sh --from 4200 --to 4300 구간을 좁혀서
+scripts/backup-audit.sh --deep 20             최근 20개는 파일 개수까지
+scripts/backup-audit.sh --mail                결과를 메일로 (알람은 울리지 않는다)
+```
+
+| | 뜻 | 할 일 |
+|---|---|---|
+| ① 로컬에만 있다 | 아직 백업이 안 됐다 | 옛 런이면 `backup-trickle.sh`, 최근 런이면 dataflow 가 막혔는지 본다 |
+| ② 원격에만 있다 | 로컬에서 정리된 옛 런 | 대개 정상이다 |
+| ③ 개수가 다르다 | 전송이 덜 끝났다 | 그 런만 다시 보낸다 |
+
+**읽기만 하므로 수집 중에 돌려도 안전하다.** 원격 목록은 `ssh` 한 번으로 통째로
+받는다 — 런마다 접속하면 2천 번이라 몇 시간이 걸린다.
+
+**③ 의 기준에 주의.** 원격 `RAW/<run>/` 에는 FADC 와 SADC 가 **함께** 들어간다.
+그래서 로컬 FADC 개수의 **2배**가 원격 기대값이다. 이걸 1배로 보면 정상인 런이
+전부 어긋난 것으로 나온다.

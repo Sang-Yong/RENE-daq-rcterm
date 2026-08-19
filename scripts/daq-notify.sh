@@ -12,6 +12,7 @@
 #     recovered        연속 실패 뒤 usbreset 자동 복구에 성공했다
 #     recovery_failed  자동 복구가 끝내 안 됐다. ★ 사람이 현장에 가야 한다
 #     fatal            감시자가 포기하고 종료한다
+#     backup_audit     로컬과 경희대를 대조한 결과 (scripts/backup-audit.sh)
 #
 #  rcsupervisor 가 이것을 부른다 :
 #     rcsupervisor --notify-cmd <이 스크립트>
@@ -38,7 +39,7 @@ MAIL_MIN_INTERVAL=300
 NOTIFY_LOG=/Data/LOG/daq-notify.log
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
-                [recovery_failed]=both [fatal]=both )
+                [recovery_failed]=both [fatal]=both [backup_audit]=mail )
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -60,6 +61,7 @@ load_params() {
          on_recovered)       ON[recovered]=$v ;;
          on_recovery_failed) ON[recovery_failed]=$v ;;
          on_fatal)           ON[fatal]=$v ;;
+         on_backup_audit)    ON[backup_audit]=$v ;;
          *) : ;;
       esac
    done < "$f"
@@ -182,6 +184,11 @@ build_body() {
          restart)
             echo "  런 하나가 실패해 새 번호로 재시작했다. 한 번이면 대개 그냥 넘어간다."
             echo "  연속으로 쌓이면 자동 USB 복구가 돌고, 그것도 실패하면 다시 알린다." ;;
+         backup_audit)
+            echo "  로컬과 경희대 서버를 대조한 결과다. 아래 목록을 볼 것."
+            echo "  '로컬에만 있다' 가 많으면 백업이 밀린 것이다 :"
+            echo "     scripts/backup-trickle.sh --from <시작> --to <끝>"
+            echo "  급한 상황은 아니다. 데이터는 로컬에 그대로 있다." ;;
       esac
    } > "$f" 2>/dev/null
 }
