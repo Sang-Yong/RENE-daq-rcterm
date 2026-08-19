@@ -548,6 +548,11 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 
 - **heartbeat 경로는 `rcterm.params`와 `rcsupervisor.params`에서 반드시 동일.**
   다르면 감시자가 영원히 stale로 보고 무한 재시작한다.
+- **★ 로그·heartbeat 는 `rawdatadir` 밑이 아니다.** 이 사이트는 갈라져 있다 —
+  RAW 는 `/Data_ssd`, heartbeat·로그는 **`/Data/LOG/`**
+  (`rcterm.hb` · `rcterm.log` · `rcsupervisor.log`). `/Data_ssd/LOG/` 에는 DAQ
+  자신의 로그(`TCB_*.log` 등)와 운용 스크립트 로그만 있다. 상태를 볼 때
+  `/Data_ssd/LOG/rcterm.hb` 를 찾으면 없다(2026-08-19 에 한 번 헛짚었다).
 - 배경/지리드 런처럼 이벤트가 드문 측정은 `--stall-grace`를 크게 하거나
   `--no-stall-check`. 안 그러면 정상 런을 이상으로 판정해 재시작한다.
 - 장시간 운용은 `tmux` 또는 `nohup ... --quiet &`.
@@ -749,21 +754,66 @@ backlog 가 3뿐이다. 스캐너가 자리를 차지하면 rcterm 의 연결이
 22:49 라 7시간 반 차이다. §11.17 은 여전히 원인 미상이다.** 외부 접속으로
 설명하지 말 것.
 
-**조치 (root 필요. Claude 가 할 수 없다)** — 세 포트를 로컬/실험망으로만 막는다.
-`firewalld` 가 active 이지만 설정을 읽을 권한이 없어 어느 존이 열어 두고 있는지
-확인하지 못했다.
+**★ 조치 완료 (2026-08-19 20시경. 사용자가 root 로 실행).**
+
+착수 시점에는 "firewalld 가 active 이지만 설정을 읽을 권한이 없다"고만 적어
+두었는데, 사용자가 `firewall-cmd --list-all` 을 붙여 주어 확정됐다.
+**추측이 아니라 `public` 존이 DAQ 포트를 명시적으로 열고 있었다.**
+
+```
+public (active)
+  interfaces: enp0s31f6                        <- 공인 IP (203.230.111.71) 쪽
+  ports: 7809/tcp 7813/tcp 7814/tcp 7815/tcp 7816/tcp 50022/tcp 4280/tcp
+         2049/tcp 111/tcp 2049/udp 111/udp 40000-40002/udp 40000-40002/tcp
+```
+
+여섯 개를 뺐다 — 쓰는 것 셋(`7809` `7814` `7815`)과 **아무도 듣지 않는 죽은
+규칙 셋**(`7813` `7816` `4280`. `ss -ltn` 으로 확인).
 
 ```bash
-sudo firewall-cmd --permanent --zone=public --remove-port=7809/tcp
-sudo firewall-cmd --permanent --zone=public --remove-port=7814/tcp
-sudo firewall-cmd --permanent --zone=public --remove-port=7815/tcp
+for p in 7809 7813 7814 7815 7816 4280; do
+  sudo firewall-cmd --permanent --zone=public --remove-port=$p/tcp
+done
 sudo firewall-cmd --reload
-sudo firewall-cmd --list-all            # 확인
 ```
+
+**닫아도 수집에 영향이 없다 — 근거와 실측 둘 다 있다.**
+
+- run 4294 의 config 가 세 노드 전부 `localhost` 다
+  (`SERVER 0 TCB localhost 7809` 등). firewalld 는 루프백을 거르지 않는다.
+- 닫은 직후 실측 : heartbeat 나이 **1초**, `phase=running`, `subrun=1006`,
+  FADCDAQ 1001.24 Hz / SADCDAQ 1001.18 Hz. run 4294 는 그대로 돌았다.
+
+차단 자체는 아직 **바깥에서 확인하지 않았다.** 변경 전 마지막 외부 접속이
+15:11:57(`210.117.211.131`, 세 포트 동시 = 스캐너)이고 변경은 그 뒤라, 로그의
+공백은 증거가 못 된다. 다만 `public` 은 `target: default` 라 명시 허용하지
+않은 것을 거부하므로 규칙상으로는 확정이다. 굳이 실측하려면 외부 지점
+(예 `ssh khu`)에서 접속해 보면 되는데, 살아 있는 런의 backlog(3) 를 잠깐
+쓰므로 급하지 않다.
+
+**★ 남은 것 — NFS 가 아직 인터넷에 열려 있다. DAQ 포트보다 성격이 나쁘다.**
+
+```
+public 존   2049/tcp 2049/udp 111/tcp 111/udp        <- 그대로 열림
+ss -ltn     0.0.0.0:2049  0.0.0.0:111  0.0.0.0:20048  <- 전부 LISTEN
+```
+
+이 PC 가 NFS **서버**도 돌리고 있다. DAQ 포트는 6.5개월간 유효 명령이 한 번도
+안 맞았지만(위 전수 조사) 이쪽은 그런 종류가 아니다. **다만 누가 마운트하고
+있는지 모른 채 닫으면 남의 작업을 끊는다.** 먼저 확인할 것 :
+
+```bash
+sudo exportfs -v                                # 무엇을 누구에게 내보내나
+ss -tn state established '( sport = :2049 )'    # 지금 붙어 있는 클라이언트
+firewall-cmd --get-active-zones                 # enp1s0(10.0.0.11) 는 어느 존인가
+```
+
+마지막 줄이 필요한 이유 — **`enp1s0` 이 `public` 의 interfaces 목록에 없다.**
+다른 존에 있다는 뜻이고 그 존이 무엇을 여는지는 위 출력에 안 나온다.
 
 근본적으로는 `daq`/`tcb` 가 `0.0.0.0` 이 아니라 `127.0.0.1` 에만 bind 하는
 것이 옳다. 단일 PC 구성(`kISREMOTEDAQ=False`)이라 외부에서 붙을 이유가 없다.
-그것은 CUPDAQ 쪽 변경이다.
+그것은 CUPDAQ 쪽 변경이다. 방화벽은 그 전까지의 가림막이다.
 
 #### 11.42 ★ 돌고 있는 스크립트를 제자리에서 고쳐 오류를 만들었다 (내 실수)
 
