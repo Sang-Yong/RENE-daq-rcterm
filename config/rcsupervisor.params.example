@@ -42,3 +42,17 @@ daqport       = 7809
 # ---- DB 를 사용하지 않을 때만 ----
 # no-db
 # run         = 1000          # 감시자가 사이클당 +1 시킨다
+
+# ---- 알람 / 메일 / 자동 USB 복구  (2026-08-20 추가) ------------------
+#  연속 실패 한계(max-consec-fail)에 닿으면 감시자는 포기하기 전에
+#  recover-cmd 를 한 번 부른다. 그것이 종료코드 0 을 주면 실패 카운터를
+#  0 으로 되돌리고 수집을 이어간다.
+#
+#  * 경로는 절대경로로 적을 것. 감시자의 작업 디렉터리와 무관하게 돌아야 한다.
+#  * 사건별로 무엇을 할지(알람/메일)는 여기가 아니라 config/notify.params 가 정한다.
+#  * 알람만 쓰고 자동 복구는 원치 않으면 no-auto-recover 의 주석을 푼다.
+notify-cmd    = /home/frontend/DAQ/RENE-daq-rcterm/scripts/daq-notify.sh
+notify-params = /home/frontend/DAQ/RENE-daq-rcterm/config/notify.params
+recover-cmd   = /home/frontend/DAQ/RENE-daq-rcterm/scripts/usb-recover.sh
+# no-notify                   # 알림을 아예 끈다
+# no-auto-recover             # usbreset 자동 시도를 끈다 (알림은 그대로)

@@ -1,0 +1,84 @@
+# =====================================================================
+#  알람 / 메일 알림 설정
+#    사용 : scripts/daq-notify.sh --params config/notify.params <이벤트> ...
+#           scripts/daq-alarm.sh  --params config/notify.params --raise '...'
+#           scripts/usb-recover.sh --params config/notify.params
+#           install/bin/rcsupervisor --notify-cmd scripts/daq-notify.sh
+#    형식 : 'key = value'  ( '#' 뒤는 주석 )
+#
+#  ★ 이 파일에는 비밀번호가 들어간다. config/notify.params 는 .gitignore 대상이다.
+#    복사해서 쓸 것 :  cp config/notify.params.example config/notify.params
+#                      chmod 600 config/notify.params
+#
+#  ★ 값 안에 '#' 을 쓰지 말 것. 파서가 주석으로 보고 잘라낸다.
+#    앱 비밀번호에 '#' 이 들어 있으면 새로 발급받는 편이 빠르다.
+# =====================================================================
+
+# ---- 알람 (현장에서 귀로 듣는 것) ------------------------------------
+#  both   = 사운드카드 + PC 스피커 둘 다   <- 권장. 한쪽이 죽어도 남는다
+#  card   = 사운드카드만 (외부 스피커)
+#  pcspkr = 케이스 내부 비프만
+#  none   = 소리 없이 화면·로그만
+alarm_sound     = both
+
+#  1 이면 사람이 끌 때까지 계속 울린다 :  scripts/daq-alarm.sh --silence
+#  0 이면 alarm_max_sec 만큼만 울리고 스스로 멈춘다.
+alarm_until_ack = 1
+alarm_period    = 20        # 경보음 반복 간격 [초]
+alarm_max_sec   = 600       # alarm_until_ack = 0 일 때만 쓰인다
+alarm_device    = default   # aplay -D 에 넘길 장치. 보통 default 로 둔다
+alarm_volume    = 90        # 경보 직전 Master 를 이 값[%]으로 올린다. 0 이면 건드리지 않는다
+
+#  알람 상태 파일. 이것이 있으면 알람이 울리는 중이다.
+#  rcmon.sh 와 daq-tmux.sh 가 화면에 배너를 띄울 때도 이 파일을 본다.
+alarm_state     = /Data/LOG/daq-alarm.state
+
+# ---- 메일 -----------------------------------------------------------
+mail_enable     = 1
+smtp_host       = smtp.gmail.com
+smtp_port       = 587
+smtp_security   = starttls    # starttls | ssl | none
+smtp_user       =             # 보내는 계정 (Gmail 이면 전체 주소)
+smtp_pass       =             # ★ 앱 비밀번호. 계정 비밀번호가 아니다
+mail_from       =             # 비우면 smtp_user 를 쓴다
+
+#  책임자 — 일상 알림(재시작·stale·복구 성공)을 받는다. 쉼표로 여러 명.
+mail_to         =
+#  전문가 — 자동 복구가 실패해 사람이 현장에 가야 할 때 받는다.
+#           비우면 mail_to 와 같은 곳으로 간다.
+mail_to_expert  =
+
+mail_subject_prefix = [RENE DAQ]
+
+# ---- 어떤 사건에 무엇을 할까 ----------------------------------------
+#  값 : none | mail | alarm | both
+#
+#   restart          런 하나가 실패해 감시자가 재시작했다
+#   stale            런이 쓰기 도중 멈춰(heartbeat 정지) 감시자가 개입했다
+#   recovered        연속 실패 뒤 usbreset 자동 복구에 성공했다
+#   recovery_failed  자동 복구가 끝내 안 됐다.  ★ 사람이 현장에 가야 한다
+#   fatal            감시자가 포기하고 종료한다
+on_restart          = mail
+on_stale            = mail
+on_recovered        = mail
+on_recovery_failed  = both
+on_fatal            = both
+
+#  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
+#  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
+mail_min_interval   = 300
+
+# ---- 자동 USB 복구 --------------------------------------------------
+#  감시자가 연속 실패 한계(--max-consec-fail, 기본 5)에 닿았을 때
+#  포기하기 전에 scripts/usb-recover.sh 를 한 번 부른다.
+recover_enable      = 1
+recover_max_try     = 2       # usbreset 을 최대 몇 번까지 시도할까 (사용자 지침: 최소 2)
+recover_settle_sec  = 15      # 리셋 뒤 보드가 다시 잡힐 때까지 기다리는 시간 [초]
+recover_check_min   = 0.05    # 확인 런 길이 [시간]. 0.05 = 3분
+recover_check_run   = 999999  # 확인 런에 쓸 번호. 카탈로그를 더럽히지 않으려고 --no-db 로 돈다
+recover_min_rate    = 500     # 확인 런의 ADC 별 계수율이 이 [Hz] 를 넘어야 정상으로 본다
+                              # ★ 합이 아니라 최솟값을 본다. 한 보드만 죽으면
+                              #   합·평균은 멀쩡해 보인다 (이번 장애가 그 모양이었다)
+recover_log_age_min = 60      # 최근 이 시간[분] 안에 쓰인 DAQ 로그만 진단에 쓴다.
+                              # 옛 장애의 로그를 근거로 오진하지 않기 위해서다
+recover_keep_data   = 0       # 1 이면 확인 런의 파일을 남긴다. 0 이면 지운다

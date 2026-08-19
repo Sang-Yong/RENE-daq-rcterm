@@ -68,6 +68,15 @@ struct Sup {
    std::string heartbeat = "/Data/LOG/rcterm.hb";
    std::string logFile   = "/Data/LOG/rcsupervisor.log";
    std::string binDir;                 // 정리용 (executedaq.sh 와 같은 디렉토리)
+
+   // ---- 알람 / 메일 / 자동 USB 복구 (2026-08-20 추가) ----
+   //  감시자는 이 셋을 '바깥 프로그램'으로만 다룬다. 알림이나 복구 로직이
+   //  감시자 안에 들어오면 그것이 죽을 때 감시자까지 끌고 내려간다.
+   //  RunControl 을 링크하지 않는 것과 같은 이유다.
+   std::string notifyCmd;              // 사건을 알리는 스크립트 (scripts/daq-notify.sh)
+   std::string notifyParams;           // 위 스크립트에 넘길 --params
+   std::string recoverCmd;             // 자동 USB 복구 (scripts/usb-recover.sh)
+   bool        autoRecover = true;     // 연속 실패 한계에서 복구를 시도할까
    std::string daqIP     = RCTERM_DEF_SERVER_IP;
    int         daqPort   = RCTERM_DEF_SERVER_PORT;
 };
@@ -243,6 +252,53 @@ static void CleanupStale(const Sup& c)
    }
 }
 
+// ====================================================== 알림 / 자동 복구
+//  셸 인자로 나가는 값에서 작은따옴표를 없앤다. 사유 문자열은 로그에서
+//  온 것이라 따옴표가 섞일 수 있고, 그대로 넘기면 명령이 깨진다.
+static std::string ShQuote(const std::string& in)
+{
+   std::string o = "'";
+   for (size_t i = 0; i < in.size(); ++i) {
+      if (in[i] == '\'') o += "'\\''";
+      else if (in[i] == '\n' || in[i] == '\r') o += ' ';
+      else o += in[i];
+   }
+   o += "'";
+   return o;
+}
+
+//  사건 하나를 바깥 스크립트에 넘긴다.
+//  ★ 실패해도 감시자는 계속 간다. 알림이 안 나가는 것보다 수집이 멎는 것이 나쁘다.
+static void Notify(const Sup& c, const char* event,
+                   const std::string& run, const std::string& msg)
+{
+   if (c.notifyCmd.empty()) return;
+   std::string cmd = c.notifyCmd;
+   if (!c.notifyParams.empty()) cmd += " --params " + ShQuote(c.notifyParams);
+   cmd += " ";
+   cmd += event;
+   if (!run.empty()) cmd += " --run " + ShQuote(run);
+   if (!msg.empty()) cmd += " --msg " + ShQuote(msg);
+   cmd += " >/dev/null 2>&1 &";          // 알림 때문에 감시가 멈추면 안 된다
+   Log(std::string("notify: ") + event + (msg.empty() ? "" : " : " + msg));
+   if (!c.dryRun) { int rc = ::system(cmd.c_str()); (void)rc; }
+}
+
+//  자동 USB 복구를 부르고 그 판정을 그대로 돌려준다.
+//   0 복구됨 / 1 USB 문제 아님 / 2 복구 실패 / 3 안전조건 미달 / 그 외 실행 실패
+//  ★ 이쪽은 백그라운드로 돌리지 않는다. 결과를 보고 다음 행동을 정해야 한다.
+static int RunRecover(const Sup& c)
+{
+   if (c.recoverCmd.empty()) return -1;
+   std::string cmd = c.recoverCmd;
+   if (!c.notifyParams.empty()) cmd += " --params " + ShQuote(c.notifyParams);
+   Log("recover: " + cmd);
+   if (c.dryRun) return -1;
+   int rc = ::system(cmd.c_str());
+   if (rc == -1) return -1;
+   return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+}
+
 // ============================================================== 진단
 struct HealthState {
    unsigned long long lastTot = 0;
@@ -400,6 +456,13 @@ static void Usage(const char* p)
 "   --no-db                rcterm runs without the run catalog DB\n"
 "   --run N                first run number when --no-db\n"
 "   --dry-run              show what would happen, spawn nothing\n"
+"\n"
+" Alarm / mail / automatic USB recovery\n"
+"   --notify-cmd PATH      script called on each event (scripts/daq-notify.sh)\n"
+"   --notify-params FILE   passed to it as --params  (config/notify.params)\n"
+"   --recover-cmd PATH     automatic USB recovery    (scripts/usb-recover.sh)\n"
+"   --no-notify            do not call the notify script at all\n"
+"   --no-auto-recover      never run usbreset automatically\n"
 "   -h, --help\n"
 << std::endl;
 }
@@ -487,6 +550,11 @@ int main(int argc, char** argv)
       else if (o == "--no-db")               { c.useDB = false; }
       else if (o == "--run")                 { VAL c.startRun = atoi(v.c_str()); }
       else if (o == "--dry-run")             { c.dryRun = true; }
+      else if (o == "--notify-cmd")          { VAL c.notifyCmd = v; }
+      else if (o == "--notify-params")       { VAL c.notifyParams = v; }
+      else if (o == "--recover-cmd")         { VAL c.recoverCmd = v; }
+      else if (o == "--no-notify")           { c.notifyCmd.clear(); }
+      else if (o == "--no-auto-recover")     { c.autoRecover = false; }
       else {
          std::cerr << "unknown option : " << o << std::endl;
          Usage(argv[0]);
@@ -539,6 +607,21 @@ int main(int argc, char** argv)
             c.binDir.empty() ? "(unset)" : c.binDir.c_str(),
             c.daqIP.c_str(), c.daqPort);
    Log(hdr);
+
+   //  알람·복구가 실제로 걸렸는지 기동할 때 눈으로 확인할 수 있어야 한다.
+   //  설정 파일에 적어 두고도 오타 하나로 조용히 꺼져 있으면, 정작 필요한
+   //  순간에 아무 일도 일어나지 않는다.
+   snprintf(hdr, sizeof(hdr), "notify=%s  recover=%s%s",
+            c.notifyCmd.empty()  ? "(off)" : c.notifyCmd.c_str(),
+            (!c.autoRecover || c.recoverCmd.empty())
+                                 ? "(off)" : c.recoverCmd.c_str(),
+            c.notifyParams.empty() ? "" : "  (params set)");
+   Log(hdr);
+   if (!c.notifyCmd.empty() && ::access(c.notifyCmd.c_str(), X_OK) != 0)
+      Log("WARN notify-cmd is not executable; events will not be reported");
+   if (c.autoRecover && !c.recoverCmd.empty()
+       && ::access(c.recoverCmd.c_str(), X_OK) != 0)
+      Log("WARN recover-cmd is not executable; automatic USB recovery is dead");
 
    const double rotateSec = c.runLengthHour * 3600.0;
    int cycle = 0, consecFail = 0, nRestart = 0;
@@ -654,6 +737,12 @@ int main(int argc, char** argv)
       if (unhealthy || !exitedOK) {
          ++consecFail;
          ++nRestart;
+
+         // 어느 런이 죽었는지는 heartbeat 에서 읽는다. 알림 본문에 들어간다.
+         std::map<std::string, std::string> hbNow;
+         ReadHB(c.heartbeat, hbNow);
+         const std::string curRun = HBGet(hbNow, "run", "");
+
          Log("recovering : cleaning up stale DAQ processes");
          CleanupStale(c);
          ::sleep((unsigned)c.settleSec);
@@ -661,9 +750,42 @@ int main(int argc, char** argv)
                   "restart #%d (consecutive failures %d/%d); next run will be new",
                   nRestart, consecFail, c.maxConsecFail);
          Log(b);
+
+         // heartbeat 가 멈춰서 잡힌 것과 그냥 실패한 것은 성격이 다르다.
+         // 앞은 '쓰다가 멎었다', 뒤는 '아예 못 떴다' 인 경우가 많다.
+         const bool wasStale = reason.find("stale") != std::string::npos;
+         Notify(c, wasStale ? "stale" : "restart", curRun,
+                reason.empty() ? std::string(b) : reason);
+
          if (c.maxConsecFail > 0 && consecFail >= c.maxConsecFail) {
+            // ---- 포기하기 전에 자동 USB 복구를 한 번 시도한다 ----
+            //  2026-08-20 에 FADC 보드가 걸려 런 5개가 연속 실패했다. 그때
+            //  사람이 한 일(진단 -> usbreset -> 짧은 확인 런)을 스크립트로
+            //  옮겨 두었다. 여기서 그것을 부른다.
+            //  ★ 복구 판단과 실행은 전부 바깥 스크립트에 있다. 감시자는
+            //    종료코드만 보고 이어갈지 포기할지 정한다.
+            int rrc = -1;
+            if (c.autoRecover && !c.recoverCmd.empty()) {
+               Log("consecutive failure limit reached; trying automatic USB recovery");
+               rrc = RunRecover(c);
+               snprintf(b, sizeof(b), "automatic recovery returned %d "
+                        "(0=recovered 1=not-usb 2=failed 3=unsafe)", rrc);
+               Log(b);
+               if (rrc == 0) {
+                  Log("automatic USB recovery succeeded; resuming data taking");
+                  consecFail = 0;               // 새로 세기 시작한다
+                  ::sleep((unsigned)c.settleSec);
+                  continue;                     // 다음 사이클로 그냥 간다
+               }
+            }
+
             Log("FATAL too many consecutive failures; giving up. "
                 "please inspect the DAQ logs");
+            // 복구 스크립트가 이미 recovery_failed 로 알렸으면 또 보내지 않는다.
+            // 그쪽 메일이 시도 기록까지 담고 있어 훨씬 쓸모 있다.
+            if (rrc != 1 && rrc != 2)
+               Notify(c, "fatal", curRun,
+                      "연속 실패 한계 도달 - 감시자가 종료한다");
             return 2;
          }
          ::sleep((unsigned)c.failBackoffSec);

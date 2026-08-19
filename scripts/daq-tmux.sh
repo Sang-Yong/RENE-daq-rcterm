@@ -126,6 +126,21 @@ if [ "$SUP_RUNNING" -eq 1 ]; then
    tmux send-keys -t "$BOTLEFT" "tail -n 40 -f '$SUP_LOG'" C-m
 else
    CMD="$SUP --params '$SUP_PARAMS'"
+   #  알람/메일/자동 USB 복구를 붙인다.
+   #  ★ 설정 파일을 안 고쳐서 알람이 조용히 꺼져 있는 것이 가장 위험한
+   #    실패 방식이다. rcsupervisor.params 에 이미 적혀 있으면 그것을 쓰고,
+   #    안 적혀 있는데 notify.params 가 있으면 여기서 붙여 준다.
+   #    (--params 뒤에 오므로 파일보다 이긴다 -- CLAUDE.md 5.6)
+   NOTIFY_PARAMS=$DIR/config/notify.params
+   if [ -r "$NOTIFY_PARAMS" ] && ! grep -q '^[[:space:]]*notify-cmd' "$SUP_PARAMS" 2>/dev/null; then
+      CMD="$CMD --notify-cmd '$DIR/scripts/daq-notify.sh'"
+      CMD="$CMD --notify-params '$NOTIFY_PARAMS'"
+      CMD="$CMD --recover-cmd '$DIR/scripts/usb-recover.sh'"
+      echo "알람/메일/자동 USB 복구를 붙였다 (config/notify.params)."
+   elif [ ! -r "$NOTIFY_PARAMS" ]; then
+      echo "주의: config/notify.params 가 없어 알람·메일이 꺼진 채로 뜬다."
+      echo "      cp config/notify.params.example config/notify.params 후 채울 것."
+   fi
    if [ -r "$DESC_FILE" ]; then
       # 주석(#)과 빈 줄은 버리고 첫 줄만 쓴다. 줄 끝 공백은 남긴다 --
       # rcterm 이 뒤에 ', Split T [m] = N' 을 붙이므로 이전 런의 rundesc 와

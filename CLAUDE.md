@@ -23,7 +23,9 @@ config/dotfiles/install.sh --all
 #      build.sh          thisroot.sh / cupdaq_env.sh 의 source 경로
 #      src/OnlConsts.hh  RCTERM_DEF_RAWDATA_DIR / RCTERM_DEF_DBFILE
 #      config/*.params   (.gitignore 대상. *.params.example 에서 복사해 수정)
-#                        rcterm / rcsupervisor / dataflow 세 개다
+#                        rcterm / rcsupervisor / dataflow / notify 네 개다
+#      config/notify.params  ★ 알람·메일 자격증명. 비우면 소리만 나고
+#                        메일이 안 간다. Gmail 은 '앱 비밀번호'여야 한다 (§11.55)
 #      config/rundesc.txt  런 설명(HV 등). 없으면 daq-tmux.sh 가 --desc 를 안 넘겨
 #                        rundesc 가 이전 런들과 달라진다 (§11.20)
 #      ~/.ssh/config     백업 서버 별칭 'khu' + 키 교환 (docs/DATAFLOW.md §4)
@@ -69,6 +71,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/MANUAL.md` | rcterm / rcsupervisor 운용 상세 |
 | `docs/POSTRUN.md` | 병합·production 파이프라인의 구조와 성능 근거 |
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
+| `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `tools/monitor/README.md` | 모니터링 3단계 — PRD 에서 livetime·이벤트 수 -> IBD 후보 -> 효율 보정 rate 추이 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가 |
 | `docs/*.pptx` | 발표 자료 (종합 영/한, 운영 중심 한) |
@@ -148,6 +151,11 @@ src/usbreset      20.0k   ★ 소스가 아니라 실행 파일이다. 아래 �
 src/NOTICE_CODE_RUN.sh    ★ rcterm 과 무관한 보드 점검 스크립트. 아래 설명 참조
 config/{rcterm.params.example, rcsupervisor.params.example, SERVER-block.example}
 scripts/{killdaq.sh, rcsupervisor.service.example}
+scripts/daq-alarm.sh     현장 알람 (사운드카드 + PC 스피커). 사람이 끌 때까지
+scripts/daq-notify.sh    사건 -> 알람 + 메일. 감시자가 --notify-cmd 로 부른다
+scripts/usb-recover.sh   USB 진단 + usbreset + 확인 런. --diagnose 는 읽기 전용
+tools/notify/send_mail.py  SMTP 발송
+config/notify.params(.example)   위 넷이 함께 읽는다. ★ 자격증명이 들어간다
 tools/monitor/RenePrdSingles.h   PRD -> clean single (= 분석 Step1 + Step2)
 tools/monitor/RenePairing.h      single -> 후보 수    (= 분석 Step3 + Step4)
    ★ 위 둘은 분석 쪽 essential 헤더를 include 한다. §0.0 의 경고 참조
@@ -564,6 +572,12 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 - **감시자가 `FATAL too many consecutive failures` 로 포기했으면 하드웨어를 의심할 것.**
   같은 노드가 같은 오류로 5번 연속 실패한 것이므로 재기동만 해서는 또 5개를 태운다.
   FADC USB 보드가 걸린 사례와 복구 절차는 §11.49~11.51.
+  **2026-08-20 부터는 감시자가 포기하기 전에 `scripts/usb-recover.sh` 를 스스로
+  부른다**(§11.55). 그래도 안 되면 알람이 울리고 전문가에게 메일이 간다.
+- **감시자 기동 로그에서 `notify=` 줄을 확인할 것.** `(off)` 면 알람·메일이
+  꺼진 채로 뜬 것이다. 설정을 안 고쳐 조용히 꺼져 있는 것이 가장 위험하다.
+- **알람이 울리면** `scripts/daq-alarm.sh --status` 로 사유를 보고,
+  조치한 뒤 `--silence` 로 끈다. 끄는 것과 고치는 것은 다르다.
 - **postrun 의 `[FAIL] Producing FAILED (0초)` 는 데이터 문제가 아니다.**
   0초짜리 실패는 로그 파일을 못 열어 ROOT 매크로가 아예 안 돈 것이다 (§11.52).
   이 경우 PRD 가 조용히 하나 빈다. 런 끝에 FADC 개수와 PRD 개수를 대조할 것.
@@ -733,6 +747,85 @@ run 4290   /Data_ssd/RAW/004290   FADC 0    PRD 200    <- 먼저 잡힌다
 ```
 
 `Max subrun` 은 1439 / 199 / 64 처럼 **개수 − 1** 로 들어갔다.
+
+### 2026-08-20 (아침) — 알람·메일·자동 USB 복구를 붙였다 ★ 사용자 요청
+
+상세는 `docs/ALARM.md`. 여기에는 왜 그렇게 만들었는지와 검증 결과만 적는다.
+
+#### 11.55 무엇을 만들었나
+
+§11.49 의 장애에서 드러난 구멍은 둘이었다. **아무도 두 시간 동안 몰랐다**는
+것과, **사람이 손으로 밟은 복구 절차가 어디에도 없었다**는 것이다.
+
+```
+scripts/daq-alarm.sh      소리를 켜고 끈다. 사람이 끌 때까지 반복
+scripts/daq-notify.sh     사건 하나를 알람+메일로 내보내는 단일 진입점
+tools/notify/send_mail.py SMTP 발송
+scripts/usb-recover.sh    진단 + usbreset + 확인 런  (최대 2회)
+config/notify.params      위 넷이 함께 읽는다. .gitignore 대상
+src/rcsupervisor.cc       --notify-cmd / --notify-params / --recover-cmd
+                          --no-notify / --no-auto-recover
+scripts/rcmon.sh          알람 중이면 붉은 배너
+scripts/daq-tmux.sh       notify.params 가 있으면 자동으로 붙인다
+```
+
+감시자는 연속 실패 한계에서 **포기하기 전에** `recover-cmd` 를 한 번 부르고,
+종료코드 0 이면 실패 카운터를 되돌려 수집을 이어간다.
+
+#### 11.56 설계에서 신경 쓴 것 — 되돌리기 전에 읽을 것
+
+- **안전 게이트를 없애지 말 것.** `usb-recover.sh` 는 맨 처음에 rcterm/daq/
+  tcb/merger 와 7809·7814·7815 를 확인하고 하나라도 살아 있으면 exit 3 로
+  물러난다. `usbreset` 은 진행 중인 런을 그 자리에서 깬다.
+- **진단 없이 리셋하지 않는다.** USB 오류 근거가 없으면 exit 1.
+- **최근 로그만 본다** (`recover_log_age_min`, 기본 60분). 처음엔 '최신 3개'로
+  짰는데, 장애 로그가 몇 시간 뒤에도 최신 3개 안에 남아 **정상인 보드를 USB
+  문제로 오진했다.** 실측으로 잡았다.
+- **계수율은 합이 아니라 ADC 별 최솟값.** 한 보드만 죽으면 합·평균은 멀쩡해
+  보인다. **§11.49 가 정확히 그 모양이었다** (FADC 먹통 / SADC 1000 Hz 정상).
+  heartbeat 의 `ar=` 중 최솟값을 본다.
+- **확인 런 없이 복구됐다고 하지 않는다.** 걸린 보드도 `lsusb` 에는 나온다.
+  3분 런을 실제로 돌려 ① exit 0 ② 그 런 로그의 USB 오류 0건 ③ FADC 산출
+  1 MB 이상 ④ ADC 별 계수율 최솟값이 문턱 이상 — 넷을 다 통과해야 한다.
+  확인 런은 `--no-db --run 999999` 라 카탈로그를 더럽히지 않는다.
+- **알림은 비동기, 복구는 동기.** 알림 실패가 감시자를 끌고 내려가면 안 된다.
+  복구는 결과를 봐야 다음 행동을 정한다.
+- **복구 스크립트가 이미 알렸으면 감시자는 `fatal` 을 또 보내지 않는다.**
+- 알림·복구를 전부 **바깥 프로그램**으로 뺐다. 감시자가 `RunControl.cc` 를
+  링크하지 않는 것과 같은 이유다(§2).
+
+#### 11.57 검증 — 하드웨어를 전혀 건드리지 않고 10종 ★
+
+가짜 `rcterm`/복구 스크립트로 돌렸다. `--bindir` 을 비우면 감시자의 `pkill`
+정리가 통째로 생략되므로 **살아 있는 run 4301 옆에서 안전하게** 시험했다.
+
+| 시험 | 결과 |
+|---|---|
+| 안전 게이트 (수집 중) | `rcterm daq tcb` + 포트 3개 감지, exit 3, 무접촉 |
+| 진단 (장애 로그가 창 안) | `FADC` 지목 — 사람이 내린 판정과 일치 |
+| 진단 (보드 정상) | "USB 문제 아님" exit 1 |
+| 알람 켜기/상태/끄기 | 상태 파일·좀비 정리까지 확인 |
+| 소리 경로 | `pw-play` OK / `aplay -D default` OK / `plughw:0,0` 실패(대체) |
+| 감시자 A 복구 성공(0) | 실패 카운터 0 으로, 수집 계속, exit 0 |
+| 감시자 B 복구 실패(2) | 포기 exit 2, `fatal` 중복 없음 |
+| 감시자 C USB 아님(1) | 위와 동일 |
+| 감시자 D `--no-auto-recover` | 복구 0회, `fatal` 발송 |
+| 감시자 E heartbeat 정지 | `stale` 로 런 번호·사유까지 실어 알림 |
+
+빌드는 clean, 경고 0 (ROOT 6.28/04 · GCC 11.5.0).
+
+#### 11.58 아직 안 된 것 / 사용자 조치가 필요한 것
+
+- **메일 자격증명이 비어 있다.** `config/notify.params` 의 `smtp_user` ·
+  `smtp_pass`(★ Gmail 이면 앱 비밀번호) · `mail_to` · `mail_to_expert` 를
+  채워야 메일이 나간다. 채우기 전까지 알람(소리)만 동작한다.
+  **값에 `#` 을 쓰면 파서가 주석으로 잘라낸다.**
+- **PC 스피커는 root 1회 조치가 필요하다** — `sudo usermod -aG input frontend`
+  후 재로그인. 안 하면 사운드카드만 쓴다(동작은 한다).
+- **외부 스피커가 켜져 있는지 사람이 확인해야 한다.** `--test` 로 소리가 나는
+  것은 확인했지만, 실제로 들리는지는 현장에서만 알 수 있다.
+- **실제 보드가 걸린 상태의 자동 복구는 아직 못 봤다.** 다음 장애 때 확인된다.
+- **새 바이너리는 감시자를 재시작해야 적용된다.** 스크립트 셋은 즉시 쓸 수 있다.
 
 ### 2026-08-20 (새벽) — FADC 보드가 먹통이 되어 DAQ 가 2시간 9분 멎었다 ★★
 

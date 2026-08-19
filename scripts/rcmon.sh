@@ -20,6 +20,9 @@ set -u
 HB=${1:-/Data/LOG/rcterm.hb}
 PERIOD=${2:-1}
 STALE=${RCMON_STALE:-300}
+#  알람이 울리는 중이면 화면 맨 위에 띄운다. 소리를 못 듣는 자리에서도
+#  화면만 보면 알 수 있어야 한다. scripts/daq-alarm.sh 가 이 파일을 만든다.
+ALARM_STATE=${RCMON_ALARM_STATE:-/Data/LOG/daq-alarm.state}
 
 cleanup() { printf '\033[?25h\n'; exit 0; }   # 커서 복구
 trap cleanup INT TERM
@@ -69,6 +72,22 @@ while true; do
    [ "${error:-0}" != "0" ] && state="$state  *** ERROR ***"
 
    printf '\033[H\033[2J'
+
+   #  ---- 알람 배너 ----  깜빡이지 않고 계속 붉게 둔다. 깜빡이면 오히려
+   #  터미널에 따라 안 보이거나 눈에 덜 띈다.
+   if [ -f "$ALARM_STATE" ]; then
+      a_since=$(sed -n 's/^since=//p' "$ALARM_STATE" 2>/dev/null | head -1)
+      a_why=$(sed -n 's/^reason=//p'  "$ALARM_STATE" 2>/dev/null | head -1)
+      #  오른쪽 테두리를 두지 않는다. printf 의 %-Ns 는 '바이트' 로 채우는데
+      #  한글은 3바이트에 2칸이라 사유가 한글이면 테두리가 어긋난다.
+      printf '\033[1;37;41m'
+      echo "######################################################################"
+      echo "##  ALARM  ${a_why:-DAQ 이상}"
+      echo "##  since  ${a_since:-?}"
+      echo "##  끄려면 : scripts/daq-alarm.sh --silence"
+      echo "######################################################################"
+      printf '\033[0m'
+   fi
 
    echo "======================================================================"
    echo "  RENE / CUPDAQ   Run Monitor   (heartbeat viewer, read-only)"
