@@ -390,7 +390,7 @@ classify() {             # run_num
 
    #  ★ 판정을 셋으로 나눈다. 조회에 실패했으면(UNKNOWN) **격리하지 않는다** —
    #    확신이 없을 때 멀쩡한 원본을 묻는 것보다 목록에 남기는 편이 안전하다.
-   local bad_raw="" blocked="" gap="" v_f v_s v_n nofile
+   local bad_raw="" blocked="" gap="" nof_subs="" v_f v_s v_n nofile
    for s in $checked; do
       nofile=0
       if [ -f "$rawdir/FADC_$rp.root.$s" ]; then
@@ -409,6 +409,8 @@ classify() {             # run_num
          #    FADC 는 혼자서는 merge 도 production 도 못 하므로 최상위에
          #    남겨 두면 PRD 개수와 영원히 어긋나 런이 옮겨지지 않는다.
          bad_raw="$bad_raw $s"
+         [ "$v_f" = NOFILE ] && nof_subs="$nof_subs ${s}(FADC 없음)"
+         [ "$v_s" = NOFILE ] && nof_subs="$nof_subs ${s}(SADC 없음)"
          [ -f "$rawdir/FADC_$rp.root.$s" ] && R_QUAR="$R_QUAR$rawdir/FADC_$rp.root.$s"$'\n'
          [ -f "$sadcdir/SADC_$rp.root.$s" ] && R_QUAR="$R_QUAR$sadcdir/SADC_$rp.root.$s"$'\n'
       elif [ "$v_f" = UNKNOWN ] || [ "$v_s" = UNKNOWN ]; then
@@ -421,7 +423,12 @@ classify() {             # run_num
    done
 
    local cats="" memo=""
-   [ -n "$bad_raw" ] && { cats="truncated_tail"; memo="격리 대상 서브런$bad_raw (원본이 ROOT 로 안 열린다)"; }
+   if [ -n "$bad_raw" ]; then
+      cats="truncated_tail"
+      memo="격리 대상 서브런$bad_raw (원본이 ROOT 로 안 열린다)"
+      #  '안 열린다' 와 '아예 없다' 는 다르다. 왜 포기했는지의 근거가 되므로 밝힌다.
+      [ -n "$nof_subs" ] && memo="$memo. 짝이 없는 것 :$nof_subs"
+   fi
    if [ -n "$blocked" ]; then
       [ -n "$cats" ] && cats="$cats+prd_gap" || cats="prd_gap"
       memo="${memo:+$memo; }서브런$blocked 은 원본은 멀쩡하나 다음 SADC 가 죽어 merge 를 끝낼 수 없다. 부분 Merged 에서 PRD 복구 가능"
@@ -545,7 +552,10 @@ list_summary() {         # 데이터줄 파일
       | awk '{printf "#    %-24s %4d\n", $2, $1}'
    echo "#"
    echo "#  ★ 사람이 손볼 것 — 원본이 죽어 격리가 필요하거나 이미 격리한 런"
-   awk '$4 ~ /truncated_tail/ {printf "#    run %-6s %-24s %s\n", $1, $4, $5}' "$f" 2>/dev/null | head -30
+   awk '$4 ~ /truncated_tail/ {
+           done_ = (index($0, "격리했다") > 0 || index($0, "격리됨") > 0) ? "격리됨" : "미격리"
+           printf "#    run %-6s %-8s %-24s %s\n", $1, done_, $4, $5
+        }' "$f" 2>/dev/null | head -30
    echo "# ─────────────────────────────────────────────────────────────────"
    echo "#"
 }
@@ -601,9 +611,12 @@ update_list_for() {      # run_num...
    local n keep="$TMP/keep.txt" out="$TMP/list.new" when
    declare -A OLDWHEN OLDLINE
    if [ -r "$LIST" ]; then
-      while read -r a b c rest; do
+      #  ★ 다시 printf 로 찍는다. "  $a $b $c $rest" 로 이어 붙이면 run 의
+      #    %-4s 패딩이 사라져 세 자리 이하 런에서 열이 어긋난다(실측 122줄).
+      while read -r a b c d e rest; do
          case "$a" in ''|'#'*) continue ;; esac
-         OLDWHEN[$a]="$b $c"; OLDLINE[$a]="  $a $b $c $rest"
+         OLDWHEN[$a]="$b $c"
+         OLDLINE[$a]=$(printf '  %-4s %-19s %-22s %-22s %s' "$a" "$b $c" "$d" "$e" "$rest")
       done < "$LIST"
    fi
    for n in "$@"; do

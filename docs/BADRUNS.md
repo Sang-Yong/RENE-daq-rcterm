@@ -12,7 +12,7 @@
 #
 # 갱신 : scripts/badrun.sh --scan --update-list
 # 사본 : docs/BADRUNS.md  (scripts/badrun.sh --export)
-# 생성 : 2026-08-21 03:59:08
+# 생성 : 2026-08-21 04:39:20
 #
 # 범주
 #   boot_failed     부팅 실패. 런이 시작되지 못했고 데이터가 없다
@@ -38,24 +38,24 @@
 #    truncated_tail+prd_gap      4
 #
 #  ★ 사람이 손볼 것 — 원본이 죽어 격리가 필요하거나 이미 격리한 런
-#    run 2466   truncated_tail           00038
-#    run 2487   truncated_tail           00041
-#    run 2547   truncated_tail           00032
-#    run 2602   truncated_tail           00032
-#    run 2614   truncated_tail           00031
-#    run 2627   truncated_tail           00032
-#    run 2651   truncated_tail           00036
-#    run 2660   truncated_tail           00033
-#    run 2664   truncated_tail           00036
-#    run 2683   truncated_tail           00031
-#    run 2957   truncated_tail           00035
-#    run 3207   truncated_tail+prd_gap   01533,01534,01535,01536,01537,01538,01539,01540...외32개
-#    run 3520   truncated_tail+prd_gap   00570,00571,00572,00573
-#    run 3523   truncated_tail+prd_gap   00324,00325,00326
-#    run 3855   truncated_tail           00010
-#    run 3923   truncated_tail+prd_gap   00742,00743
-#    run 4291   truncated_tail           00869
-#    run 4293   truncated_tail           00091
+#    run 2466   미격리      truncated_tail           00038
+#    run 2487   미격리      truncated_tail           00041
+#    run 2547   미격리      truncated_tail           00032
+#    run 2602   미격리      truncated_tail           00032
+#    run 2614   미격리      truncated_tail           00031
+#    run 2627   미격리      truncated_tail           00032
+#    run 2651   미격리      truncated_tail           00036
+#    run 2660   미격리      truncated_tail           00033
+#    run 2664   미격리      truncated_tail           00036
+#    run 2683   미격리      truncated_tail           00031
+#    run 2957   격리됨      truncated_tail           00035
+#    run 3207   미격리      truncated_tail+prd_gap   01533,01534,01535,01536,01537,01538,01539,01540...외32개
+#    run 3520   미격리      truncated_tail+prd_gap   00570,00571,00572,00573
+#    run 3523   미격리      truncated_tail+prd_gap   00324,00325,00326
+#    run 3855   격리됨      truncated_tail           00010
+#    run 3923   미격리      truncated_tail+prd_gap   00742,00743
+#    run 4291   격리됨      truncated_tail           00869
+#    run 4293   격리됨      truncated_tail           00091
 # ─────────────────────────────────────────────────────────────────
 #
   27   2026-08-21 03:57:40 aborted                -                      DB onlbit=0
@@ -387,7 +387,7 @@
   2939 2026-08-21 03:57:40 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
   2940 2026-08-21 03:57:40 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
   2953 2026-08-21 03:57:40 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
-  2957 2026-08-21 03:57:40 truncated_tail         00035                  FADC 36 / PRD 35. 격리 대상 서브런 00035 (원본이 ROOT 로 안 열린다)
+  2957 2026-08-21 03:57:40 truncated_tail         00035                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 35 = PRD 35). 사유는 badrun/README.txt
   2961 2026-08-21 03:57:40 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
   2962 2026-08-21 03:57:40 aborted                -                      DB onlbit=0; 다만 후처리는 완결됐다 (FADC 2 = PRD 2)
   2963 2026-08-21 03:57:40 aborted                -                      DB onlbit=0; 다만 후처리는 완결됐다 (FADC 1 = PRD 1)
@@ -553,7 +553,7 @@
   3839 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3840 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3841 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
-  3855 2026-08-21 03:57:41 truncated_tail         00010                  FADC 11 / PRD 10. 격리 대상 서브런 00010 (원본이 ROOT 로 안 열린다)
+  3855 2026-08-21 03:57:41 truncated_tail         00010                  원시 파일 1 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 10 = PRD 10). 사유는 badrun/README.txt
   3862 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3873 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3874 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
