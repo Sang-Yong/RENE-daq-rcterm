@@ -492,6 +492,9 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   **2026-08-19 해결. 그리고 "너무 비싸다"는 판단이 틀렸다** — run 4290 PRD
   15.4 GB 기준 전송 17분 40초 대 대조 **1분 00초**다(§11.35). 양쪽이 각자
   계산해 결과만 주고받으므로 링크 부담이 거의 없다. 지금은 기본으로 켜져 있다
+  **★ 단 이것은 ssh 전송에만 해당한다.** dataflow 3단계의 `/scratch` 는 NFS
+  마운트라 rsync 에게는 로컬 경로이고, 클라이언트가 목적지 전량을 읽어야 해서
+  **대조가 전송보다 비싸다** — run 4292 는 전송 10.3시간 대 대조 28시간+ (§11.63)
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -582,6 +585,11 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 - **postrun 의 `[FAIL] Producing FAILED (0초)` 는 데이터 문제가 아니다.**
   0초짜리 실패는 로그 파일을 못 열어 ROOT 매크로가 아예 안 돈 것이다 (§11.52).
   이 경우 PRD 가 조용히 하나 빈다. 런 끝에 FADC 개수와 PRD 개수를 대조할 것.
+- **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
+  매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
+  (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
+  쓰기 도중 죽은 런에서는 거의 언제나 **마지막 SADC 가 안 닫힌 것**이고, 그때는
+  부분 Merged 가 정상 ROOT 파일로 남아 있으므로 **PRD 는 살릴 수 있다** (§11.64).
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -692,6 +700,136 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ---
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-21 — run 4294 백업 착수, 그리고 잘린 꼬리 서브런을 끝까지 복구했다
+
+#### 11.62 착수 시점 실측 — 수집은 건강한데 뒤쪽이 밀려 있었다
+
+```
+run 4302   sub=1180  daqtime 19.7h  heartbeat 나이 1초  FADC/SADC 994.9 Hz
+supervisor pid 76388 (08-20 06:13 기동).  notify= · recover= 둘 다 붙어 있다
+로그       rcterm [ERROR]/[WARN]/[FATAL] 0건.  알람 없음
+```
+
+08-20 새벽 FADC 보드 장애(§11.49) 이후 재발 없다. 문제는 수집이 아니라 뒤쪽이었다.
+
+**★ 완결된 정상 런 4294 가 백업이 하나도 안 돼 있었다.** 원격 `RAW/` 는 4292 까지,
+`PRD/` 도 4292 까지다. 4293 · 4294 · 4300 · 4301 은 흔적이 없다. run 4294 는
+FADC=SADC=Merged=PRD=1440 으로 완결된 24시간 정상 런(334 GB)인데 **사본이 이 PC
+하나뿐**이었다. 백업 큐가 옛 런 우선(4289 -> trickle 4200~4290)이라 새 런이 뒤로
+밀리는 구조 때문이다.
+
+#### 11.63 ★ 체크섬 대조 비용 — §11.35 의 "1/18" 은 ssh 에만 해당한다
+
+dataflow 가 28시간째 run 4292 를 대조 중이라 추적했다. **고장이 아니라 원래 그만큼
+걸리는 것이었다.**
+
+```
+전송   /data -> /scratch   348 GB   10시간 17분  (8.96 MB/s)
+대조   rsync -a -c -n -i   28시간+ , 착수 시점 292/348 GB = 84%
+pid(로컬 /data 읽기)  347 GB 완료
+pid(/scratch 읽기)    292 GB 진행중
+enp1s0 rx  12.02 MB/s   <- 100 Mb 링크 line rate. 포화
+```
+
+§11.35 는 run 4290 PRD 로 재고 "전송 17분 40초 대 대조 1분 00초"라 적었다.
+**그것은 ssh 전송이라 양쪽이 각자 계산하고 결과만 주고받기 때문이다.**
+`/scratch` 는 NFS 마운트라 rsync 에게는 그냥 로컬 경로다 — **클라이언트가 목적지
+348 GB 를 전부 읽어야 한다.** 그래서 3단계에서는 **대조가 전송보다 비싸다.**
+
+정리 : `--verify` 를 쓸 이유가 없다는 §6 백로그의 결론은 **경희대 백업(ssh)에만
+유효**하고, dataflow 3단계(NFS)에는 반대다. 24시간 로테이션을 못 따라간다.
+
+#### 11.64 잘린 꼬리 서브런 — 어디까지 살릴 수 있는지 확정했다 ★
+
+run 4291(§11.17 에서 죽음) 과 run 4293(§11.41 외부 접속으로 죽음) 은 둘 다 후처리가
+덜 끝나 있었다. **`ZOMBIE FILE` 이라는 postrun 의 표시는 진단명이 아니다** — merge
+매크로가 rc≠0 이면 무조건 붙는 이름이라, 실제 사유는 merge 로그를 봐야 한다.
+
+**사유는 하나였다. 런이 죽으면서 마지막 SADC 파일이 안 닫혔다.**
+
+```
+log_merge_..._run4293_subrun90.txt 끝
+   [END] sadc trg #= 5521865
+   FADC subrun = 90, SADC subrun = 91
+   Warning: file SADC_004293.root.00091 probably not closed, trying to recover
+   Warning: no keys recovered, file has been made a Zombie
+   [ERROR] Cannot open SADC file or ZOMBIE
+```
+
+**FADC 서브런 N 을 merge 하려면 SADC 서브런 N+1 이 필요하다**(SADC 가 뒤처져
+기록되므로). 그래서 마지막 SADC 가 잘리면 **그 앞 서브런까지 같이 못 만든다.**
+
+**★ 그런데 부분 Merged 는 정상 ROOT 파일로 남아 있다.** 매크로가 에러로 빠지기
+전까지 쓴 것이 autosave 되어 있다. 확인 : `MERGED_004293.root.00090` 은 Zombie 가
+아니고 `AbsEvent` 트리에 42,602 이벤트(정상 ~59,600 의 71%)를 갖고 있다.
+재-merge 해도 크기가 바이트까지 같아 **결정적(deterministic)이다.**
+
+그래서 **§11.52 와 같은 요령 — 껍데기를 건너뛰고 production 매크로를 직접 부른다.**
+
+```bash
+cd /home/frontend/DAQ/DAQ_cup/production/Code
+root -l -b -q 'production_from_merged_v3_5v.cc(<런>,<서브런>,"<데이터디렉터리>")'
+```
+
+**결과**
+
+| 런 | 전 | 후 | 한 일 |
+|---|---|---|---|
+| 4291 | FADC 870 / Merged 867 / PRD 866 | **Merged 869 / PRD 869** | sub 30 은 PRD 만 없어 직접 생성(61,140 ev, 온전) · sub 867 은 postrun 으로 정상 merge+PRD(61,909 ev) · sub 868 은 부분 Merged 에서 PRD 직접 생성(42,588 ev) |
+| 4293 | FADC 92 / Merged 91 / PRD 90 | **PRD 91** | sub 90 을 부분 Merged 에서 직접 생성(42,602 ev) |
+
+**남은 것은 각 런의 마지막 서브런 하나씩이고, 이건 복구 불가다.**
+
+```
+4291 sub 869   FADC_004291.root.00869 자체가 Zombie (22.7 MB / 정상 74 MB)
+4293 sub  91   SADC_004293.root.00091 이 Zombie  ( 0.67 MB / 정상 8.9 MB)
+   둘 다 ROOT 의 recover 가 "no keys recovered" 로 실패한다. 키가 하나도 없다
+```
+
+**이어받기 상태는 postrun 이 알아서 찾는다** — `--from 867` 로 주면 866 번 merge
+로그에서 `(867, 1527, 52077777)` 을 읽어 온다. 손으로 넣을 필요가 없다.
+`/scratch` 쪽 심볼릭 링크(§11.36)가 살아 있어 `--rawroot /scratch/RAW` 로 주면
+Merged/PRD 는 `/Data_ssd` 에 쓰인다.
+
+#### 11.65 ★ 그 결과 dataflow 가 이 두 런을 영원히 못 옮긴다
+
+```bash
+is_processed() {                       # scripts/dataflow.sh:161
+   f=$(find -L "$1" -maxdepth 1 -name 'FADC_*.root.*' | wc -l)
+   p=$(find -L "$1/PRD" -maxdepth 1 -name '*.root'    | wc -l)
+   [ "$f" -gt 0 ] && [ "$p" -eq "$f" ]         # 정확히 같아야 한다
+}
+```
+
+```
+4293   FADC 92  PRD 91   ->  영원히 false. /Data_ssd 에 붙박이다
+4291   FADC  0 (RAW 는 /scratch)  ->  §11.40 의 그 이유로 역시 false
+```
+
+**설계상의 구멍이다 — 쓰기 도중 죽은 런은 100% 가 될 수 없으므로 자동 이동
+대상이 절대 되지 못한다.** 지금 `/Data_ssd/RAW` 에 런이 7개 쌓인 이유의 일부다
+(`keep_ssd=2`). 어떻게 고칠지는 **사용자 판단 대기** — 후보는 셋이다.
+
+1. 런 디렉터리에 `.postrun_final` 같은 표식을 두고 `is_processed` 가 그것도 인정
+2. `PRD >= FADC - 1` 처럼 꼬리 하나를 봐주기 (조용히 틀릴 여지가 있어 권하지 않는다)
+3. 이런 런은 `relocate-run.sh` 로 손으로 옮긴다 (지금 방식)
+
+#### 11.66 run 4294 백업 — 진행 중
+
+```bash
+scripts/backup-khu.sh --params config/dataflow.params --mid /Data_ssd --run 4294
+```
+
+`--mid /Data_ssd` 가 핵심이다. 기본값은 `/data` 인데 4294 는 아직 SSD 에 있다.
+대상 RAW 2880 · PRD 1441 · PNG 1440, 약 222 GB. **전부 로컬 NVMe 라 100 Mb
+링크를 전혀 쓰지 않는다**(§11.37 의 그 이점). 로그는
+`/Data_ssd/LOG/backup-4294.log`.
+
+실측 속도 **약 7.2 MB/s** — 기대(15.7)의 절반이다. 같은 khu 링크를
+`backup-queue-4288-4289`(4289 RAW, 3.6 MB/s) 가 함께 쓰고 있다. 둘이 합쳐
+약 11.5 MB/s 로 링크 상한(15.7)에 못 미치므로 서로 굶기지는 않는다.
+이 속도면 **약 8.5시간**이다.
 
 ### 2026-08-20 — 네트워크 끊김 뒤 전수 점검, 그리고 시트 기록 완료
 
