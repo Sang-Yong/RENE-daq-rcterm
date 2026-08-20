@@ -532,6 +532,24 @@ print_found() {
 #    이미 있는 줄은 분류일시를 보존한다. 매번 오늘 날짜로 덮으면
 #    '언제부터 문제였나'를 잃는다.
 # =====================================================================
+#  목록이 631 줄쯤 되면 열어도 '한눈에' 가 아니다. 맨 위에 범주별 수와
+#  조치가 필요한 런을 요약해 둔다. 데이터 줄에서 그때그때 계산한다.
+list_summary() {         # 데이터줄 파일
+   local f=$1 n
+   n=$(grep -c '^  [0-9]' "$f" 2>/dev/null || echo 0)
+   echo "# ── 요약 ─────────────────────────────────────────────────────────"
+   echo "#  문제 런 $n 개"
+   #  줄 모양 : run  YYYY-MM-DD HH:MM:SS  범주  서브런  메모
+   #  분류일시가 두 토큰이므로 범주는 $4 다. $3 으로 세면 시각이 세어진다.
+   awk '{print $4}' "$f" 2>/dev/null | sort | uniq -c | sort -rn \
+      | awk '{printf "#    %-24s %4d\n", $2, $1}'
+   echo "#"
+   echo "#  ★ 사람이 손볼 것 — 원본이 죽어 격리가 필요하거나 이미 격리한 런"
+   awk '$4 ~ /truncated_tail/ {printf "#    run %-6s %-24s %s\n", $1, $4, $5}' "$f" 2>/dev/null | head -30
+   echo "# ─────────────────────────────────────────────────────────────────"
+   echo "#"
+}
+
 list_header() {
       echo "# RENE DAQ badrun list — 문제가 있었던 런 전부. 한 줄에 한 런. 런 번호 오름차순."
       echo "#"
@@ -563,13 +581,11 @@ write_list() {
          OLDWHEN[$n]="$when1 $when2"
       done < "$LIST"
    fi
-   {
-      list_header
-      while IFS=$'\t' read -r n cat subs memo; do
-         when=${OLDWHEN[$n]:-$(ts)}
-         printf '  %-4s %-19s %-22s %-22s %s\n' "$n" "$when" "$cat" "$subs" "$memo"
-      done < "$TMP/found.tsv"
-   } > "$out"
+   while IFS=$'\t' read -r n cat subs memo; do
+      when=${OLDWHEN[$n]:-$(ts)}
+      printf '  %-4s %-19s %-22s %-22s %s\n' "$n" "$when" "$cat" "$subs" "$memo"
+   done < "$TMP/found.tsv" | sort -k1,1n > "$TMP/data.txt"
+   { list_header; list_summary "$TMP/data.txt"; cat "$TMP/data.txt"; } > "$out"
    local d; d=$(dirname "$LIST"); [ -d "$d" ] || mkdir -p "$d" || die "목록 디렉터리를 만들 수 없다 : $d"
    if [ "$DRYRUN" -eq 1 ]; then
       logt "${C_C}[DRY]${C_0} 목록 $(grep -c '^  [0-9]' "$out") 줄 -> $LIST"
@@ -599,9 +615,8 @@ update_list_for() {      # run_num...
          unset 'OLDLINE[$n]'
       fi
    done
-   { grep '^#' "$LIST" 2>/dev/null || list_header
-     for n in "${!OLDLINE[@]}"; do printf '%s\n' "${OLDLINE[$n]}"; done | sort -k1,1n
-   } > "$out"
+   for n in "${!OLDLINE[@]}"; do printf '%s\n' "${OLDLINE[$n]}"; done | sort -k1,1n > "$TMP/data.txt"
+   { list_header; list_summary "$TMP/data.txt"; cat "$TMP/data.txt"; } > "$out"
    mv -f "$out" "$LIST" || die "목록을 쓰지 못했다 : $LIST"
    logt "${C_G}목록 갱신${C_0} : $LIST  ($(grep -c '^  [0-9]' "$LIST") 런)"
 }
