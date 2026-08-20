@@ -155,6 +155,8 @@ scripts/{killdaq.sh, rcsupervisor.service.example}
 scripts/daq-alarm.sh     현장 알람 (사운드카드 + PC 스피커). 사람이 끌 때까지
 scripts/daq-notify.sh    사건 -> 알람 + 메일. 감시자가 --notify-cmd 로 부른다
 scripts/usb-recover.sh   USB 진단 + usbreset + 확인 런. --diagnose 는 읽기 전용
+scripts/badrun.sh        문제 런 판정 + 못 쓰는 원시 파일 격리 + 통합 목록
+                         ★ 읽기 전용이 기본. --quarantine 이라야 파일을 옮긴다
 tools/notify/send_mail.py  SMTP 발송
 config/notify.params(.example)   위 넷이 함께 읽는다. ★ 자격증명이 들어간다
 tools/monitor/RenePrdSingles.h   PRD -> clean single (= 분석 Step1 + Step2)
@@ -386,6 +388,90 @@ DAQ 수집 뒤에 `scripts/postrun.sh` 가 붙는다. `DAQ_cup/production` 의
 성공 판정(2PC)과 로그 파일명은 원본과 **동일하게** 유지했다. 따라서
 `production/Shell/audit_run.sh` 가 postrun.sh 결과에도 그대로 동작한다.
 
+## 5.9 badrun — 쓰기 도중 죽은 런을 어떻게 다루는가  ★ 2026-08-21
+
+**문제.** 런이 쓰기 도중 죽으면 마지막 서브런 파일이 안 닫힌 채 남는다. ROOT 가
+열지 못하므로(`no keys recovered`) merge 도 production 도 못 한다. 그러면 그 런은
+**PRD 개수 == FADC 개수** 를 영원히 만족할 수 없고, `dataflow.sh:161` 의
+`is_processed()` 가 통과시키지 않아 `/Data_ssd` 에 붙박이가 된다. 자동 이동 대상이
+**절대** 되지 못한다는 뜻이라, 설계상의 구멍이었다.
+
+**해법 — 못 쓰는 원시 파일을 `<런>/badrun/` 으로 옮긴다.**
+
+```
+/Data_ssd/RAW/004293/
+   FADC_004293.root.00000 ~ .00090      91개 정상
+   Merged/ 91  PRD/ 91                  부분 Merged 에서 살린 sub 90 포함
+   badrun/
+      FADC_004293.root.00091   5.1 MB   (정상 73 MB)
+      SADC_004293.root.00091   0.67 MB  (정상 8.9 MB, keys 없음)
+      README.txt               격리 사유
+```
+
+**★ 이동·백업 쪽은 한 줄도 고치지 않았다.** 셋이 저절로 맞아떨어진다.
+
+| 곳 | 왜 그대로 되나 |
+|---|---|
+| `is_processed()` | `-maxdepth 1` 이라 하위 폴더를 안 센다 → 격리하는 순간 통과 |
+| `move_dir` (`dataflow.sh:182`) | `find -type f` 가 재귀라 `badrun/` 이 함께 간다 |
+| `bk_RAW` (`backup-khu.sh:292`) | `/Merged /PRD /PNG` 만 제외 → `khu:.../RAW/<런>/badrun/` |
+
+개수 검증도 안전하다 — `n_src` 는 `-maxdepth 1` 로 세고 원격은 `ls -1` 이라
+`badrun` 디렉터리 항목이 하나 더 잡힌다. 검사는 `n_dst < n_src` 이므로 통과하고,
+`verify_dir` 의 `rsync -c` 는 재귀라 `badrun/` 안까지 대조한다.
+
+**★ 안전 규칙 — 열리는 파일은 절대 격리하지 않는다.**
+원본이 멀쩡한데 PRD 만 없는 것은 **다시 돌리면 되는 것**이지 badrun 이 아니다.
+실제로 run 4291 서브런 30 이 그랬고, 격리했으면 멀쩡한 61,140 이벤트를 묻을
+뻔했다. 서브런마다 판정을 셋으로 나눈다.
+
+```
+bad_raw   자기 FADC 또는 SADC 가 안 열린다        -> 격리. 짝은 함께 옮긴다
+blocked   자기 원본은 멀쩡한데 다음 SADC 가 죽어  -> 격리하지 않는다.
+          merge 를 끝낼 수 없다                       부분 Merged 에서 PRD 복구 가능
+gap       전부 잘 열린다                          -> 격리하지 않는다. 재처리하면 된다
+```
+
+**짝은 함께 옮긴다.** 한쪽만 죽어도 그 서브런의 FADC·SADC 를 함께 격리한다.
+짝 없는 FADC 는 혼자서는 merge 도 production 도 못 하므로 최상위에 남겨 두면
+PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
+
+**이동은 같은 파일시스템 안 `mv -T` 다.** §8 이 명시한 예외(자료가 움직이지 않는
+원자적 연산)라 rsync + 체크섬 절차가 필요 없다. `<런>/badrun/` 은 언제나 런
+디렉터리 안이므로 파일시스템을 넘지 않는다.
+
+**비용을 세 단계로 나눈 이유.** `/scratch` 는 100 Mb NFS 라(§11.12) 전 구간
+1,972 개 런을 다 열어 보면 몇 시간이 된다.
+
+```
+1단계  런마다 readdir 로 개수만 센다                    (ls -U. find -printf 금지)
+2단계  PRD == FADC 이고 FADC > 0 이면 정상. 끝           여기서 대부분이 걸러진다
+3단계  나머지만 ROOT 로 열어 본다. 런당 상한 40개,       잘림은 언제나 런의 끝에서
+       그것도 꼬리부터                                   일어나기 때문이다
+```
+
+`PRD` 가 하나도 없는 런은 서브런을 열어 보지 않는다(`not_processed`). 안 그러면
+한 런에 수천 번 ROOT 를 띄운다.
+
+**목록은 정본 하나 + 저장소 사본.** 정본은 `/Data_ssd/LOG/badrun_list.txt` 이고
+`backup-khu` 가 db 옆으로 함께 보낸다. 사본은 `docs/BADRUNS.md` 로, 다른 PC 에서
+`git clone` 만 해도 보이게 한다. **사본은 생성물이다** — 손으로 고치지 말 것.
+
+**★ 격리를 마친 런도 목록에 영구히 남는다.** 격리하면 개수가 맞아떨어져 '정상'으로
+보이는데, 그대로 떨어뜨리면 문제가 있었다는 사실 자체가 사라진다. 그래서
+`badrun/` 이 있는 런은 개수와 무관하게 언제나 싣는다. 분류일시도 보존한다.
+
+**onlbit 이 NULL 인 행은 싣지 않는다.** 약 1,000건이 있고 rc.py 시절의 역사적
+정상이라(회귀가 아니다) 그것까지 실으면 목록이 쓸모없어진다. 디스크에 실제 결함이
+있으면 개수 대조에서 따로 잡힌다.
+
+**수집 중인 런은 절대 싣지 않는다.** postrun 이 `--lag 3` 으로 따라오므로 가동
+중에는 언제나 PRD 가 서너 개 적고, 기록 중인 마지막 SADC 는 아직 안 닫혀 ROOT 가
+열지 못한다. 그대로 두면 멀쩡한 런이 매 훑기마다 `prd_gap` 으로 잡힌다
+(실측 : run 4302 가 `FADC 1263 / PRD 1260` 으로 걸렸다).
+
+---
+
 ## 6. 잔여 작업 큐 (우선순위 순)
 
 ### 작업 1 — 실제 ROOT 빌드 검증 ★최우선
@@ -585,6 +671,10 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
 - **postrun 의 `[FAIL] Producing FAILED (0초)` 는 데이터 문제가 아니다.**
   0초짜리 실패는 로그 파일을 못 열어 ROOT 매크로가 아예 안 돈 것이다 (§11.52).
   이 경우 PRD 가 조용히 하나 빈다. 런 끝에 FADC 개수와 PRD 개수를 대조할 것.
+- **런이 비정상 종료했으면 `scripts/badrun.sh --scan` 을 돌릴 것.** 못 쓰는 원시
+  파일을 `<런>/badrun/` 으로 격리해야 그 런이 자동 이동 대상이 된다(§5.9).
+  격리 전까지는 `/Data_ssd` 에 붙박이로 남아 용량을 먹는다. 무엇이 문제였는지는
+  `/Data_ssd/LOG/badrun_list.txt` (사본 `docs/BADRUNS.md`) 하나만 보면 된다.
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).

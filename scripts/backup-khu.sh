@@ -46,6 +46,7 @@ MID=${DATAFLOW_MID_ROOT:-/data}          # 백업 대기 위치. 이 밑에 RAW/
 HOST=${BACKUP_HOST:-khu}                 # ssh 별칭 또는 user@host
 DEST=${BACKUP_DEST:-/store/cpnr-data/RENE}
 DBFILE=${BACKUP_DBFILE:-/Data_ssd/runcatalog.db}
+BADRUN_LIST=${BADRUN_LIST:-/Data_ssd/LOG/badrun_list.txt}   # 문제 런 목록 (scripts/badrun.sh)
 DATA_SRC=${BACKUP_DATA_SRC:-}            # 원격 Data/ 로 보낼 잡다한 경로. 비우면 안 함
 BWLIMIT=${BACKUP_BWLIMIT:-0}             # KB/s. 0 = 제한 없음
 NICE=${BACKUP_NICE:-10}
@@ -105,6 +106,7 @@ load_params() {
          BACKUP_HOST)    HOST=$v ;;
          BACKUP_DEST)    DEST=$v ;;
          BACKUP_DBFILE)  DBFILE=$v ;;
+         BADRUN_LIST)    BADRUN_LIST=$v ;;
          BACKUP_DATA_SRC) DATA_SRC=$v ;;
          BACKUP_BWLIMIT) BWLIMIT=$v ;;
          BACKUP_SKIP)    SKIP=$v ;;
@@ -379,6 +381,16 @@ bk_db() {
    rm -f "$tmp"
    [ "$rc" -ne 0 ] && { err "  db : rsync 실패 (rc=$rc)"; return 1; }
    log "  ${C_G}db${C_0} : $name 완료"
+   #  badrun 목록도 함께 보낸다. 격리된 원시 파일은 RAW/<run>/badrun/ 으로
+   #  따라가지만, '어떤 런이 왜 문제였나'를 한눈에 보는 것은 이 파일 하나다.
+   #  런에 딸린 것이 아니라 사이트 전체의 상태라 db 옆에 둔다.
+   if [ -f "$BADRUN_LIST" ]; then
+      # shellcheck disable=SC2086
+      nice -n "$NICE" rsync $RSYNC_BASE $VERIFY_C -e "$RSH" \
+           "$BADRUN_LIST" "$HOST:$DEST/db/badrun_list.txt" >/dev/null 2>&1 \
+        && log "  ${C_G}db${C_0} : badrun_list.txt 완료" \
+        || warn "  db : badrun_list.txt 전송 실패 (다음 주기에 재시도)"
+   fi
    LAST_N=1
    return 0
 }
