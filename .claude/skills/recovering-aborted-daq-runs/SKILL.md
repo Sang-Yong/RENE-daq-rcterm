@@ -50,11 +50,43 @@ tail -4 /scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt
 |---|---|---|
 | `Cannot open SADC file or ZOMBIE: SADC_...<N+1>` | **다음** SADC 가 죽어 이 서브런을 못 끝냈다. 자기 원본은 멀쩡하다 | 부분 Merged 에서 PRD 를 직접 만든다 (아래) |
 | `Cannot open FADC file or ZOMBIE: FADC_...<N>` | 자기 원본이 죽었다 | 복구 불가. 4단계로 |
-| `[FAIL] Producing FAILED (0초)` | 로그 파일을 못 열어 매크로가 **아예 안 돌았다**. 데이터 문제가 아니다 (§11.52) | 매크로를 직접 부른다 |
+| `[FAIL] Producing FAILED (0초)` 또는 **merge 가 0초에 rc=1** | 로그 파일을 못 열어 매크로가 **아예 안 돌았다**. 데이터 문제가 아니다 | 로그 이름을 시험해 보고(아래) 매크로를 직접 부른다 |
 | 로그가 없거나 원본이 다 열린다 | 그냥 후처리가 안 됐다 | `scripts/postrun.sh <런> --from A --to B` |
 
 **FADC 서브런 N 을 merge 하려면 SADC 서브런 N+1 이 필요하다** (SADC 가 뒤처져
 기록되므로). 이 한 가지가 "마지막 하나가 앞 것까지 끌고 내려가는" 이유다.
+
+### ★ 0초 실패 — 데이터가 아니라 로그 디렉터리를 의심하라
+
+`/scratch/LOG` 는 35만 개짜리 디렉터리이고 **엔트리가 깨진 이름들이 있다.**
+조회는 ENOENT, 생성은 EIO 라 어느 쪽으로도 손댈 수 없다. 껍데기 스크립트가
+`date > $LOG` 로 로그를 먼저 만드는데 그것이 실패하면 **매크로가 아예 실행되지
+않고** 0초 만에 rc≠0 이 된다. merge 와 production **둘 다** 이렇게 죽는다.
+
+```bash
+# 이름 하나를 실제로 만들어 본다. 이웃 이름은 되는데 이것만 안 되면 그 문제다
+date > /scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt   && rm -f "$_"
+date > /scratch/LOG/log_production_v3_5v_run<런>_subrun<N>.txt        && rm -f "$_"
+```
+
+**이것이 옛 런의 PRD 결손을 만든 원인이기도 하다** — 처음 처리할 때도 같은 EIO
+로 매크로가 안 돌았고, 아무도 모르게 구멍이 남았다. 원본 데이터는 멀쩡하다.
+
+**우회 — merge 도 직접 부를 수 있다.** 이어받기 상태는 직전 서브런의 merge
+로그에서 읽는다(그 파일은 대개 멀쩡하다).
+
+```bash
+tail -3 /scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N-1>.txt
+#   final SADC = 5916   final SADC_evt = 633   final before_SADC_trgnum = 24634670
+
+cd /home/frontend/DAQ/DAQ_cup/production/Code
+root -l -b -q 'merge_FADC_SADC_v3_5v.cc(<런>,<맨끝서브런>,<N>,5916,633,24634670,"<데이터디렉터리>")'
+root -l -b -q 'production_from_merged_v3_5v.cc(<런>,<N>,"<데이터디렉터리>")'
+```
+
+**직전 로그가 없으면 하지 말 것.** postrun 은 그때 `state=(N,0,0)` 으로
+초기화하는데, 그러면 그 서브런의 앞부분 SADC 이벤트를 잃은 채 산출물이 나온다.
+**개수는 맞지만 내용이 조용히 부족하다 — PRD 가 없는 것보다 나쁘다.**
 
 ## 4. 부분 Merged 에서 PRD 를 살린다
 
@@ -103,6 +135,8 @@ echo "$f $p"    # 같아야 dataflow 가 옮긴다
 | 개수만 보고 corrupt 로 단정 | 원본을 열어 보기 전엔 모른다 |
 | 서브런을 아무 순서로 merge | **번호 순서대로** 해야 한다. SADC 위치가 앞에서 넘어온다 (§5.8) |
 | 옛 런을 통째로 다시 훑음 | `/scratch` 에서 13배 느리다 (§11.32). 구간을 끊어라 |
+| 0초 실패를 데이터 손상으로 읽음 | 로그 이름을 만들어 보라. EIO 면 디렉터리 문제다 |
+| 직전 merge 로그 없이 재처리 | 내용이 조용히 짧아진다. 차라리 두어라 |
 
 ## 마지막에 할 것
 

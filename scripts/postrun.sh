@@ -146,8 +146,8 @@ log()  { sayt "$*"; }
 die()  { sayt "${C_R}[FATAL ERROR]${C_0} $*"; exit 1; }
 
 # 원본의 [Data Dashboard] / [Pre-Check] 블록. 런마다 한 번만 찍는다.
-dashboard() {            # run_num data_dir
-   local rn=$1 dd=$2 fc sc maxs empty
+dashboard() {            # run_num data_dir run_pad from to
+   local rn=$1 dd=$2 rp=$3 from=$4 to=$5 fc sc maxs empty n s f
    fc=$(find "$dd" -maxdepth 1 -name 'FADC*.root.*' 2>/dev/null | wc -l)
    sc=$(find "$dd" -maxdepth 1 -name 'SADC*.root.*' 2>/dev/null | wc -l)
    maxs=$(( fc - 1 )); [ "$maxs" -lt 0 ] && maxs=0
@@ -160,8 +160,25 @@ dashboard() {            # run_num data_dir
    [ "$fc" != "$sc" ] && \
       say "  ${C_R}[!] 주의: FADC와 SADC 파일 개수가 다릅니다! 데이터 누락 의심.${C_0}"
    say "${C_C}==========================================================${C_0}"
-   say "${C_C} [Pre-Check] Checking for 0-byte (broken) files...${C_0}"
-   empty=$(find "$dd" -maxdepth 1 -type f -name '*.root.*' -size 0 2>/dev/null)
+   say "${C_C} [Pre-Check] Checking for 0-byte (broken) files... (subrun ${from}..${to})${C_0}"
+   #  ★ 0바이트 점검은 **이번에 처리할 범위만** 본다. 런 전체에 걸면
+   #     -type f 와 -size 0 이 파일마다 stat 을 걸어, /scratch 의 100 Mb NFS
+   #     에서는 그것만으로 몇 분~십수 분이 된다(CLAUDE.md §11.5 와 같은 함정).
+   #     실측 run 4239, 26,040 파일 :
+   #        find -maxdepth 1 -name 'FADC*.root.*'              0.40 초
+   #        find -maxdepth 1 -type f -name '*.root.*' -size 0  300 초에도 안 끝남
+   #     위 개수 세기 두 줄은 -name 뿐이라 stat 이 없고 그래서 싸다.
+   #     읽을 파일만 보면 되고, 그 수는 어차피 처리할 서브런 수와 같다.
+   empty=""
+   n=$from
+   while [ "$n" -le "$to" ]; do
+      s=$(printf '%05d' "$n")
+      for f in "$dd/FADC_$rp.root.$s" "$dd/SADC_$rp.root.$s"; do
+         if [ -e "$f" ] && [ ! -s "$f" ]; then empty="$empty$f"$'\n'; fi
+      done
+      n=$(( n + 1 ))
+   done
+   empty=${empty%$'\n'}
    if [ -n "$empty" ]; then
       say "${C_Y} [WARNING] 0-byte (손상) 파일 발견됨!${C_0}"
       say "${C_Y}${empty}${C_0}"
@@ -610,7 +627,7 @@ run_once() {             # run_num
    # [Data Dashboard] / [Pre-Check] 는 런마다 한 번만. 추적 모드에서 20초마다
    # 다시 찍으면 화면이 배너로 뒤덮인다.
    if [ "$DASH_RUN" != "$rn" ]; then
-      dashboard "$rn" "$dd"
+      dashboard "$rn" "$dd" "$rp" "$from" "$to"
       DASH_RUN=$rn
    fi
    say "${C_C} [Resume Check] Subrun ${from} 부터 이어서 처리합니다."\

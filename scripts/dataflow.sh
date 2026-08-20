@@ -266,6 +266,33 @@ move_side_files() {       # run_pad src_root dst_root
 #  1단계 : /Data_ssd -> /data
 #     여기가 막히면 /Data_ssd 가 차고 DAQ 가 멈춘다. 가장 급한 단계다.
 # =====================================================================
+# =====================================================================
+#  밖에서 돌고 있는 백업이 이 런을 읽는 중인가
+#
+#  2026-08-21 에 실제로 부딪혔다. 손으로 띄운 backup-khu 가 run 4294 의 PRD 를
+#  보내는 도중 1단계가 그 런을 /data 로 옮겨, rsync 가 rc=24(원본이 사라짐)로
+#  죽었다. 그때는 RAW 가 이미 체크섬까지 통과한 뒤였고 마커가 이동을 따라가
+#  피해가 없었지만, 순서가 반대였으면 **검증하지 않은 부분 전송이 완료로
+#  남을 수 있었다.** 옮기기 전에 확인한다.
+#
+#  ★ backup-khu 는 --all 로도 돌아 명령줄에 런 번호가 없을 수 있다. 그래서
+#    껍데기가 아니라 **실제로 파일을 읽는 rsync/ssh** 의 명령줄을 본다.
+#  ★ pgrep -f 는 자기를 부른 셸까지 잡는다(§11.67 에서 두 번 밟았다).
+#    자기 계보를 빼고, 프로그램 이름을 줄 맨 앞에서 확인한다.
+# =====================================================================
+backup_reading() {       # run_pad
+   local rp=$1 mine=" $$ $PPID " p=$PPID i
+   for i in 1 2 3 4 5 6; do
+      p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+      { [ -n "$p" ] && [ "$p" != 0 ]; } || break
+      mine="$mine$p "
+   done
+   ps -eo pid=,args= 2>/dev/null | while read -r pid args; do
+      case "$mine" in *" $pid "*) continue ;; esac
+      printf '%s\n' "$args"
+   done | grep -Eq "^(/[^ ]*/)?(rsync|ssh) .*(/|^)$rp(/| |$)"
+}
+
 stage1() {
    local keep rp src
    keep=$(runs_in "$SSD/RAW" | tail -n "$KEEP_SSD")
@@ -280,6 +307,9 @@ stage1() {
       fi
       if ! is_processed "$src"; then
          log "${C_Y}[1] run $rp : 후처리 미완료. 대기${C_0}"; continue
+      fi
+      if backup_reading "$rp"; then
+         log "${C_Y}[1] run $rp : 백업이 읽는 중이다. 끝난 뒤에 옮긴다${C_0}"; continue
       fi
       log "${C_C}[1] run $rp : $SSD -> $MID${C_0}"
       if move_dir "$src" "$MID/RAW/$rp" "run $rp"; then
@@ -329,6 +359,9 @@ stage3() {
          log "${C_Y}[3] run $rp : 백업 미완료. 대기${C_0}"; continue
       fi
       src="$MID/RAW/$rp"
+      if backup_reading "$rp"; then
+         log "${C_Y}[3] run $rp : 백업이 읽는 중이다. 끝난 뒤에 옮긴다${C_0}"; continue
+      fi
 
       local extra=()
       if [ "$DROP_MERGED" = "1" ] && [ -d "$src/Merged" ]; then
