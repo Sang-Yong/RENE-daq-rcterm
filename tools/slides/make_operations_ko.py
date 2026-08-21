@@ -199,6 +199,29 @@ d.table(s, M, 2.12, CW, ["증상", "먼저 볼 것", "대개의 원인"],
 d.note(s, M, 6.20, CW, 0.85, "막히면 순서대로",
        "① 상태 화면  ② 감시자 로그  ③ DAQ 로그  ④ 저장소의 docs/MANUAL.md 디버그 순서", "info")
 
+# ============================================================ 점검 주기
+s = d.head("점검", "언제 무엇을 보나")
+for i, (when, cost, items, cmds, kind) in enumerate([
+        ("매일", "1분", "heartbeat 나이 · 계수율 · 알람 띠 · 디스크 여유",
+         ["tmux attach -t daq", "df -h /Data_ssd"], "ok"),
+        ("런이 끝나면", "5분", "원시와 PRD 개수가 같은가 · 구글시트에 등재",
+         ["scripts/badrun.sh --scan --run <런>",
+          "tools/sheetlog/append_runs.py --from <런>"], "info"),
+        ("주 1회", "10분", "백업이 밀리지 않았는가 · 문제 런이 늘지 않았는가 · 추이가 이상하지 않은가",
+         ["scripts/backup-audit.sh", "tools/monitor/run-summary.sh --show"], "info")]):
+    y = 2.08 + i * 1.36
+    d.box(s, M, y, CW, 1.24, fill=PANEL)
+    d.box(s, M, y, 0.05, 1.24, fill=ACCENT if kind != "ok" else OK)
+    d.text(s, M + 0.26, y + 0.18, 2.0, 0.32,
+           [[(when, {"size": 18, "bold": True, "color": INK})]])
+    d.chip(s, M + 0.26, y + 0.64, 0.95, 0.30, cost, kind, size=11)
+    d.text(s, M + 2.45, y + 0.20, 5.1, 0.9,
+           [[(items, {"size": 13.5, "color": INK2})]], line_spacing=1.2)
+    d.code(s, M + 7.75, y + 0.16, CW - 7.75, 0.92, cmds, size=11.5)
+d.note(s, M, 6.12, CW, 1.05, "이 셋 말고는 볼 것이 없다",
+       "나머지는 알아서 돌고, 막히면 알람이 울리거나 메일이 온다. 점검은 고장을 찾는 일이 "
+       "아니라 조용히 밀리고 있는 것을 보는 일이다.", "info")
+
 # ============================================================ 금지
 s = d.head("주의", "수집 중에는 절대 하지 말 것")
 for i, (t, why) in enumerate([

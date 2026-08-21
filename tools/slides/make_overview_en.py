@@ -35,6 +35,59 @@ d.note(s, M, 5.20, CW, 1.0, "IN ONE SENTENCE",
        "Something that needed a person watching the screen now runs without one — "
        "and fetches a person when it cannot.", "info")
 
+s = d.head("HOW IT WENT", "Eight days, in order")
+tl = [("Aug 13", "Verified the build and the logic first",
+       "Real ROOT clean build; rotation and recovery exercised against a fake child"),
+      ("Aug 14", "First run on real hardware at the site",
+       "Runs 4280-4287. Met three defects only unattended running exposes"),
+      ("Aug 15", "Fixed those three defects",
+       "A rotated run no longer loses its record. Moved the DAQ into tmux"),
+      ("Aug 16", "Watched the fix rotate twice in a row",
+       "4288 - 4289 - 4290 clean. Processing caught up with acquisition"),
+      ("Aug 17", "Redesigned the route the data takes",
+       "Measured the NFS link at 100 Mb; added 3-stage movement and off-site backup"),
+      ("Aug 18", "Moved all monitoring onto the PRD files",
+       "All three stages reproduce the analysis chain number for number"),
+      ("Aug 19", "Movement became copy, compare, then delete",
+       "Swept 6.5 months of foreign connections and closed the DAQ ports"),
+      ("Aug 20", "A wedged FADC board stopped us for 2h09m",
+       "Wrote the recovery procedure; added alarm, mail and automatic USB recovery"),
+      ("Aug 21", "Built the quarantine for runs that died mid-write",
+       "Swept all 1,972 runs and unjammed the ones that were stuck")]
+lx = M + 1.18
+d.box(s, lx, 2.22, 0.028, len(tl) * 0.46 - 0.10, fill=FAINT)
+for i, (dt, what, res) in enumerate(tl):
+    y = 2.15 + i * 0.46
+    d.text(s, M, y + 0.05, 1.04, 0.26,
+           [[(dt, {"font": MONO, "size": 12, "bold": True, "color": ACCENT})]],
+           align=PP_ALIGN.RIGHT)
+    d.box(s, lx - 0.055, y + 0.10, 0.14, 0.14, fill=ACCENT, shape=MSO_SHAPE.OVAL)
+    d.text(s, lx + 0.26, y + 0.02, 4.30, 0.28,
+           [[(what, {"size": 13, "bold": True, "color": INK})]])
+    d.text(s, lx + 4.70, y + 0.04, CW - (lx - M) - 4.78, 0.28,
+           [[(res, {"size": 11.5, "color": INK2})]])
+d.foot(s, "Left is what was done; right is what came of it. Three lines are incident response - the rest is making sure that incident does not return")
+
+s = d.head("WHAT WAS BUILT", "Eight days of output")
+rows = [[("rcterm · rcsupervisor", {"bold": True}), ("C++17, 2,563 lines", {"font": MONO}),
+         "One run / N-hour rotation with diagnosis and auto recovery"],
+        [("Operations scripts", {"bold": True}), ("15", {"font": MONO}),
+         "Processing, movement, backup, alarm, recovery, broken runs, screen"],
+        [("Tools", {"bold": True}), ("20", {"font": MONO}),
+         "3-stage monitoring, mail, run-log sheet, these slides"],
+        [("Documents", {"bold": True}), ("5 + 1 skill", {"font": MONO}),
+         "Manual, post-run, data flow, alarm, broken-run list"],
+        [("Commits", {"bold": True}), ("77", {"font": MONO}),
+         "Since Aug 13. All of them on origin/main"]]
+d.table(s, M, 2.15, CW, ["What", "Size", "What it does"], rows,
+        widths=[3.3, 2.5, CW - 5.8], rh=0.44)
+d.note(s, M, 5.05, CW, 1.02, "NOT COPYING IS THE RULE",
+       "Not one line of hardware driver was written - the CUPDAQ binaries drive the boards and "
+       "we only send 32-byte commands. Physics is the same: the post-run macros are called, and "
+       "the analysis cut constants are included from their own header. A copy would drift.", "info")
+d.note(s, M, 6.22, CW, 0.72, "IN SERVICE",
+       "Five 24-hour runs carried to completion (4288, 4289, 4292, 4294, 4302) - about 434 million events.", "ok")
+
 d.section("01", "ARCHITECTURE", "What controls what, and why it is split this way")
 
 s = d.head("ARCHITECTURE", "We are not the ones touching the hardware")
