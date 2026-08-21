@@ -4,9 +4,9 @@
 그렇게 적혔는지가 `git log` 에 남는다. 이 저장소의 다른 것들과 같은 이유다.
 
 ```bash
-python3 tools/slides/make_overview_ko.py      # 종합 (한글)   21장
-python3 tools/slides/make_overview_en.py      # 종합 (영문)   20장
-python3 tools/slides/make_operations_ko.py    # 운용자용 (한글) 11장
+python3 tools/slides/make_overview_ko.py      # 종합 (한글)   23장
+python3 tools/slides/make_overview_en.py      # 종합 (영문)   22장
+python3 tools/slides/make_operations_ko.py    # 운용자용 (한글) 12장
 python3 tools/slides/audit.py docs/*.pptx     # 배치 점검
 ```
 
@@ -30,6 +30,10 @@ python3 tools/slides/audit.py docs/*.pptx     # 배치 점검
 사고는 거의 다 걸린다.** 실제로 만드는 동안 여섯 군데를 이것으로 잡았다.
 
 새 슬라이드를 넣었으면 반드시 돌릴 것. `문제 없음` 이 나와야 한다.
+2026-08-21 에 두 장을 더하면서 넘침·겹침 6건을 이것으로 잡았다.
+
+**슬라이드에 명령을 적을 때는 `--help` 로 옵션을 확인하고 넣을 것.** 발표자료가
+틀린 명령을 가르치면 문서보다 나쁘다 — 사람이 그대로 따라 친다.
 
 ## `deck.py` 의 그림 조각
 

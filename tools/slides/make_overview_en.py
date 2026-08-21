@@ -13,22 +13,24 @@ d.title("RENE / CUPDAQ",
         "It began as a rewrite of a GUI run control. It ended as one chain — taking data,\n"
         "processing it, backing it up, watching itself, and calling a human when it cannot cope.",
         ["Yeong-Gwang site  ·  Rocky Linux 9.8  ·  ROOT 6.28/04  ·  GCC 11.5.0",
-         "August 2026  ·  runs 4280-4302  ·  four clean 24-hour rotations"])
+         "August 2026  ·  runs 4280-4303  ·  five 24-hour runs carried to completion"])
 
 s = d.head("AT A GLANCE", "Where this stands today")
-cards = [("Data taking", "24-hour rotation", "4 clean", "ok"),
+cards = [("Data taking", "24-hour rotation", "5 completed", "ok"),
          ("Processing", "follows acquisition live", "lag 3 subruns", "ok"),
          ("Data movement", "local → backup → archive", "checksum verified", "ok"),
+         ("Off-site backup", "by file category", "content compared", "ok"),
          ("Monitoring", "livetime → IBD candidates", "3 stages, automatic", "ok"),
          ("Alarm & mail", "buzzer + expert mail", "delivery confirmed", "ok"),
+         ("Broken runs", "quarantined, one list", "whole history swept", "ok"),
          ("Auto recovery", "revive a wedged board", "awaiting real fault", "warn")]
-bw, gap = (CW - 0.32 * 2) / 3.0, 0.32
+bw, gap = (CW - 0.30 * 3) / 4.0, 0.30
 for i, (t, sub, chip, kind) in enumerate(cards):
-    x = M + (i % 3) * (bw + gap); y = 2.15 + (i // 3) * 1.42
+    x = M + (i % 4) * (bw + gap); y = 2.15 + (i // 4) * 1.42
     d.box(s, x, y, bw, 1.22, fill=PANEL); d.box(s, x, y, 0.05, 1.22, fill=ACCENT)
-    d.text(s, x + 0.24, y + 0.16, bw - 0.5, 0.3, [[(t, {"size": 17, "bold": True})]])
-    d.text(s, x + 0.24, y + 0.53, bw - 0.5, 0.3, [[(sub, {"size": 13.5, "color": INK2})]])
-    d.chip(s, x + 0.24, y + 0.83, 2.3, 0.28, chip, kind, size=10.5)
+    d.text(s, x + 0.22, y + 0.16, bw - 0.42, 0.3, [[(t, {"size": 15.5, "bold": True})]])
+    d.text(s, x + 0.22, y + 0.52, bw - 0.42, 0.3, [[(sub, {"size": 12, "color": INK2})]])
+    d.chip(s, x + 0.22, y + 0.84, 2.2, 0.28, chip, kind, size=10)
 d.note(s, M, 5.20, CW, 1.0, "IN ONE SENTENCE",
        "Something that needed a person watching the screen now runs without one — "
        "and fetches a person when it cannot.", "info")
@@ -177,6 +179,31 @@ d.note(s, M, 4.70, CW, 1.05, "WHY COUNTING IS NOT ENOUGH",
 d.note(s, M, 5.90, CW, 0.9, "AND A JUDGEMENT THAT WAS WRONG",
        "Verifying by checksum costs one eighteenth of the transfer. 'Too expensive' was simply false.", "ok")
 
+s = d.head("CHANGES · BROKEN RUNS", "A run that died mid-write jammed the pipeline forever")
+d.text(s, M, 2.08, CW, 0.42,
+       [[("When a run dies while writing, its last file is never closed. ROOT cannot open it, so "
+          "that run can never satisfy 'PRD count = raw count' and never becomes eligible to move.",
+          {"size": 15.5, "color": INK2})]])
+d.code(s, M, 2.52, CW, 1.62, [
+    "/Data_ssd/RAW/004293/",
+    ("   FADC_004293.root.00000 ~ .00090    91 files   healthy", OK),
+    ("   Merged/ 91   PRD/ 91               includes one salvaged from a partial merge", OK),
+    ("   badrun/                            reason recorded in README.txt", WARN),
+    ("      FADC_004293.root.00091   5.1 MB  (73 MB when healthy)", CRIT),
+    ("      SADC_004293.root.00091  0.67 MB  (no keys at all)", CRIT),
+], size=12.5)
+d.table(s, M, 4.24, CW, ["Verdict", "What it means", "What is done"],
+        [[("bad_raw", {"font": MONO, "bold": True, "color": CRIT}),
+          "its own FADC or SADC will not open", "quarantined — the partner file always goes with it"],
+         [("blocked", {"font": MONO, "bold": True, "color": WARN}),
+          "healthy, but the next SADC died", "not quarantined — the PRD is salvaged from the partial merge"],
+         [("gap", {"font": MONO, "bold": True, "color": OK}),
+          "everything opens fine", "not quarantined — this one just needs reprocessing"]],
+        widths=[1.5, 4.3, CW - 5.8], rh=0.46, size=13.5)
+d.note(s, M, 6.14, CW, 1.30, "NOT ONE LINE OF THE MOVE OR BACKUP CODE CHANGED",
+       "Quarantining releases the completeness test by itself, and run 4293 then travelled all the "
+       "way to the archive. Sweeping all 1,972 runs found 631 with problems, now in one list.", "ok")
+
 s = d.head("CHANGES · SECURITY", "The DAQ control ports faced the internet")
 d.bullets(s, M, 2.12, CW, [
     ("Run 4293 died moments after an external connection. ", "It had been perfectly healthy until then."),
@@ -244,6 +271,30 @@ d.table(s, M, 2.12, CW, ["Item", "Result"],
 d.note(s, M, 5.85, CW, 0.95, "WE DO NOT WRITE 'VERIFIED' FOR THINGS WE DID NOT VERIFY",
        "The repository marks verification status explicitly. The last row is what that looks like.", "info")
 
+s = d.head("MEASUREMENTS · DIAGNOSIS", "Missing PRDs in old runs were never a data problem")
+d.text(s, M, 2.08, CW, 0.42,
+       [[("Old runs with missing PRDs looked like data corruption. The real cause was a damaged "
+          "directory entry on the archive server: certain log file names cannot be created at all.",
+          {"size": 15.5, "color": INK2})]])
+d.code(s, M, 2.58, CW, 1.72, [
+    "date > /scratch/LOG/log_merge_..._run4238_subrun5916.txt",
+    ("   -> Input/output error", CRIT),
+    ("   neighbouring names (5915 · 5917) are created fine. 20T free, 1% of inodes used", MUTED),
+    "",
+    ("The wrapper script creates the log first. When that fails,", WARN),
+    ("the macro never runs at all — post-processing leaves one '(0 s) FAILED' line", WARN),
+], size=12.5)
+d.bullets(s, M, 4.44, CW, [
+    ("Success and failure matched log-creatability exactly. ",
+     "Every raw file was of normal size — no data was lost."),
+    ("The workaround is to skip the wrapper and call the macro directly. ",
+     "Runs 4238 and 4239 were completed this way: raw = merged = PRD."),
+    ("★ Never reprocess without the preceding merge log. ",
+     "The carry-over state is lost: counts match while contents are quietly short — worse than a missing PRD."),
+], size=15)
+d.note(s, M, 6.50, CW, 0.90, "ONE MORE RULE CAME OUT OF THIS",
+       "A failure that takes zero seconds points at the log path, not at the data.", "info")
+
 d.section("04", "WHAT IS NEXT", "What remains, and what is urgent")
 
 s = d.head("WHAT IS NEXT", "In order")
@@ -252,17 +303,18 @@ d.table(s, M, 2.12, CW, ["", "Item", "Why"],
           "NFS ports face the internet", "Worse in kind than the DAQ ports. Identify the mounts, then close"],
          [("site", {"color": CRIT, "bold": True, "font": MONO, "size": 11.5}),
           "the 100 Mb storage link", "Fixing it turns a 12-hour archive move into one or two. Everything shares this link"],
+         [("site", {"color": WARN, "bold": True, "font": MONO, "size": 11.5}),
+          "damaged directory entries on the archive", "Certain log names cannot be created, so processing goes quietly short"],
+         [("ops", {"color": WARN, "bold": True, "font": MONO, "size": 11.5}),
+          "14 old runs still to quarantine", "Their raw tails are dead. A person must read the reason first — one is missing 156 subruns"],
+         [("ops", {"color": MUTED, "bold": True, "font": MONO, "size": 11.5}),
+          "237 old runs not yet backed up", "The low-priority backup keeps yielding to more urgent work and never advances"],
          [("code", {"color": WARN, "bold": True, "font": MONO, "size": 11.5}),
           "stop earlier on a repeating error", "Hardware faults still burn five run numbers"],
-         [("code", {"color": WARN, "bold": True, "font": MONO, "size": 11.5}),
-          "reconnect the monitor socket", "A mid-run disconnect is never recovered"],
          [("code", {"color": MUTED, "bold": True, "font": MONO, "size": 11.5}),
-          "link libsqlite3 · unit tests", "Parsing and bitmask decoding are pure functions and easy to test"],
-         [("phys", {"color": MUTED, "bold": True, "font": MONO, "size": 11.5}),
-          "fold in the energy-window efficiency", "It needs a peak fit, so it cannot be derived automatically"]],
-        widths=[1.0, 4.9, CW - 5.9], rh=0.60, size=13.5)
-d.note(s, M, 6.05, CW, 0.80, "THE TWO URGENT ONES ARE SITE ACTIONS",
-       "Nothing else blocks operation today. Fixing the link is the single change that moves the most.", "info")
+          "libsqlite3 · unit tests · socket reconnect", "Parsing and bitmask decoding are pure functions and easy to test"]],
+        widths=[1.0, 4.9, CW - 5.9], rh=0.55, size=13.5)
+d.foot(s, "The urgent ones are site actions. Nothing else blocks operation today — fixing the link is the single change that moves the most")
 
 s = d.head("CLOSING", "In one line")
 d.box(s, M, 2.30, CW, 1.55, fill=INK)

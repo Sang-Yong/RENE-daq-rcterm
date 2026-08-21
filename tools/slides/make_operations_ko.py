@@ -163,16 +163,40 @@ d.bullets(s, M, 5.05, CW, [
 ], size=14.5)
 
 # ============================================================ 대처
+s = d.head("복구", "런이 비정상 종료했을 때")
+d.text(s, M, 2.08, CW, 0.42,
+       [[("런이 쓰다 죽으면 마지막 파일이 닫히지 않는다. 그대로 두면 그 런은 후처리도 이동도 "
+          "되지 않고 로컬 디스크에 붙박이로 남는다. 아래 순서대로 하면 된다.",
+          {"size": 15.5, "color": INK2})]])
+d.code(s, M, 2.54, CW, 2.12, [
+    ("1  무엇이 문제인지 본다   — 읽기 전용. 아무것도 옮기지 않는다", OK),
+    "     scripts/badrun.sh --scan --run 4293",
+    ("2  격리할 것을 미리 본다", OK),
+    "     scripts/badrun.sh --quarantine --run 4293 --dry-run",
+    ("3  못 쓰는 원시 파일만 <런>/badrun/ 으로 옮긴다", WARN),
+    "     scripts/badrun.sh --quarantine --run 4293",
+    ("4  목록과 저장소 사본을 갱신한다", OK),
+    "     scripts/badrun.sh --scan --update-list  &&  scripts/badrun.sh --export",
+])
+d.note(s, M, 4.74, CW, 0.95, "격리하면 나머지는 저절로 풀린다",
+       "이동과 백업이 격리 폴더를 그대로 함께 가져가므로 고칠 것이 없다. "
+       "완결 판정이 통과로 바뀌어 그 런이 다시 흐르기 시작한다.", "ok")
+d.note(s, M, 5.78, CW, 1.02, "★ 열리는 파일은 절대 격리하지 않는다",
+       "원본이 멀쩡한데 PRD 만 없는 것은 '다시 돌리면 되는 것'이지 못 쓰는 파일이 아니다. "
+       "격리 대상은 ROOT 가 열지 못하는 원시 파일뿐이고, 짝은 언제나 함께 옮긴다.", "crit")
+d.foot(s, "무엇이 문제였는지는 /Data_ssd/LOG/badrun_list.txt 하나만 보면 된다 (저장소 사본 docs/BADRUNS.md)")
+
 s = d.head("대처", "증상별로 무엇을 볼까")
 d.table(s, M, 2.12, CW, ["증상", "먼저 볼 것", "대개의 원인"],
         [["화면이 갱신되지 않는다", "heartbeat 나이 · pgrep -x rcterm", "런컨트롤이 멎었다. 감시자가 곧 재시작한다"],
          ["계수율이 0 이거나 절반", "FADCDAQ/SADCDAQ 로그의 USB 오류", "보드 한 장이 걸렸다 → 자동 복구가 돈다"],
          ["감시자가 FATAL 로 끝났다", "usb-recover 기록 · 메일 본문", "하드웨어. 재기동만 하면 런 번호만 태운다"],
-         ["후처리가 0초 만에 실패", "그 서브런의 production 로그", "로그 파일을 못 연 것이다. 데이터 문제가 아니다"],
+         ["후처리가 0초 만에 실패", "그 이름의 로그를 만들 수 있는지", "로그 경로가 깨진 것이다. 데이터 문제가 아니다"],
+         ["끝난 런이 계속 '대기'", "원시 개수와 PRD 개수", "쓰다 죽은 런이다. badrun.sh 로 격리하면 풀린다"],
          ["디스크가 찬다", "df -h /Data_ssd", "이동 체인이 막혔다. dataflow 화면을 본다"],
          ["백업이 느리다", "무엇을 어디서 읽는가", "/scratch 에서 읽으면 6배 느리다"]],
-        widths=[3.5, 4.0, CW - 7.5], rh=0.56, size=13.5)
-d.note(s, M, 6.00, CW, 0.85, "막히면 순서대로",
+        widths=[3.5, 4.0, CW - 7.5], rh=0.50, size=13.5)
+d.note(s, M, 6.20, CW, 0.85, "막히면 순서대로",
        "① 상태 화면  ② 감시자 로그  ③ DAQ 로그  ④ 저장소의 docs/MANUAL.md 디버그 순서", "info")
 
 # ============================================================ 금지
@@ -220,9 +244,10 @@ d.code(s, M + col + 0.4, 2.44, col, 1.75, [
 ], size=12.5)
 d.text(s, M + col + 0.4, 4.35, col, 0.3,
        [[("점검 (읽기만 한다)", {"font": MONO, "size": 12, "bold": True, "color": ACCENT})]])
-d.code(s, M + col + 0.4, 4.69, col, 1.35, [
+d.code(s, M + col + 0.4, 4.69, col, 1.55, [
     "scripts/usb-recover.sh --diagnose",
     "scripts/dataflow.sh --once --dry-run",
+    "scripts/badrun.sh --scan --run <런>",
     "tools/monitor/run-summary.sh --show",
 ], size=12.5)
 d.text(s, M, 6.30, CW, 0.4,
