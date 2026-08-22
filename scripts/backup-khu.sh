@@ -167,13 +167,29 @@ want_cat() {             # 카테고리 이름
 
 # ---- 접속 확인 -------------------------------------------------------
 #  키 인증이 안 되면 rsync 가 런마다 매달린다. 시작할 때 한 번에 걸러낸다.
+#  ★ 여기도 remote_count 와 같은 이유로 재시도한다. 일시적인 연결 리셋
+#     하나에 [FATAL] 을 내면 멀쩡한 런이 통째로 미완료가 된다 (실측
+#     2026-08-22 : run 4276 이 그렇게 걸렸다).
+#  ★ 재시도는 ssh 가 붙지 못한 경우(rc=255)에만 한다. 원격 명령이 제 뜻대로
+#     실패한 것(경로 없음 = rc 1)은 다시 붙어도 결과가 같으므로 곧바로 낸다.
 check_host() {
-   local out
-   out=$($RSH "$HOST" "test -d '$DEST' && echo OK-$(id -un 2>/dev/null)" 2>&1) || {
-      err "[FATAL] $HOST 접속 실패. ssh 키와 ~/.ssh/config 를 확인할 것"
+   local out rc i wait=5
+   for i in 1 2 3 4 5; do
+      out=$($RSH "$HOST" "test -d '$DEST' && echo OK-$(id -un 2>/dev/null)" 2>&1); rc=$?
+      [ "$rc" -ne 255 ] && break
+      [ "$i" -eq 5 ] && break
+      sleep "$wait"; wait=$(( wait * 2 )); [ "$wait" -gt 30 ] && wait=30
+   done
+   if [ "$rc" -eq 255 ]; then
+      err "[FATAL] $HOST 접속 실패 (${i}회 시도). ssh 키와 ~/.ssh/config 를 확인할 것"
       err "        $out"
       return 1
-   }
+   fi
+   if [ "$rc" -ne 0 ]; then
+      err "[FATAL] $HOST 에 $DEST 가 없다 (rc=$rc) : $out"
+      return 1
+   fi
+   [ "$i" -gt 1 ] && log "  (접속 확인 : ${i}번째 시도에 성공)"
    case "$out" in
       OK*) log "백업 대상 ${C_C}${HOST}:${DEST}${C_0} 접속 확인" ;;
       *)   err "[FATAL] $HOST 에 $DEST 가 없다 : $out"; return 1 ;;
@@ -198,8 +214,40 @@ mark_cat() {             # run_pad cat n
 }
 
 # ---- 원격 개수 세기 (전송 검증) --------------------------------------
+#  ★ ssh 가 실패한 것과 '원격에 파일이 적은 것'은 전혀 다르다. 원격 서버가
+#     동시 접속을 간헐적으로 끊는다 (실측 2026-08-22 : 여덟 번에 한 번꼴로
+#     'Connection closed by ... port 2223' / 'kex_exchange_identification:
+#      read: Connection reset by peer'). 그때 빈 문자열을 돌려주면 호출자가
+#     '원격 개수 0' 으로 읽어, 전송이 멀쩡히 끝난 런을 실패로 표시하고 마커를
+#     안 찍는다 — 그러면 밀린 런을 영영 못 따라잡는다 (backup-trickle 실측 :
+#     run 4273·4274·4276 이 그렇게 걸렸고 원격에는 파일이 전부 있었다).
+#
+#  간격을 벌려 다섯 번 시도한다. 세 번(5초 간격)으로는 연속 실패를 실제로
+#  한 번 겪었다 — 다른 rsync 들이 같은 링크로 ssh 를 물고 있으면 몰려서
+#  끊긴다. 실패했을 때만 치르는 비용이고 최대 65초다.
+#
+#  끝내 안 되면 아무것도 내지 않고 1 을 돌려준다. 호출자는 '개수 부족'과
+#  '확인 실패'를 갈라서 처리한다.
+#
+#  ★ 원격 경로를 맨 처음에 지역 변수로 받아 둔다. 재시도 안에서 위치 인자를
+#     건드리면 $1 이 경로가 아니게 되어 엉뚱한 디렉터리를 센다.
 remote_count() {         # 원격 디렉터리
-   $RSH "$HOST" "ls -1 '$1' 2>/dev/null | wc -l" 2>/dev/null | tr -dc '0-9'
+   local dir=$1
+   local out rc i wait=5
+   for i in 1 2 3 4 5; do
+      out=$($RSH "$HOST" "ls -1 '$dir' 2>/dev/null | wc -l" 2>/dev/null); rc=$?
+      out=$(printf '%s' "$out" | tr -dc '0-9')
+      if [ "$rc" -eq 0 ] && [ -n "$out" ]; then
+         [ "$i" -gt 1 ] && log "    (원격 개수 확인 : ${i}번째 시도에 성공)"
+         printf '%s' "$out"
+         return 0
+      fi
+      [ "$i" -eq 5 ] && break
+      sleep "$wait"
+      wait=$(( wait * 2 ))
+      [ "$wait" -gt 30 ] && wait=30
+   done
+   return 1
 }
 
 # ---- 체크섬 대조 ------------------------------------------------------
@@ -265,8 +313,12 @@ push_dir() {             # 이름표 로컬디렉터리 원격상대경로 [추�
       err "  $what : rsync 실패 (rc=$rc). 다음 주기에 재시도"
       return 1
    fi
-   n_dst=$(remote_count "$DEST/$rel")
-   if [ -z "$n_dst" ] || [ "$n_dst" -lt "$n_src" ]; then
+   if ! n_dst=$(remote_count "$DEST/$rel"); then
+      err "  $what : 원격 개수를 확인하지 못했다 (ssh 3회 실패). 미완료로 둔다"
+      err "         전송 자체는 끝났을 수 있다. 다음 주기에 다시 센다"
+      return 1
+   fi
+   if [ "$n_dst" -lt "$n_src" ]; then
       err "  $what : 원격 개수 부족 ($n_dst / $n_src). 미완료로 둔다"
       return 1
    fi
