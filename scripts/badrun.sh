@@ -507,6 +507,8 @@ scan() {
    total=$(printf '%s\n' "$list" | grep -c '[0-9]')
    logt "${C_C}훑는 중${C_0} : 런 $total 개  (roots=$ROOTS)"
    : > "$TMP/found.tsv"
+   #  이번에 실제로 훑은 런. write_list 가 부분 훑기를 알아보는 데 쓴다.
+   printf '%s\n' "$list" | grep '[0-9]' > "$TMP/scanned.txt"
    for n in $list; do
       seen=$((seen+1))
       if [ "$QUIET" -eq 0 ] && [ $((seen % 200)) -eq 0 ]; then
@@ -582,19 +584,36 @@ list_header() {
       printf '# %-4s %-19s %-22s %-22s %s\n' "run" "분류일시" "범주" "서브런" "메모"
 }
 
+#  ★ 부분 훑기(--run / --from / --to)에서는 **병합**한다. 예전에는 언제나
+#     found.tsv 만으로 목록을 통째로 다시 썼는데, 그러면
+#     `--scan --run 4134 --update-list` 한 번에 631줄짜리 목록이 그 한 줄로
+#     줄어든다. 2026-08-22 에 그 조합을 실제로 돌렸고(다행히 자식이 일찍
+#     죽어 쓰이지 않았다) 그때 발견했다.
+#     전 구간을 훑었을 때만 통째로 다시 쓴다 — 그때는 사라진 줄이 곧
+#     '이제 문제가 아니다' 라는 뜻이기 때문이다.
 write_list() {
    local out="$TMP/list.new" n cat subs memo when
-   declare -A OLDWHEN
+   declare -A OLDWHEN OLDLINE
    if [ -r "$LIST" ]; then
-      while read -r n when1 when2 rest; do
+      while read -r n a b c d rest; do
          case "$n" in ''|'#'*) continue ;; esac
-         OLDWHEN[$n]="$when1 $when2"
+         OLDWHEN[$n]="$a $b"
+         OLDLINE[$n]=$(printf '  %-4s %-19s %-22s %-22s %s' "$n" "$a $b" "$c" "$d" "$rest")
       done < "$LIST"
+   fi
+   local partial=0
+   [ -n "$RUNS" ] || [ -n "$FROM" ] || [ -n "$TO" ] && partial=1
+   if [ "$partial" -eq 1 ] && [ -r "$TMP/scanned.txt" ]; then
+      #  이번에 훑은 런은 결과로 갈아끼운다. 문제가 사라졌으면 줄을 지운다.
+      while read -r n; do [ -n "$n" ] && unset 'OLDLINE[$n]'; done < "$TMP/scanned.txt"
+   else
+      OLDLINE=()
    fi
    while IFS=$'\t' read -r n cat subs memo; do
       when=${OLDWHEN[$n]:-$(ts)}
-      printf '  %-4s %-19s %-22s %-22s %s\n' "$n" "$when" "$cat" "$subs" "$memo"
-   done < "$TMP/found.tsv" | sort -k1,1n > "$TMP/data.txt"
+      OLDLINE[$n]=$(printf '  %-4s %-19s %-22s %-22s %s' "$n" "$when" "$cat" "$subs" "$memo")
+   done < "$TMP/found.tsv"
+   for n in "${!OLDLINE[@]}"; do printf '%s\n' "${OLDLINE[$n]}"; done | sort -k1,1n > "$TMP/data.txt"
    { list_header; list_summary "$TMP/data.txt"; cat "$TMP/data.txt"; } > "$out"
    local d; d=$(dirname "$LIST"); [ -d "$d" ] || mkdir -p "$d" || die "목록 디렉터리를 만들 수 없다 : $d"
    if [ "$DRYRUN" -eq 1 ]; then
