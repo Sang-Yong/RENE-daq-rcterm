@@ -716,8 +716,8 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 우리 것    23개.  런 4280 이상  +  되메운 4208 4209 4210 4211 4276
 ```
 
-우리가 쓴 23개 : 4208 4209 4210 4211 4276 4280 4282 4283 4284 4285 4286 4287
-4288 4289 4290 4291 4292 4293 4294 4300 4301 4302 4303.
+우리가 쓴 24개 : 4208 4209 4210 4211 4276 4280 4282 4283 4284 4285 4286 4287
+4288 4289 4290 4291 4292 4293 4294 4300 4301 4302 4303 4304.
 **여기에 행을 더할 때마다 이 목록도 늘린다.**
 코드에도 같은 경계가 `append_runs.py` 의 `OURS_MIN` · `OURS_EXTRA` 로 박혀 있다.
 
@@ -803,6 +803,136 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ---
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-23 — run 4304 의 PRD 결손 두 개 복구, 그리고 손실 판정법을 하나 얻었다
+
+#### 11.88 착수 시점 실측 — 24시간 완주 7회째
+
+```
+run 4305   sub 925, daqtime 15h26m, FADC 1003.2 Hz / SADC 1003.2 Hz, heartbeat 나이 0초
+supervisor pid 76388 (08-20 06:13 기동), rcterm/daq/tcb 정상. 알람 없음
+run 4304   24시간 정상 마감 (onlbit=1, 86,413,796 ev)  ->  24시간 완주 7회째
+디스크     /Data_ssd 2.6T(27%) · /data 30T(4%) · /scratch 19T(86%)
+```
+
+**`dataflow.sh` 가 두 개로 보이지만 중복이 아니다** — 한쪽이 다른 쪽의 자식
+(서브셸)이다. `ps -o ppid=` 로 확인했다. run 4302 를 `/data` -> `/scratch` 로
+체크섬 대조 중이었다(1시간 41분, 234 GB 읽음). §11.63 그대로다.
+
+#### 11.89 run 4304 의 결손 두 개 — 또 `/scratch/LOG` 였다 (§11.68·§11.82 세 번째)
+
+```
+FADC 1440 / SADC 1440 / Merged 1439 / PRD 1438      빠진 것은 sub 00362 · 00572
+```
+
+**§11.82 의 교훈대로 `[ -e ]` 로 존재를 먼저 확인**한 뒤 시험했다. 그때는
+성공해 있던 로그를 `date >` 로 덮어썼었다.
+
+```
+log_merge_..._run4304_subrun362.txt        -> Input/output error   (merge 가 안 돌았다)
+log_production_v3_5v_run4304_subrun572.txt -> Input/output error   (production 이 안 돌았다)
+log_production_v3_5v_run4304_subrun362.txt -> 생성 OK              (merge 가 없어 못 돈 것)
+이웃 361 · 363 · 571 · 573 은 전부 정상 생성
+```
+
+복구는 껍데기를 건너뛰고 매크로를 직접 부른다. carry 는 361 의 merge 로그에서
+읽었다(`final SADC=362, evt=441, trgnum=21758443`).
+
+```bash
+cd /home/frontend/DAQ/DAQ_cup/production/Code
+root -l -b -q 'merge_FADC_SADC_v3_5v.cc(4304,1439,362,362,441,21758443,"/Data_ssd/RAW/004304")'
+root -l -b -q 'production_from_merged_v3_5v.cc(4304,362,"/Data_ssd/RAW/004304")'
+root -l -b -q 'production_from_merged_v3_5v.cc(4304,572,"/Data_ssd/RAW/004304")'
+```
+
+**결과 — 1440 = 1440 = 1440 = 1440 으로 완결.** `is_processed()` 통과 확인.
+merge 6.9초 + production 각 5.9초. `/Data_ssd` 라 빨랐다(§11.32 의 13배 차이).
+
+**572 는 Merged 가 온전한지 먼저 봤다** — §11.85 에서 파일만 있고 `AbsEvent`
+트리가 없어 실패한 적이 있어서다. 60,473 이벤트로 정상이라 production 만 했다.
+
+#### 11.90 ★★ carry 초기화의 손실 여부를 로그만으로 판정할 수 있다 (§11.83 개선)
+
+362 를 복구하고 보니 **363 은 carry 가 0 으로 초기화된 채 돌아 있었다.**
+§11.68 이 "개수는 맞지만 내용이 조용히 부족하다"고 경고한 그 모양이다.
+
+```
+Processing merge_FADC_SADC_v3_5v.cc(4304,365,363,363,0,0,"/Data_ssd/RAW/004304")...
+[FAST-SYNC] 타겟 트리거가 SADC 파일 내 존재. 이진 탐색(Binary Search) 수행 중...
+ -> [매칭 완료] SADC Index 1019 (Trg: 21818962)로 점프 완료.
+```
+
+**매크로에 `[FAST-SYNC]` 가 있다.** carry 가 0 이어도 목표 트리거를 SADC 파일
+안에서 이진 탐색해 제자리로 점프한다. 그리고 방금 362 를 돌려 얻은 올바른
+carry 는 `final SADC_evt = 1019` 다 — **점프한 Index 와 정확히 같다. 손실이 없다.**
+
+**§11.83 은 "올바른 carry 로 한 번 더 돌려 이벤트 수와 final 을 비교하라"고
+했는데, 그보다 싼 방법이 있다.**
+
+```
+직전 서브런을 복구해 올바른 SADC_evt 를 얻는다
+   -> 다음 서브런 merge 로그의 [FAST-SYNC] 점프 Index 와 비교한다
+   -> 같으면 손실 없음. 재실행이 필요 없다
+```
+
+FAST-SYNC 줄이 아예 없으면(옛 판본이거나 목표 트리거를 못 찾은 경우) 그때는
+§11.83 대로 다시 돌려 비교해야 한다. **§11.68 의 "직전 로그가 없으면 재처리하지
+말 것" 은 그대로 유효하다** — 여기서 안전했던 것은 FAST-SYNC 가 받쳐 준
+결과이지 초기화가 무해하기 때문이 아니다.
+
+#### 11.91 ★ backup-trickle 이 29시간째 양보만 하고 있었다
+
+밀린 옛 런 64개 중 `[16/64]` 에서 멈춰 `sleep` 만 돌고 있었다. 로그가 08-22
+16:42 이후 조용한 것은 `yield_wait()` 가 사유를 **한 번만** 찍기 때문이다
+(`shown=1`). 죽은 것이 아니다.
+
+원인은 우리 코드가 아니었다.
+
+```
+Sat Aug 22 16:41:35  gnome-terminal -> bash -> rsync -a --remove-source-files
+                     --info=progress2 Merged /backup_hdd/RENE_data_backup
+                     cwd = /scratch/RAW/002442        <- 사람이 손으로 띄운 것
+Sat Aug 22 16:42:20  trickle : "양보 : dataflow 이동 이(가) 끝나기를 기다린다"
+```
+
+`busy_reason()` 이 dataflow 이동을 `pgrep -f 'rsync.*--remove-source-files'` 로
+판정하는데(`backup-trickle.sh`), **손으로 띄운 `/backup_hdd` 백업이 같은 패턴에
+걸린다.** 45초 차이로 인과가 분명하다.
+
+**고치지 않았다 — 사용자 판단이 필요하다.** 그 rsync 가 끝나면 저절로 풀린다.
+굳이 손보려면 판정을 명령줄의 목적지까지 보게 좁혀야 하는데, 그러면 이번처럼
+링크·디스크를 실제로 나눠 쓰는 작업에 양보하지 않게 되어 원래 목적이 흐려진다.
+
+곁들여 — 그 명령은 `--remove-source-files` 라 **대조 없이 보내면서 지운다.**
+§8 의 rsync + 체크섬 + 삭제 규칙과는 다른 방식이다. 사람이 의도해서 띄운
+것이므로 건드리지 않았고, 사실만 적어 둔다.
+
+#### 11.92 구글시트 — run 4304 등재
+
+```
+기록 범위  A307:S307   (1행).  306 -> 307 행
+검증       읽어 되대조 -> Run 306개, 중복 0, 정렬 위반 0, 307행 밑 잔여물 없음
+제외       4305 (진행 중이라 stime 없음)
+Max subrun 1439 = 개수 1440 − 1  (§11.46)
+Data issue 비움 — 복구를 마쳐 1440/1440/1440/1440 으로 완결됐다
+값         RAW 110.0 GB · PRD 104.3 GB · 1.0 kHz · 23h59m
+```
+
+§11.5 의 '우리가 쓴' 목록을 23 -> 24 개로 늘렸다.
+
+**★ `append_runs.py --from` 은 없는 옵션이다.** §11.79 에 그렇게 적어 두었으나
+실제로는 `--scan` · `--limit` · `--all-runs` · `--insert` · `--commit` 뿐이고,
+기본이 '마지막 Run 이후 전부 미리보기'다. 그 자리도 함께 고쳤다.
+
+#### 11.93 아직 열려 있는 것
+
+- **`/scratch/LOG` 의 깨진 dirent — 이번이 세 번째다** (§11.52 · §11.68 · 이번).
+  런마다 두어 개씩 조용히 구멍을 낸다. **서버 쪽 fsck 가 필요한 사이트 조치**이고,
+  그때까지는 런이 끝날 때마다 FADC 개수와 PRD 개수를 대조해야 한다.
+- backup-trickle 양보 (§11.91). `/backup_hdd` rsync 가 끝나야 풀린다.
+- `prd_gap` 17개 — 직전 merge 로그가 없어 손대지 않기로 한 그대로다 (§11.85).
+- 백업 밀린 옛 런 237개 (§11.61). NFS 인터넷 노출 (§11.41).
+- 서브에이전트로 스킬 압박 시나리오 검증 (에이전트 기동은 사용자 요청이 필요하다).
 
 ### 2026-08-22 — 일시적 ssh 끊김 오탐 수정, run 4303 복구, 격리 완료
 
@@ -1578,7 +1708,10 @@ supervisor pid 76388 (08-20 06:13 기동), health OK 끊김 없음, 알람 없�
 운용자용에 넣은 '점검'은 **고장을 찾는 일이 아니라 조용히 밀리고 있는 것을 보는
 일**이다 — 백업이 밀리는 것도, 문제 런이 느는 것도 알람이 울리지 않는다.
 적은 명령은 전부 `--help` 로 확인했다(`badrun.sh --scan --run` ·
-`backup-audit.sh` · `run-summary.sh --show` · `append_runs.py --from`).
+`backup-audit.sh` · `run-summary.sh --show` · `append_runs.py`).
+**★ 그때 `append_runs.py --from` 이라 적은 것은 틀렸다 — 그런 옵션은 없다**
+(2026-08-23 확인). 있는 것은 `--scan` · `--limit` · `--all-runs` · `--insert` ·
+`--commit` 이고, 기본이 '마지막 Run 이후 전부 미리보기'다.
 
 **`audit.py` 가 또 하나 잡았다** — 운용자용 11장의 맺음말이 상자 밖으로 0.65인치
 넘쳤다. 줄 간격이 아니라 **본문이 두 줄이 되는데 상자 높이를 한 줄로 잡은 것**이라,
