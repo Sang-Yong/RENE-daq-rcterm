@@ -165,9 +165,21 @@ fi
 #  RAW 가 이미 로컬 NVMe 에 있으므로(rcterm.params 의 rawdatadir) 처리도 그 자리에서
 #  한다. --outroot 는 필요 없다. 완료된 런은 scripts/dataflow.sh 가 옮긴다.
 POSTRUN_RAW=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
+
+#  로그 디렉터리를 갈아끼운 뒤에는(scripts/swap-logdir.sh) 그 이전 런의 carry 가
+#  옛 자리에 남는다. 지금 쓰는 곳과 다를 때만 그 옛 자리를 함께 넘긴다.
+#  못 찾으면 postrun 이 carry 를 0 으로 초기화하는데, 그러면 개수는 맞아도
+#  내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68)
+POSTRUN_PROD=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
+POSTRUN_FB=${POSTRUN_LOG_FALLBACK:-/scratch/LOG}
+PRODLOG_NOW=$(readlink -f "$POSTRUN_PROD/LOG" 2>/dev/null)
+FBOPT=""
+if [ -n "$POSTRUN_FB" ] && [ -d "$POSTRUN_FB" ] && [ "$POSTRUN_FB" != "$PRODLOG_NOW" ]; then
+   FBOPT=" --log-fallback '$POSTRUN_FB'"
+fi
 if [ -n "$POSTPANE" ]; then
    tmux send-keys -t "$POSTPANE" \
-      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot '$POSTRUN_RAW'" C-m
+      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot '$POSTRUN_RAW'$FBOPT" C-m
 fi
 
 # ---- 우하 : 데이터 이동 + 외부 백업 ----

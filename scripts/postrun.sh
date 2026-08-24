@@ -30,6 +30,7 @@ set -u
 
 # ---- 기본값 ---------------------------------------------------------
 PRODDIR=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
+LOGFALLBACK=${POSTRUN_LOG_FALLBACK:-}
 # 수집이 로컬 NVMe 로 옮겨졌다(rcterm.params 의 rawdatadir = /Data_ssd).
 # 끝난 런을 /data 와 /scratch 로 넘기는 것은 scripts/dataflow.sh 가 한다.
 RAWROOT=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
@@ -82,6 +83,8 @@ postrun.sh - DAQ 수집 뒤에 붙는 merge + production 파이프라인 드라�
   --from N --to N     서브런 범위 지정 (일회 처리용)
   --max-retry N       좀비 파일 재시도 횟수               (${MAXRETRY})
   --prod-dir DIR      production 트리                     (${PRODDIR})
+  --log-fallback DIR  carry 를 못 찾으면 여기도 본다. 로그 디렉터리를 갈아끼운
+                      뒤 그 이전 런을 재처리할 때 쓴다 (기본 : 안 봄)
   --rawroot DIR       RAW 상위 디렉터리                   (${RAWROOT})
   --outroot DIR       ★폐기됨★ Merged/PRD 를 여기에 두고 RAW 에는 심볼릭 링크를 건다.
                       병목이 NFS 이므로 로컬 디스크를 주면 빨라진다
@@ -112,6 +115,7 @@ while [ $# -gt 0 ]; do
       --to)         TO=$2; shift 2 ;;
       --max-retry)  MAXRETRY=$2; shift 2 ;;
       --prod-dir)   PRODDIR=$2; shift 2 ;;
+      --log-fallback) LOGFALLBACK=$2; shift 2 ;;
       --rawroot)    RAWROOT=$2; shift 2 ;;
       --outroot)    OUTROOT=$2; OUTROOT_WARN=1; shift 2 ;;
       --keep-local) KEEPLOCAL=$2; shift 2 ;;
@@ -132,6 +136,20 @@ if [ "${NORSYNC:-0}" -eq 0 ] && command -v rsync >/dev/null 2>&1; then USE_RSYNC
 CODEDIR=$PRODDIR/Code
 SHELLDIR=$PRODDIR/Shell
 LOGDIR=$PRODDIR/LOG
+
+#  직전 서브런의 merge 로그를 찾는다.
+#  ★ 못 찾으면 호출자가 carry 를 0 으로 초기화하는데, 그러면 개수는 맞아도
+#    내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68). 로그 디렉터리를 새것으로
+#    갈아끼운 뒤에는 그 이전 런의 로그가 옛 디렉터리에 남으므로 거기까지 본다.
+find_prevlog() {          # run_num subrun  ->  경로를 낸다. 없으면 rc=1
+   local f
+   f="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt"
+   [ -f "$f" ] && { echo "$f"; return 0; }
+   [ -n "$LOGFALLBACK" ] || return 1
+   f="$LOGFALLBACK/log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt"
+   [ -f "$f" ] && { echo "$f"; return 0; }
+   return 1
+}
 MERGE_MACRO=merge_FADC_SADC_v3_5v.cc
 PROD_SCRIPT=production_from_merged_v3_5v.sh
 
@@ -530,8 +548,8 @@ process_range() {        # run_pad run_num from to maxarg
       if [ "$need_state" -eq 1 ]; then
          need_state=0
          if [ "$n" -gt 0 ]; then
-            local prevlog="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
-            if [ -f "$prevlog" ]; then load_state "$prevlog"
+            local prevlog
+            if prevlog=$(find_prevlog "$rn" "$(( n - 1 ))"); then load_state "$prevlog"
             else ST_SADC=$n; ST_EVT=0; ST_TRG=0; fi
          fi
       fi
@@ -635,8 +653,8 @@ run_once() {             # run_num
 
    # 재개일 때는 직전 서브런의 상태를 이어받는다
    if [ "$from" -gt 0 ]; then
-      local prev="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( from - 1 )).txt"
-      if [ -f "$prev" ]; then load_state "$prev"
+      local prev
+      if prev=$(find_prevlog "$rn" "$(( from - 1 ))"); then load_state "$prev"
       else ST_SADC=$from; ST_EVT=0; ST_TRG=0
            log "  ${C_Y}직전 로그 없음 -> SADC 상태를 $from 부터 새로 시작${C_0}"
       fi

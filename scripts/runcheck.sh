@@ -41,6 +41,7 @@ PRODDIR=${RUNCHECK_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
 DB=${RUNCHECK_DB:-/Data_ssd/runcatalog.db}
 HB=${RUNCHECK_HEARTBEAT:-/Data/LOG/rcterm.hb}
 RUNARG=""; DOFIX=0; QUIET=0; MAXFIX=20; MAXDIAG=40; PARAMS=""
+LOGFALLBACK=${RUNCHECK_LOG_FALLBACK:-}
 
 usage() {
 cat <<EOF
@@ -60,6 +61,8 @@ cat <<EOF
                    결손이 수천 개인 옛 런을 상한 없이 훑으면 몇 시간이 걸린다
   --roots A:B:C    런 디렉터리 검색 경로 (${ROOTS})
   --prod-dir DIR   production 트리 (${PRODDIR})
+  --log-fallback D carry 를 못 찾으면 여기도 본다. 로그 디렉터리를 갈아끼운 뒤
+                   그 이전 런을 재처리할 때 쓴다
   --db FILE        런 카탈로그 (${DB})
   --heartbeat F    수집 중인 런을 알아내는 데 쓴다 (${HB})
   --params FILE    config/dataflow.params 에서 경로를 읽는다
@@ -82,6 +85,7 @@ while [ $# -gt 0 ]; do
       --max-diag)  MAXDIAG=$2; shift 2 ;;
       --roots)     ROOTS=$2; shift 2 ;;
       --prod-dir)  PRODDIR=$2; shift 2 ;;
+      --log-fallback) LOGFALLBACK=$2; shift 2 ;;
       --db)        DB=$2; shift 2 ;;
       --heartbeat) HB=$2; shift 2 ;;
       --params)    PARAMS=$2; shift 2 ;;
@@ -207,6 +211,11 @@ load_carry() {           # run_num subrun
    local rn=$1 n=$2
    [ "$n" -eq 0 ] && { CARRY_SADC=0; CARRY_EVT=0; CARRY_TRG=0; return 0; }
    local f="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
+   #  로그 디렉터리를 갈아끼운 뒤에는 그 이전 런의 carry 가 옛 디렉터리에 남는다.
+   #  못 찾으면 손대지 않으므로(§11.68) 찾는 자리를 늘리는 편이 언제나 안전하다
+   if [ ! -r "$f" ] && [ -n "$LOGFALLBACK" ]; then
+      f="$LOGFALLBACK/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
+   fi
    [ -r "$f" ] || return 1
    CARRY_SADC=$(grep -m1 "final SADC "              "$f" 2>/dev/null | awk '{print $4}')
    CARRY_EVT=$( grep -m1 "final SADC_evt"           "$f" 2>/dev/null | awk '{print $4}')
