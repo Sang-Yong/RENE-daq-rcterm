@@ -49,6 +49,7 @@ JOBS=3                 # production 동시 실행 개수
 #   - merger/DAQ 가 파일을 닫고 flush 하는 시간이 필요하다.
 LAG=3
 POLL=20                # --follow 에서 heartbeat 확인 주기 [초]
+ROTEVERY=15            # 몇 주기마다 로그 폴더 상한을 볼지 (15 x 20초 = 5분)
 NICE=10                # 수집을 방해하지 않도록 낮은 우선순위
 MAXRETRY=2             # 좀비 파일 재시도 (원본은 5회 x 60초 = 5분 낭비)
 RETRY_WAIT=10
@@ -135,20 +136,44 @@ if [ "${NORSYNC:-0}" -eq 0 ] && command -v rsync >/dev/null 2>&1; then USE_RSYNC
 
 CODEDIR=$PRODDIR/Code
 SHELLDIR=$PRODDIR/Shell
-LOGDIR=$PRODDIR/LOG
+LOGDIR=$PRODDIR/LOG                 # 로그 루트. 껍데기는 여기 평면에 쓴다
+MERGEDIR=$LOGDIR/Merge_log          # merge 로그는 종류별 폴더에 (§11.103)
+LOGROTATE=${POSTRUN_LOGROTATE:-$(dirname "$0")/logrotate-daq.sh}
 
 #  직전 서브런의 merge 로그를 찾는다.
 #  ★ 못 찾으면 호출자가 carry 를 0 으로 초기화하는데, 그러면 개수는 맞아도
 #    내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68). 로그 디렉터리를 새것으로
 #    갈아끼운 뒤에는 그 이전 런의 로그가 옛 디렉터리에 남으므로 거기까지 본다.
 find_prevlog() {          # run_num subrun  ->  경로를 낸다. 없으면 rc=1
-   local f
-   f="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt"
-   [ -f "$f" ] && { echo "$f"; return 0; }
+   local base="log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt" f d
+   f="$MERGEDIR/$base";        [ -f "$f" ] && { echo "$f"; return 0; }
+   #  상한에 이르러 빼낸 폴더들. 최신 번호부터 본다 (§11.103)
+   for d in $(ls -dU "$MERGEDIR".old* 2>/dev/null | sort -r); do
+      [ -f "$d/$base" ] && { echo "$d/$base"; return 0; }
+   done
+   f="$LOGDIR/$base";          [ -f "$f" ] && { echo "$f"; return 0; }   # 옛 평면 배치
    [ -n "$LOGFALLBACK" ] || return 1
-   f="$LOGFALLBACK/log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt"
-   [ -f "$f" ] && { echo "$f"; return 0; }
+   f="$LOGFALLBACK/$base";     [ -f "$f" ] && { echo "$f"; return 0; }
    return 1
+}
+
+#  로그 폴더가 상한에 이르렀는지 보고, 이르렀으면 폴더째 빼낸다.
+#  ★ 한 폴더에 계속 쌓으면 디렉터리 자신이 상한다 (§11.101)
+log_rotate_check() {
+   [ -x "$LOGROTATE" ] || return 0
+   "$LOGROTATE" --root "$LOGDIR" --rotate -q 2>&1 | while IFS= read -r l; do
+      [ -n "$l" ] && log "$l"
+   done
+   return 0
+}
+
+#  끝난 런의 DAQ 로그를 RAW_log 로. 수집 중인 런은 건드리지 않는다
+log_collect_raw() {
+   [ -x "$LOGROTATE" ] || return 0
+   "$LOGROTATE" --root "$LOGDIR" --collect-raw --heartbeat "$HB" -q 2>&1 | while IFS= read -r l; do
+      [ -n "$l" ] && log "$l"
+   done
+   return 0
 }
 MERGE_MACRO=merge_FADC_SADC_v3_5v.cc
 PROD_SCRIPT=production_from_merged_v3_5v.sh
@@ -219,8 +244,9 @@ fi
 [ -d "$SHELLDIR" ] || die "Shell 디렉터리 없음 : $SHELLDIR"
 [ -f "$CODEDIR/$MERGE_MACRO" ]   || die "매크로 없음 : $CODEDIR/$MERGE_MACRO"
 [ -x "$SHELLDIR/$PROD_SCRIPT" ]  || die "production 스크립트 없음 : $SHELLDIR/$PROD_SCRIPT"
-mkdir -p "$LOGDIR" 2>/dev/null || true
+mkdir -p "$LOGDIR" "$MERGEDIR" 2>/dev/null || true
 [ -d "$LOGDIR" ] || die "LOG 디렉터리 없음 : $LOGDIR"
+[ -d "$MERGEDIR" ] || die "merge 로그 디렉터리를 만들 수 없다 : $MERGEDIR"
 
 # ROOT 환경. 이미 잡혀 있으면 건드리지 않는다.
 if ! command -v root >/dev/null 2>&1; then
@@ -476,14 +502,17 @@ prod_drain() { while [ "$NRUNNING" -gt 0 ]; do wait -n 2>/dev/null || break; NRU
 # =====================================================================
 do_subrun() {            # run_pad run_num subrun maxarg data_dir
    local rp=$1 rn=$2 n=$3 maxarg=$4 dd=$5
-   local ml="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun${n}.txt"
-   local rl="$LOGDIR/log_merge_prod_v3_5v_run${rn}_subrun${n}.txt"
+   local ml="$MERGEDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun${n}.txt"
+   local rl="$MERGEDIR/log_merge_prod_v3_5v_run${rn}_subrun${n}.txt"
 
    if [ "$DRYRUN" -eq 1 ]; then
       log "${C_C}[DRY]${C_0} merge run=$rn sub=$n max=$maxarg state=($ST_SADC,$ST_EVT,$ST_TRG)"
       return 0
    fi
 
+   #  폴더를 막 빼낸 직후일 수 있다. 없으면 매크로 출력이 갈 곳이 없어
+   #  merge 가 아예 안 돈다 — §11.68 이 겪은 그 모양이다
+   mkdir -p "$MERGEDIR" 2>/dev/null
    date > "$rl"; date > "$ml"
 
    sayt "${C_C}Merging FADC Subrun ${n} ...${C_0}"
@@ -669,7 +698,7 @@ run_once() {             # run_num
 #  추적 모드
 # =====================================================================
 follow_loop() {
-   local cur=""
+   local cur="" rotn=0
    log "${C_C}추적 모드 시작${C_0}  heartbeat=$HB  lag=$LAG  jobs=$JOBS  poll=${POLL}초"
    while true; do
       local hbrun age
@@ -691,8 +720,15 @@ follow_loop() {
          # 처리가 끝난 뒤에 정리한다. 이 시점이 가장 안전하다 —
          # 직전 런은 완료됐고 새 런은 아직 산출물이 거의 없다.
          archive_sweep
+         #  직전 런의 DAQ 로그를 RAW_log 로. 그 런은 이제 아무도 쓰지 않는다
+         log_collect_raw
       fi
       cur=$hbrun
+
+      #  로그 폴더 상한 검사. 매 주기마다 셀 것까지는 없다 —
+      #  서브런 하나에 로그 3개라 상한까지 이틀이 넘게 걸린다
+      rotn=$((rotn+1))
+      if [ "$rotn" -ge "$ROTEVERY" ]; then rotn=0; log_rotate_check; fi
 
       FROM=-1; TO=-1
       run_once "$hbrun"

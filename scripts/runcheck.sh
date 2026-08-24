@@ -116,7 +116,9 @@ if [ -n "$PARAMS" ]; then
 fi
 
 CODEDIR=$PRODDIR/Code
-LOGDIR=$PRODDIR/LOG
+LOGDIR=$PRODDIR/LOG                 # 로그 루트
+MERGEDIR=$LOGDIR/Merge_log          # 종류별 폴더 (§11.103)
+PRDLOGDIR=$LOGDIR/PRD_log
 MERGE_MACRO=merge_FADC_SADC_v3_5v.cc
 PROD_MACRO=production_from_merged_v3_5v.cc
 
@@ -163,10 +165,24 @@ list_idx() {             # dir prefix suffix   ->  서브런 번호 목록
 #      재처리에 쓰인다 (§11.82 에서 한 번 날릴 뻔했다)
 #    없는 이름만 실제로 만들어 보고, 만들어졌으면 흔적을 지운다
 # ---------------------------------------------------------------------
-log_state() {            # 로그 경로  ->  exists | ok | EIO:<사유>
-   local f=$1
-   [ -e "$f" ] && { echo exists; return; }
-   local err
+#  로그 하나가 어디 있는지 찾는다.
+#    지금 폴더 -> 상한에 이르러 빼낸 폴더들(최신부터) -> 옛 평면 배치 -> fallback
+find_log() {             # 종류 파일이름  ->  경로를 낸다. 없으면 rc=1
+   local kind=$1 base=$2 d
+   [ -f "$LOGDIR/$kind/$base" ] && { echo "$LOGDIR/$kind/$base"; return 0; }
+   for d in $(ls -dU "$LOGDIR/$kind".old* 2>/dev/null | sort -r); do
+      [ -f "$d/$base" ] && { echo "$d/$base"; return 0; }
+   done
+   [ -f "$LOGDIR/$base" ] && { echo "$LOGDIR/$base"; return 0; }
+   [ -n "$LOGFALLBACK" ] && [ -f "$LOGFALLBACK/$base" ] && { echo "$LOGFALLBACK/$base"; return 0; }
+   return 1
+}
+
+log_state() {            # 종류 파일이름  ->  exists | ok | EIO:<사유>
+   local kind=$1 base=$2 f err
+   find_log "$kind" "$base" >/dev/null 2>&1 && { echo exists; return; }
+   f="$LOGDIR/$kind/$base"
+   mkdir -p "$LOGDIR/$kind" 2>/dev/null
    #  ★ 그룹으로 감싸야 리다이렉션 실패 메시지까지 잡힌다. `: > "$f" 2>&1` 로
    #    쓰면 `> "$f"` 가 먼저 실패하고 그때는 2>&1 이 아직 적용되기 전이라
    #    사유가 화면으로 새면서 EIO: 뒤는 비어 버린다
@@ -210,12 +226,10 @@ load_carry() {           # run_num subrun
    CARRY_SADC=""; CARRY_EVT=""; CARRY_TRG=""
    local rn=$1 n=$2
    [ "$n" -eq 0 ] && { CARRY_SADC=0; CARRY_EVT=0; CARRY_TRG=0; return 0; }
-   local f="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
-   #  로그 디렉터리를 갈아끼운 뒤에는 그 이전 런의 carry 가 옛 디렉터리에 남는다.
-   #  못 찾으면 손대지 않으므로(§11.68) 찾는 자리를 늘리는 편이 언제나 안전하다
-   if [ ! -r "$f" ] && [ -n "$LOGFALLBACK" ]; then
-      f="$LOGFALLBACK/log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt"
-   fi
+   #  빼낸 폴더나 옛 디렉터리에 남아 있을 수 있다. 못 찾으면 손대지 않으므로
+   #  (§11.68) 찾는 자리를 늘리는 편이 언제나 안전하다
+   local f
+   f=$(find_log Merge_log "log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt") || return 1
    [ -r "$f" ] || return 1
    CARRY_SADC=$(grep -m1 "final SADC "              "$f" 2>/dev/null | awk '{print $4}')
    CARRY_EVT=$( grep -m1 "final SADC_evt"           "$f" 2>/dev/null | awk '{print $4}')
@@ -285,15 +299,15 @@ check_run() {            # run_num
    while read -r n; do
       [ -n "$n" ] || continue
       idx=$((10#$n))
-      mlog="$LOGDIR/log_merge_FADC_SADC_v3_5v_run${rn}_subrun${idx}.txt"
-      plog="$LOGDIR/log_production_v3_5v_run${rn}_subrun${idx}.txt"
+      mlog="log_merge_FADC_SADC_v3_5v_run${rn}_subrun${idx}.txt"
+      plog="log_production_v3_5v_run${rn}_subrun${idx}.txt"
       local mfile="$dd/Merged/MERGED_${rp}.root.$n"
 
       if grep -qx "$n" "$tmp/miss_merged"; then kind=no_merge
       elif merged_ok "$mfile";              then kind=no_prd
       else                                       kind=empty_merged; fi
 
-      ms=$(log_state "$mlog"); ps=$(log_state "$plog")
+      ms=$(log_state Merge_log "$mlog"); ps=$(log_state PRD_log "$plog")
       carry=no; load_carry "$rn" "$idx" && carry=yes
 
       printf '   %b\n' "${C_C}sub $n${C_0}  $kind   merge로그=$ms  prod로그=$ps  carry=$carry"
