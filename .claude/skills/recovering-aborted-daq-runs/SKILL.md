@@ -25,8 +25,16 @@ description: Use when a RENE DAQ run ended abnormally - postrun printed "ZOMBIE 
 ## 1. 무엇이 빠졌는지 센다
 
 ```bash
+scripts/runcheck.sh --run <런>                                   개수 대조 + 사유 + 복구 명령
 scripts/badrun.sh --scan --params config/dataflow.params --from <런-20>
 ```
+
+**`runcheck.sh` 가 아래 2~4 단계를 대신한다** — 빠진 서브런을 찾아
+`no_merge` / `no_prd` / `empty_merged` 로 가르고, 로그 이름이 EIO 인지 보고,
+직전 merge 로그에서 carry 를 읽어 복구 명령을 그대로 찍는다. `--fix` 를 붙이면
+실행까지 한다. **carry 를 못 읽으면 건너뛴다**(CLAUDE.md §11.68). 읽기 전용이
+기본이고 **이미 있는 로그는 건드리지 않는다.** 손으로 밟을 때의 순서와 함정은
+그대로 아래에 있다 — 도구가 손대지 않기로 한 것은 사람이 판단해야 한다.
 
 손으로 셀 때는 **`ls -U` (readdir) 만** 쓴다. `/scratch` 는 100 Mb NFS 라
 파일마다 stat 을 거는 `find -printf '%s'` 는 런 하나에 15분이 지나도 안 끝난다.
