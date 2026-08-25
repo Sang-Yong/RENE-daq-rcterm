@@ -589,6 +589,9 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   **★ 단 이것은 ssh 전송에만 해당한다.** dataflow 3단계의 `/scratch` 는 NFS
   마운트라 rsync 에게는 로컬 경로이고, 클라이언트가 목적지 전량을 읽어야 해서
   **대조가 전송보다 비싸다** — run 4292 는 전송 10.3시간 대 대조 28시간+ (§11.63)
+- `postrun`·`runcheck` 의 '수집 중' 게이트가 heartbeat 의 `run=` 만 보고
+  `phase=ended` 를 무시한다. 런이 끝난 직후에는 언제나 그 런을 수집 중으로 읽어
+  꼬리 서브런을 처리하지 못한다 (§11.111). 지금은 `--heartbeat` 를 비켜 주어 넘긴다
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -708,6 +711,13 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   `scripts/swap-logdir.sh --verify` 로 지금 막혀 있는지 보고, 막혔으면
   **postrun 을 먼저 멈춘 뒤** 갈아끼운다(§11.102). 로그 4,320 개/런이라 석 달쯤이
   주기다.
+- **★ postrun 을 세울 때 pane 에서 `C-c` 를 누르지 말 것.** 포그라운드 프로세스
+  그룹 전체에 SIGINT 라 매크로까지 죽고 **반쪽짜리 Merged 가 남는다.** 완료 판정이
+  `[ -s ]` 뿐이라 그 반쪽을 완료로 읽는다(§11.85 의 `empty_merged`). 셸 PID 에만
+  `kill -TERM <pid>` 를 보내면 진행 중인 merge 를 끝내고 스스로 빠진다 (§11.109).
+- **★ 전원을 내리기 전에 `sudo umount /scratch`.** `hard` 마운트라 스토리지가
+  먼저 사라지면 종료가 그 자리에서 멎는다. fstab 에 `nofail` 이 없어 부팅도
+  늘어질 수 있다 (§11.113).
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
@@ -824,6 +834,118 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ---
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-25 (밤) — 10G 랜카드 교체를 위한 전체 정지. run 4307 은 결손 0 으로 완결
+
+사용자가 스토리지 서버와 이 서버 사이를 **10 Gb 로 올리는 작업**을 하려고 전원을
+내린다. 돌고 있던 것 전부를 안전하게 세웠다.
+
+#### 11.109 ★ 정지 순서와 그 근거 — 다음에도 이대로 하면 된다
+
+**`/scratch` 를 쓰는 것부터 내리고, DAQ 를 가장 나중에 정상 마감했다.**
+
+```
+1  reprocess 드라이버 -> 그 밑 postrun(4224)      드라이버를 먼저. 안 그러면 다음 런을 띄운다
+2  monitor-all · ibd-summary · BuildPairSummary
+3  backup-trickle · backup-khu · 그 rsync/ssh
+4  dataflow · 그 rsync (4303 을 /data -> /scratch 이동 중이었다)
+5  DAQ : rcsupervisor 에 SIGTERM                  ENDRUN -> ENDED -> EXIT -> exit=code 0
+6  postrun --follow
+7  남은 서브런 마무리 + 전수 확인
+```
+
+**★ postrun 은 pane 에서 `C-c` 를 누르면 안 된다.** `C-c` 는 포그라운드 프로세스
+그룹 전체에 SIGINT 라 **매크로까지 함께 죽고 반쪽짜리 Merged 가 남는다.**
+`subrun_done()` 은 `[ -s ]` 로만 보므로(`postrun.sh:291`) 그 반쪽을 완료로 읽는다 —
+§11.85 의 `empty_merged` 가 그렇게 생긴다. **셸 PID 에만 `kill -TERM`** 을 보내면
+bash 가 포그라운드 매크로가 끝난 뒤에 trap(`postrun.sh:745`)을 실행하므로
+진행 중인 merge 를 끝내고 production 을 drain 한 뒤 130 으로 빠진다.
+
+실측으로 확인했다 — 4224 서브런 1225 는 **merge 가 완결**(`Total merged events =
+52376`, PNG 생성)됐고 PRD 만 없다. Merged·PRD 둘 다 요구하는 판정이라 다음에
+그 서브런부터 정확히 이어서 된다. **반쪽짜리는 하나도 없다.**
+
+`dataflow` 와 `monitor-all` 은 trap 이 있어 TERM 만으로 깨끗이 빠진다.
+`backup-khu`·`backup-trickle` 은 trap 이 없으나 **마커가 체크섬 대조 뒤에만
+찍히고** rsync 가 `--partial-dir` 라 중간에 끊어도 다음에 이어진다.
+
+**★ `lsof +D /scratch` 를 쓰지 말 것.** NFS 트리 전체를 훑어 120초에도 안 끝난다.
+`/proc/*/cwd` 와 `/proc/*/fd/*` 를 읽으면 로컬 작업이라 즉시 끝난다 (결과 : 0건).
+§11.5 의 `find -printf` 함정과 같은 계열이다.
+
+#### 11.110 run 4307 완결 — 새 로그 구조가 온전히 덮은 첫 런, 결손 0
+
+```
+22:25:22  [SUP] stop requested; ending the current run gracefully
+22:25:23  ENDED run=004307        22:25:27  cycle 6 finished : exit=code 0
+DB        onlbit=1  2026-08-25 06:14:24 ~ 22:25:22  16h11m  59,171,096 ev  1015.7 Hz
+결과      FADC 971 = SADC 971 = Merged 971 = PRD 971
+```
+
+**§11.104 가 "새 구조가 온전히 덮는 첫 런은 4307 이다. 그것이 끝나면 다시
+대조해야 한다"고 지목한 그 런이고, 결손이 하나도 없다.** 다만 24시간을 채우지
+못하고 16시간에서 사람이 세운 런이라 **표본으로서는 4306 보다 약하다** — 로그
+구조 교체(§11.103)의 효과는 다음 24시간 런에서 한 번 더 봐야 확정된다.
+
+#### 11.111 ★ `postrun`·`runcheck` 의 '수집 중' 게이트가 `phase` 를 보지 않는다
+
+런이 끝난 직후 남은 세 서브런을 처리하려 했더니 둘 다 **`run 004307 : 수집 중이다`**
+로 물러났다. heartbeat 는 이미 `phase=ended` 인데 **`run=` 만 보고 판정**한다.
+rcterm 은 나가면서 heartbeat 를 지우지 않으므로 **런이 끝난 직후에는 언제나 이
+상태**가 된다.
+
+이번에는 `--heartbeat /nonexistent/none.hb` 로 비켜 주고 21초에 마쳤다.
+**고치려면 `phase=ended` 일 때 그 런을 수집 중으로 보지 않으면 된다.** 다만
+지금 손대면 정지 절차 도중의 변경이 되므로 하지 않았다 — 남은 작업으로 둔다.
+(실운용에서는 다음 런이 뜨면 heartbeat 의 `run=` 이 바뀌어 저절로 풀린다.)
+
+#### 11.112 재부팅 뒤 이어받을 것
+
+```
+/scratch   hard 마운트다. 전원을 내리기 전에 반드시 umount 할 것 (§11.113)
+run 4307   완결. 아직 이동·백업 전이다. /Data_ssd 에 있다
+run 4303   /data -> /scratch 이동 중이었다. 원본은 그대로 (대조 통과 뒤에만 지운다)
+run 4246   경희대 RAW 백업 중이었다. 마커가 없으므로 다음에 다시 보낸다
+run 4224   재처리가 서브런 1225 에서 멈췄다 (Merged 있음 / PRD 없음)
+           /Data_ssd/LOG/reprocess-4000up.sh 를 다시 부르면 4221 부터 훑어 이어간다
+run 4238   IBD 표 되채우기가 중간에 끊겼다. 그 런은 다시 처음부터 돈다
+```
+
+**★ `ojk` 계정이 tmux `main` 에서 대화형 `root -b` 를 띄워 두고 있다**(16:40 기동).
+우리 것이 아니므로 건드리지 않았다. 전원을 내리기 전에 본인이 닫아야 한다.
+
+#### 11.113 ★★ `/scratch` 는 hard 마운트다 — 끄기 전에 umount 할 것
+
+```
+10.0.0.10:/data /scratch nfs4 rw,...,hard,proto=tcp,timeo=600,retrans=2
+/etc/fstab      10.0.0.10:/data  /scratch  nfs  defaults 0 0
+```
+
+`hard` 라 서버가 사라지면 I/O 가 **무한히 매달린다.** 스토리지 서버의 랜카드를
+먼저 뽑으면 이 PC 의 종료가 그 자리에서 멎을 수 있다. 순서는 이렇다.
+
+```
+1) sudo umount /scratch          (지금 이것을 붙잡은 프로세스는 0개다. 실측)
+2) 이 PC 종료 -> 양쪽 랜카드 교체
+```
+
+**그리고 fstab 에 `nofail` 도 `_netdev` 도 없다.** 교체 뒤 10.0.0.10 이 곧바로
+응답하지 않으면 **부팅이 NFS 를 기다리며 늘어진다.** IP 가 바뀌면 fstab 도 함께
+고쳐야 한다. 미리 `nofail` 을 붙여 두면 그 위험이 없어진다.
+
+#### 11.114 재기동 절차
+
+```bash
+mount /scratch 확인 후
+scripts/daq-tmux.sh --start        # 화면 + 감시자. rundesc.txt 를 자동으로 넘긴다
+scripts/runcheck.sh --last 2       # 4306 · 4307 대조 (읽기 전용)
+scripts/dataflow.sh --params config/dataflow.params --once --dry-run
+```
+
+10 Gb 가 되면 **§11.63 의 전제가 바뀐다** — 3단계의 체크섬 대조가 전송보다 비싼
+것은 `/scratch` 가 100 Mb 였기 때문이다(§11.12). 링크가 100배가 되면 dataflow
+3단계(런당 12시간)와 옛 런 백업이 근본적으로 달라지므로, **올린 뒤 다시 실측해
+`docs/DATAFLOW.md` 와 §5.8 의 수치를 갱신할 것.**
 
 ### 2026-08-25 (저녁) — prd_gap 재처리. 백업을 먼저 확인하고, 4000번 초과만 손댄다
 
