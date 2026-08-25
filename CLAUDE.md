@@ -29,6 +29,7 @@ config/dotfiles/install.sh --all
 #      config/rundesc.txt  런 설명(HV 등). 없으면 daq-tmux.sh 가 --desc 를 안 넘겨
 #                        rundesc 가 이전 런들과 달라진다 (§11.20)
 #      ~/.ssh/config     백업 서버 별칭 'khu' + 키 교환 (docs/DATAFLOW.md §4)
+#                        저장소 서버 별칭 'store' = 10.0.0.10:7777 (§11.118)
 #      RENE_ANA_HELPERS  분석 헤더 경로. ★ 없으면 모니터링 2·3단계가 빌드 실패
 #      RENE_COND         (아래 '분석 트리 의존' 참조)
 
@@ -275,6 +276,8 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | **백업 계정 권한** | `renecomm`(별칭 `khu`, 키 인증) = 7개 카테고리 전부 쓰기 가능. `sykim` = `config`/`db`/`RAW` 만 (§11.14) |
 | **경희대 링크 속도** | 500 MB 업로드 31.9초 = **15.7 MB/s**. `/scratch` 의 100 Mb 와 **다른 랜카드**라 서로 대역을 뺏지 않는다 (§11.14) |
 | **모니터링 2단계 PRD 직독** | 재구성은 분석 Step2 와 single 목록이 **비트 단위로 동일**(run 4237 sub 100), 페어링은 Step3/Step4 와 **여덟 개 수 전부 일치**(run 4237 전체, single 7,266만) (§11.31) |
+| **10G 스토리지 링크** | 2026-08-26 개통. `/scratch` 읽기 **838 MB/s** · 쓰기 **534 MB/s** (옛 7.7 MB/s), RTT 10.6 -> **0.31 ms**, 오류 0 (§11.115) |
+| **저장소 서버 ssh** | `ssh store` (10.0.0.10:7777, 키 인증). §11.101 의 `No route to host` 는 방화벽 REJECT 였다 (§11.118) |
 
 종료코드가 0/1/2 세 값으로 갈리는 것은 설계상 이상적이다 — supervisor가
 "설정 오류(재시작 무의미)" / "런 실패(재시작 가치 있음)" / "정상"을 구분할 수 있다.
@@ -580,8 +583,11 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   → PID 파일 + `flock`
 - rate가 벽시계가 아니라 DAQ 보고 시간 기준 → ns 카운터 정지 시 순간 rate 미정의
 - 단위 테스트 없음. config 파싱 / 머저 판정 / 비트마스크 디코딩은 순수 함수라 쉽다
-- dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
-  고치는 것이 정답이고, 그 전까지는 `--drop-merged` 가 유일한 단축 수단이다
+- ~~dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
+  고치는 것이 정답이고, 그 전까지는 `--drop-merged` 가 유일한 단축 수단이다~~
+  **2026-08-26 해결 — 링크를 10 Gb 로 올렸다** (§11.115). 쓰기 7.7 -> 534 MB/s.
+  `--drop-merged` 를 켤 이유가 사라졌다. **다만 3단계가 실제로 도는 것은 아직
+  못 봤다** — 산술이 아니라 실측으로 §11.117 의 표를 채울 것
 - ~~`backup-khu.sh` 는 원격 개수만 검증한다. 체크섬 검증은 너무 비싸다~~
   **2026-08-19 해결. 그리고 "너무 비싸다"는 판단이 틀렸다** — run 4290 PRD
   15.4 GB 기준 전송 17분 40초 대 대조 **1분 00초**다(§11.35). 양쪽이 각자
@@ -589,9 +595,14 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   **★ 단 이것은 ssh 전송에만 해당한다.** dataflow 3단계의 `/scratch` 는 NFS
   마운트라 rsync 에게는 로컬 경로이고, 클라이언트가 목적지 전량을 읽어야 해서
   **대조가 전송보다 비싸다** — run 4292 는 전송 10.3시간 대 대조 28시간+ (§11.63)
+  **★ 이것도 100 Mb 전제다.** 2026-08-26 에 10 Gb 가 됐으므로 다시 재야 한다 (§11.117)
 - `postrun`·`runcheck` 의 '수집 중' 게이트가 heartbeat 의 `run=` 만 보고
   `phase=ended` 를 무시한다. 런이 끝난 직후에는 언제나 그 런을 수집 중으로 읽어
   꼬리 서브런을 처리하지 못한다 (§11.111). 지금은 `--heartbeat` 를 비켜 주어 넘긴다
+- **`usb-recover.sh` 의 진단이 TCB 고장을 못 잡는다.** `FADCDAQ`·`SADCDAQ` 로그만
+  훑고(`usb-recover.sh:148,152`), 오류 패턴도 `LIBUSB_ERROR_IO`·`read error` 계열
+  뿐이라 `USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT` 과 한 글자도 안 겹친다.
+  실측 : 오류 43건짜리 로그를 0건으로 센다 (§11.120). **둘 다 고쳐야 잡힌다**
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -715,6 +726,18 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   그룹 전체에 SIGINT 라 매크로까지 죽고 **반쪽짜리 Merged 가 남는다.** 완료 판정이
   `[ -s ]` 뿐이라 그 반쪽을 완료로 읽는다(§11.85 의 `empty_merged`). 셸 PID 에만
   `kill -TERM <pid>` 를 보내면 진행 중인 merge 를 끝내고 스스로 빠진다 (§11.109).
+- **★★ 보드가 `LIBUSB_ERROR_TIMEOUT` 으로 부팅 실패하면 `usbreset` 만으로 안 된다.**
+  `usbreset` 은 USB 링크만 다시 맺고 보드 안의 FPGA·펌웨어 상태는 그대로다.
+  **보드 크레이트 전원을 내렸다 올려야** 풀린다 — **PC 재부팅으로는 안 된다**
+  (보드가 자체 전원을 쓴다). 그리고 전원을 내리면 트리거 설정이 날아가므로
+  **`src/NOTICE_CODE_RUN.sh` 로 반드시 다시 설정할 것.** 안 하면 계수율이
+  정상의 20배가 넘는다(실측 23,527 Hz). 전체 절차는 §11.119.
+- **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
+  포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
+  치울 것 — **인자 없이 부르면 `bin directory not found` 로 실패한다** (§11.119).
+- **★ 살아 있는 DAQ 를 찾을 때 `pgrep -f` 를 쓰지 말 것.** 저장소 경로에
+  `rcterm` 이 들어 있어(`RENE-daq-rcterm`) 자기 셸과 postrun·dataflow 까지
+  잡힌다. `pgrep -x rcsupervisor|rcterm|daq|tcb|merger` 로 볼 것 (§11.67 · §11.119).
 - **★ 전원을 내리기 전에 `sudo umount /scratch`.** `hard` 마운트라 스토리지가
   먼저 사라지면 종료가 그 자리에서 멎는다. fstab 에 `nofail` 이 없어 부팅도
   늘어질 수 있다 (§11.113).
@@ -834,6 +857,247 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ---
 
 ## 11. 세션 기록 (Claude Code)
+
+### 2026-08-26 — 10G 링크 개통. 그리고 TCB 보드는 전원 재투입으로만 풀렸다
+
+#### 11.115 ★★ 스토리지 링크를 100 Mb 에서 10 Gb 로 — 실측 69~109 배
+
+§11.114 가 "올린 뒤 다시 실측해 문서를 갱신하라"고 지목한 그 작업이다.
+
+```
+새 카드   Intel X710-2 for 10GbE SFP+ (i40e), 03:00.0/03:00.1
+          enp3s0f1  DAC 직결, 10 Gbps Full, 오류 0        <- 이것만 쓴다
+          enp3s0f0  케이블 없음
+옛 카드   enp1s0 는 건드리지 않았다. 케이블만 빠졌다
+```
+
+**★ 옛 `enp1s0` 은 사실 10G 카드였다.** Aquantia AQC113CS(10GBase-T)인데 100 Mb
+로 협상되고 있었다. §11.12 가 "속도 협상/배선 문제"로 의심한 것이 맞았다.
+
+**설정 — 이 PC 쪽은 이것이 전부다.**
+
+```bash
+nmcli connection add type ethernet ifname enp3s0f1 con-name storage10g \
+      ipv4.method manual ipv4.addresses 10.0.0.11/24 \
+      ipv4.never-default yes connection.zone trusted connection.autoconnect yes
+nmcli connection modify enp1s0 connection.autoconnect no    # 옛 프로파일
+```
+
+- `never-default` — 기본 경로가 이리로 새면 인터넷이 사설 링크로 나간다
+- `zone trusted` — 옛 `enp1s0` 이 있던 존과 같게. `public` 은 `enp0s31f6` 전용이다
+- **`10.0.0.11` 을 그대로 옮겼다.** 저장소의 스크립트가 이 주소를 하드코딩한 곳이
+  하나도 없음을 확인했고(문서에만 나온다), 그래서 fstab 도 코드도 고칠 게 없다
+
+**★ 죽은 인터페이스가 경로를 가로챈다 — 진단을 두 번 헛되게 했다.**
+
+```
+10.0.0.0/24 dev enp1s0 ... metric 101 linkdown      <- 캐리어가 없는데 남아 있다
+/proc/sys/net/ipv4/conf/all/ignore_routes_with_linkdown = 0
+```
+
+`0` 이면 **커널이 캐리어 없는 인터페이스로도 그냥 내보낸다.** 그래서 새 포트에
+주소를 붙이고 ping 해도 죽은 `enp1s0` 으로 나갔다. 증거는 NIC 카운터였다 —
+`enp3s0f1` 의 `tx_broadcast` 가 **0** 이라 ARP 가 한 번도 안 나갔고, 이웃표에는
+`10.0.0.10 dev enp1s0 FAILED` 가 있었다. **옛 프로파일을 내리기 전에는 어떤
+테스트도 의미가 없다.**
+
+**★ 상대가 살아 있는지 알아내는 순서 — 이 셋이 값싸고 확실하다.**
+
+```
+1  ethtool -S <iface> 의 rx_multicast / rx_broadcast
+      조용한 점대점 링크에서 tcpdump 는 몇 분을 봐도 0 이다. 카운터는 부팅 이후
+      누적이라 '한 번이라도 왔는가'를 알려준다 (실측 : 8 프레임 586 바이트)
+2  ping -6 ff02::1%<iface>   ->   ip -6 neigh show dev <iface>
+      IPv4 주소 설정과 무관하게 이웃을 찾는다. 상대 링크로컬과 MAC 이 나온다
+3  nmap -6 -Pn -sT --reason  ->  filtered(admin-prohibited) / closed(refused) 구분
+      '방화벽이 막는다' 와 '데몬이 없다' 가 갈린다
+```
+
+**★ `bash` 의 `/dev/tcp` 는 스코프 붙은 IPv6 주소(`%iface`)를 못 다룬다.**
+`부적절한 인수` 로 즉시 실패하는데, 그걸 '포트 닫힘'으로 읽으면 정반대 결론이
+난다. 한 번 그렇게 냈다 뒤집었다. IPv6 포트 검사는 `nmap -6` 으로 할 것.
+
+**실측 — 옛 값과 나란히**
+
+| 측정 | 옛 100 Mb | 새 10G | 배수 |
+|---|---|---|---|
+| `/scratch` 읽기 | — | **838 MB/s** | — |
+| `/scratch` 쓰기 (버퍼드 bs=8M) | 7.7 MB/s | **534 MB/s** | **69** |
+| `/scratch` 쓰기 (버퍼드 bs=1M) | | 444 MB/s | 58 |
+| `/scratch` 쓰기 (`oflag=direct`) | | 62.8 MB/s | ← 처리량이 아니다 |
+| RTT | 10.6 ms | **0.31 ms** | 34 |
+| (참고) 로컬 `/Data_ssd` 쓰기 | | 2.0 GB/s | |
+
+**★ `oflag=direct` 로 NFS 쓰기를 재지 말 것.** 1 MB 마다 서버 커밋을 기다리는
+**왕복 지연 측정**이라 언제나 낮게 나온다. rsync · ROOT 파일 쓰기 · dataflow 는
+전부 버퍼드라 실제 값은 444~534 MB/s 다. 처음에 62.8 을 보고 "쓰기가 병목"이라고
+읽을 뻔했다.
+
+읽기 838 MB/s = 6.7 Gbps 이므로 **병목은 이제 네트워크가 아니라 서버 스토리지**다.
+전송 4.4 GB 동안 `rx_errors`/`tx_errors`/`rx_dropped` 전부 0. MTU 는 1500 그대로다
+(jumbo 는 아직 시도하지 않았다 — 양쪽 끝이 같아야 한다).
+
+#### 11.116 fstab 두 가지 — 잘못된 주소, 그리고 `nofail`
+
+작업 도중 fstab 이 **`10.0.0.11:/data`** 로 바뀌어 있었다. 그건 **이 PC 자신**이고
+이 PC 의 `/etc/exports` 는 비어 있으므로(§11.100) 영원히 마운트되지 않는다.
+`10.0.0.10` 으로 되돌렸다. **저장소 서버가 `.10`, 이 PC 가 `.11` 이다.**
+
+그리고 §11.113 이 남긴 숙제를 함께 처리했다.
+
+```
+10.0.0.10:/data  /scratch  nfs  defaults,nofail,x-systemd.mount-timeout=30  0 0
+```
+
+`nofail` 이 없어서 이번 부팅에 `/scratch` 가 안 올라온 채 늘어졌다. 백업은
+`/etc/fstab.bak-<날짜>`.
+
+#### 11.117 ★ 이 수치가 뒤집는 판단들 — 다시 재야 한다
+
+| 자리 | 옛 결론 | 왜 다시 재야 하나 |
+|---|---|---|
+| §11.63 | "3단계는 **대조가 전송보다 비싸다**" | 100 Mb 전제다. run 4292 348 GB 기준 전송 10h17m + 대조 28h+ 였던 것이, 산술로는 **전송 약 11분 + 대조 약 7분**이 된다 |
+| §6 백로그 | "3단계가 12시간이라 `--drop-merged` 가 유일한 단축 수단" | 그 이유가 사라진다 |
+| §5.8 · §11.32 | 후처리가 `/scratch` 에서 13배 느리다 (서브런당 14.58초 대 1.11초) | 링크가 100배가 됐으니 다시 재야 한다 |
+| §11.5 | `find -printf` 가 `/scratch` 에서 못 쓸 만큼 느리다 | RTT 가 34배 줄었다. 여전히 `ls -lU` 가 낫겠지만 확인이 필요하다 |
+| `backup-trickle` `--bwlimit` | 링크를 굶기지 않으려는 양보 | 대역 자체가 넉넉해졌다. 양보 논리는 유효하되 값은 재검토 |
+
+**★ 위는 전부 산술이지 실측이 아니다.** 실제 dataflow 3단계가 도는 것을 보고
+채워야 한다. 지금은 `/data/RAW` 가 비어 있어 볼 기회가 없다.
+
+#### 11.118 저장소 서버에 ssh 가 뚫렸다 — 포트는 22 가 아니라 **7777**
+
+§11.101 이 "그 서버에는 ssh 도 붙지 않는다(`No route to host`)"고 적어 둔 자리다.
+**원인이 확정됐다** — `No route to host` 는 방화벽이 ICMP `admin-prohibited` 로
+명시적으로 거부할 때 리눅스가 내는 말이다. 배선도 주소도 아니었다.
+
+사용자가 서버 쪽 방화벽을 열고 계정을 만들어 접속이 됐다.
+
+```
+호스트     nfs-server   Rocky 9.6 (5.14.0-570.18.1)
+/data      /dev/sda1    140 T   114 T 사용   19 T 여유      <- 단일 블록 장치
+ssh        10.0.0.10 : 7777   (22 는 닫혀 있다)
+별칭       ~/.ssh/config 에 `Host store nfs-server` 추가.  ssh store
+키         id_rsa 를 ssh-copy-id 로 넣었다 (무암호 접속)
+```
+
+**이로써 §11.101 의 `/scratch/LOG` XFS 점검을 원격에서 할 수 있게 됐다.**
+다만 `xfs_repair` 는 마운트를 풀어야 하므로(무수정 `-n` 조차 그렇다) 계획된
+정비 시간이 필요하다. **114 TB 에 완전한 백업이 없다는 점**(백업 안 된 옛 런
+237개, §11.61)을 먼저 저울질할 것. 급하지도 않다 — §11.103 이후 결손이 0 이다.
+
+#### 11.119 ★★ TCB 보드 장애 — `usbreset` 으로 안 풀린다. 전원 재투입만이 답이었다
+
+재기동하니 **5회 연속 부팅 실패**로 감시자가 포기했다. §11.49 와 같은 계열이나
+이번엔 FADC 가 아니라 **TCB** 다.
+
+```
+TCB_0043xx.log
+  CupGeneralTCB::Open: nkusb_open_device: super speed device opened   <- 보드는 열린다
+  CupGeneralTCB::Config: module configuration start
+  [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]      x 21
+  [ERROR] USB3TCBRead:  write error:LIBUSB_ERROR_TIMEOUT [sid=0]      x 22
+```
+
+`lsusb` 에는 보드 셋 다 정상 열거된다. `dmesg` 에 disconnect 도 없다.
+**태운 런 번호 : 4308 ~ 4312.**
+
+**시도한 순서와 결과 — 이 표가 이 절의 요점이다.**
+
+| 시도 | 결과 |
+|---|---|
+| `src/usbreset` | **효과 없음.** USB 링크만 다시 맺는다 |
+| 그 뒤 확인 런 | 증상이 *바뀌었다* — `CupGeneralTCB::Config: no module linked`. 리셋 전에는 `CheckLinkStatus: TCB[mid=0] found @ 10,13,14,15,26` 으로 모듈을 보고 있었다 |
+| `src/NOTICE_CODE_RUN.sh` | **7분간 물림.** 출력 한 줄 없이 매달려 강제 종료 |
+| **보드 전원 재투입** | **이것이 풀었다.** device 8·9·10 으로 완전 재열거 |
+| 그 뒤 확인 런 | USB 오류 0건. 그런데 **23,527 Hz** (정상의 23배) |
+| `src/NOTICE_CODE_RUN.sh` | **7초에 rc=0.** pedestal 3693~3721 정상 |
+| `src/usbreset` | 마무리 |
+| 확인 런 | **962.3 Hz — 정상** (run 4307 이 1015.7 Hz) |
+
+**★ `usbreset`(USBDEVFS_RESET)은 USB 링크만 다시 맺는다. 보드 안의 FPGA·펌웨어
+상태는 그대로다.** 그것이 엉키면 **전원을 끊어야만** 풀린다.
+
+**★ PC 재부팅으로는 안 된다.** NOTICE 보드는 자체 크레이트 전원을 쓰므로 PC 만
+껐다 켜도 보드는 계속 켜져 있다. USB 케이블만 뽑았다 꽂는 것도 같다.
+**보드 전원 자체를 내리고 10초 이상 기다렸다 올려야 한다.**
+
+**★ 전원 재투입은 트리거 설정을 날린다.** 직후 23,527 Hz 가 그것이다. 잡음
+트리거이므로 **`NOTICE_CODE_RUN.sh` 로 보드를 다시 설정해야 한다.** 전원을
+내렸으면 이 단계가 선택이 아니라 필수다.
+
+**★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
+부모가 systemd 로 바뀌고 포트 3개를 계속 잡고 있어 다음 시도를 막는다. 오늘
+두 번 걸렸다. **§11.50 의 복구 절차에 이 한 줄이 빠져 있었다.**
+
+```bash
+scripts/killdaq.sh -b /home/frontend/DAQ/DAQ_cup/install/bin
+#   ★ 인자 없이 부르면 ONLDAQ_DIR 이 없어 "bin directory not found : '/bin'" 로 실패한다
+```
+
+**고친 복구 절차 (§11.50 을 대체한다)**
+
+```
+1  pgrep -x rcsupervisor / rcterm / daq / tcb / merger  +  ss -ltn | grep 7809
+   ★ pgrep -f 를 쓰지 말 것 — 저장소 경로에 'rcterm' 이 들어 있어 자기가 잡힌다
+2  scripts/killdaq.sh -b <bindir>            고아가 있으면 치운다
+3  src/usbreset                              먼저 이것
+4  확인 런  rcterm --no-db --run 999999 --max-runs 1 --run-length 0.05 --quiet
+      합격 : exit=0, 약 1000 Hz, TCB/FADC/SADC 로그에 LIBUSB 0건
+      실패하면 -> 5
+5  ★ 보드 전원 재투입 (10초 이상) -> lsusb 로 셋 다 확인
+6  src/NOTICE_CODE_RUN.sh                    설정 복원. rc=0 이고 pedestal 이 나와야 한다
+7  src/usbreset  ->  확인 런 다시
+8  감시자 재기동 (rundesc.txt 를 넘겨서) -> daq-alarm.sh --silence
+```
+
+확인 런은 **`--no-db --run 999999`** 로 돌린다. 런 카탈로그를 더럽히지 않는다
+(§11.50 은 실제 런 번호를 태웠다). 끝나면 `/Data_ssd/RAW/999999` 를 지운다.
+
+**결과 — run 4313 이 975 Hz 로 수집 중이고 `rundesc` 가 run 4307 과 바이트 일치**
+한다(§11.20 대로 한 측정으로 묶인다). 공백 22:25 ~ 01:34, **3시간 9분**.
+
+#### 11.120 ★ `usb-recover.sh` 가 이 고장을 영원히 못 잡는다 (아직 안 고쳤다)
+
+감시자는 포기하기 전에 자동 복구를 불렀고 **`1 = not-usb`** 로 물러났다.
+5초 만에 끝났다. 구멍이 둘이고 **둘 다 고쳐야** 다음에 잡는다.
+
+```
+① TCB 로그를 아예 안 본다
+     scripts/usb-recover.sh:148,152 가 FADCDAQ · SADCDAQ 만 훑는다.
+     TCB 는 리셋 대상 목록(BOARDS, 50행)에는 있는데 로그 검사에서 빠져 있다
+
+② 오류 문자열이 하나도 안 겹친다
+     찾는 것   LIBUSB_ERROR_IO · USB3Read: read error ·
+               USB3ReadReg: read error · error in reading buffer count
+     실제      USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT
+               USB3TCBRead:  write error:LIBUSB_ERROR_TIMEOUT
+     함수 이름 · 동사(write/read) · libusb 코드(_TIMEOUT/_IO) 셋 다 다르다
+
+실측 : 그 로그에 오류 43건이 있는데 진단 패턴으로 세면 0 건이다
+```
+
+§11.56 에서 이 진단을 만들 때 근거로 삼은 것은 §11.49 의 **FADC + `LIBUSB_ERROR_IO`
+한 사례뿐**이었다. 그물이 그 한 사례에 맞춰져 있었다. 스크립트가 "근거 없으면
+리셋하지 않는다"를 지킨 것 자체는 옳다 — **원칙이 아니라 그물이 문제다.**
+
+**★ 그리고 진단을 통과했더라도 이번엔 못 고쳤을 것이다.** 답이 `usbreset` 이
+아니라 **물리적 전원 재투입**이었기 때문이다. 자동 복구로 닫을 수 없는 고장이
+있다는 것을 `usb-recover.sh` 의 실패 메시지가 사람에게 알려야 한다.
+
+#### 11.121 아직 열려 있는 것
+
+- **`usb-recover.sh` 수정** (§11.120). 코드 변경이므로 §8 대로 **별도 클론**에서
+  할 것 — 지금 이 디렉터리의 바이너리로 run 4313 이 돌고 있다.
+- **10G 실측 재측정** (§11.117). dataflow 3단계가 실제로 도는 것을 봐야 한다.
+  jumbo frame(MTU 9000)도 아직 시도하지 않았다.
+- **`/scratch/LOG` XFS 점검** — 이제 `ssh store` 로 할 수 있다 (§11.118).
+  읽기 전용 진단(`dmesg` · `xfs_info` · `smartctl -a /dev/sda`)부터.
+  **`fsck` 가 아니라 `xfs_repair`** 이고 마운트를 풀어야 한다.
+- `prd_gap` 17개 (§11.85). 백업 밀린 옛 런 (§11.61).
+- 4000번 초과 재처리 (§11.108) — 정전으로 4224 서브런 1225 에서 멈춰 있다.
+- run 4306 · 4307 이동·백업 전이다. run 4303 은 `/data` -> `/scratch` 이동 중이었다.
+- 서브에이전트로 스킬 압박 시나리오 검증 (에이전트 기동은 사용자 요청이 필요하다).
 
 ### 2026-08-25 (밤) — 10G 랜카드 교체를 위한 전체 정지. run 4307 은 결손 0 으로 완결
 
