@@ -228,8 +228,11 @@ load_carry() {           # run_num subrun
    [ "$n" -eq 0 ] && { CARRY_SADC=0; CARRY_EVT=0; CARRY_TRG=0; return 0; }
    #  빼낸 폴더나 옛 디렉터리에 남아 있을 수 있다. 못 찾으면 손대지 않으므로
    #  (§11.68) 찾는 자리를 늘리는 편이 언제나 안전하다
+   #  ★ 옛 런은 로그 이름에 _v3_5v 가 없다 (§11.107). 담긴 carry 는 같다
    local f
-   f=$(find_log Merge_log "log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt") || return 1
+   f=$(find_log Merge_log "log_merge_FADC_SADC_v3_5v_run${rn}_subrun$(( n - 1 )).txt") \
+     || f=$(find_log Merge_log "log_merge_FADC_SADC_run${rn}_subrun$(( n - 1 )).txt") \
+     || return 1
    [ -r "$f" ] || return 1
    CARRY_SADC=$(grep -m1 "final SADC "              "$f" 2>/dev/null | awk '{print $4}')
    CARRY_EVT=$( grep -m1 "final SADC_evt"           "$f" 2>/dev/null | awk '{print $4}')

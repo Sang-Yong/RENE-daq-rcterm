@@ -145,15 +145,20 @@ LOGROTATE=${POSTRUN_LOGROTATE:-$(dirname "$0")/logrotate-daq.sh}
 #    내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68). 로그 디렉터리를 새것으로
 #    갈아끼운 뒤에는 그 이전 런의 로그가 옛 디렉터리에 남으므로 거기까지 본다.
 find_prevlog() {          # run_num subrun  ->  경로를 낸다. 없으면 rc=1
-   local base="log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt" f d
-   f="$MERGEDIR/$base";        [ -f "$f" ] && { echo "$f"; return 0; }
-   #  상한에 이르러 빼낸 폴더들. 최신 번호부터 본다 (§11.103)
-   for d in $(ls -dU "$MERGEDIR".old* 2>/dev/null | sort -r); do
-      [ -f "$d/$base" ] && { echo "$d/$base"; return 0; }
+   local base f d
+   #  ★ 옛 런은 매크로 판이 달라 로그 이름에 _v3_5v 가 없다 (§11.107).
+   #    4240 은 새 이름, 4138·4219·4221·4224 는 옛 이름이다. 둘 다 본다 —
+   #    안에 담긴 carry 세 줄(final SADC / SADC_evt / before_SADC_trgnum)은 같다
+   for base in "log_merge_FADC_SADC_v3_5v_run${1}_subrun${2}.txt" \
+               "log_merge_FADC_SADC_run${1}_subrun${2}.txt"; do
+      f="$MERGEDIR/$base";        [ -f "$f" ] && { echo "$f"; return 0; }
+      #  상한에 이르러 빼낸 폴더들. 최신 번호부터 본다 (§11.103)
+      for d in $(ls -dU "$MERGEDIR".old* 2>/dev/null | sort -r); do
+         [ -f "$d/$base" ] && { echo "$d/$base"; return 0; }
+      done
+      f="$LOGDIR/$base";          [ -f "$f" ] && { echo "$f"; return 0; }   # 옛 평면 배치
+      [ -n "$LOGFALLBACK" ] && [ -f "$LOGFALLBACK/$base" ] && { echo "$LOGFALLBACK/$base"; return 0; }
    done
-   f="$LOGDIR/$base";          [ -f "$f" ] && { echo "$f"; return 0; }   # 옛 평면 배치
-   [ -n "$LOGFALLBACK" ] || return 1
-   f="$LOGFALLBACK/$base";     [ -f "$f" ] && { echo "$f"; return 0; }
    return 1
 }
 
