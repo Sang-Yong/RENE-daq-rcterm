@@ -732,6 +732,11 @@ scripts/backup-khu.sh --params config/dataflow.params --run <N>
   그룹 전체에 SIGINT 라 매크로까지 죽고 **반쪽짜리 Merged 가 남는다.** 완료 판정이
   `[ -s ]` 뿐이라 그 반쪽을 완료로 읽는다(§11.85 의 `empty_merged`). 셸 PID 에만
   `kill -TERM <pid>` 를 보내면 진행 중인 merge 를 끝내고 스스로 빠진다 (§11.109).
+- **★ rsync 이 `Input/output error (5)` 로 무더기 실패하면 장치가 사라진 것이다.**
+  "디스크 이름이 바뀌어서 끊긴다"는 인과가 반대다 — **끊겼기 때문에 다시 붙으면서
+  다음 빈 이름을 받는 것**이다. `dmesg` 에서 `device offline` 과 곧이은
+  `Attached SCSI disk` 를 찾을 것. 저장소 서버의 USB 백업 디스크에서 실제로 겪었다
+  (§11.123). UUID 로 마운트하면 오인만 막을 뿐 **끊김 자체는 안 멎는다.**
 - **★★ 보드가 `LIBUSB_ERROR_TIMEOUT` 으로 부팅 실패하면 `usbreset` 만으로 안 된다.**
   `usbreset` 은 USB 링크만 다시 맺고 보드 안의 FPGA·펌웨어 상태는 그대로다.
   **보드 크레이트 전원을 내렸다 올려야** 풀린다 — **PC 재부팅으로는 안 된다**
@@ -1256,7 +1261,7 @@ scripts/netcheck.sh                 # 전부. ★ 대역을 실제로 쓴다
 바꾸니 69배가 됐다. 이쪽은 우리 쪽이 이미 1 Gb 이고 바깥이 막혔다.
 **같은 '10 Gb 로 올리자'가 한쪽에서는 옳고 한쪽에서는 헛돈이다.**
 
-#### 11.122 ★★ 여기서 이어받는다 — 2026-08-26 05:45 기준
+#### 11.122 ★★ 여기서 이어받는다 — 2026-08-26 17:00 기준
 
 **창이 닫히거나 접속이 끊겨도 이 절만 보면 그대로 이어갈 수 있다.**
 다른 서버에서라면 §0.0 으로 환경을 세운 뒤 여기로 온다.
@@ -1314,6 +1319,7 @@ scripts/netcheck.sh                    # 5~10분. 대역을 실제로 쓴다
 | 4000번 초과 재처리 | 정전으로 run 4224 서브런 1225 에서 멈춤 | §11.108 |
 | `prd_gap` 17개 · 백업 밀린 옛 런 237개 | 그대로 | §11.85 · §11.61 |
 | jumbo frame(MTU 9000) | 시도 안 했다. 양쪽 끝이 같아야 한다 | §11.115 |
+| **저장소 서버 `/backup_hdd`** | USB 인클로저가 부하 중 떨어진다. 0바이트 138개 + 디스크 99% | §11.123 |
 | 서브에이전트 스킬 압박 검증 | 사용자 요청이 있어야 기동한다 | — |
 
 **★ 이어받을 때 밟기 쉬운 것 셋**
@@ -1324,6 +1330,132 @@ scripts/netcheck.sh                    # 5~10분. 대역을 실제로 쓴다
 2  운영 디렉터리에서 소스를 고치지 말 것 — 여기 바이너리로 run 4313 이 돌고 있다 (§8)
 3  git push 는 자격증명 캐시가 살아 있을 때만 된다. 만료되면 사용자가 한 번 밀어야 한다
 ```
+
+#### 11.123 ★★ `/backup_hdd` rsync 이 끊기는 이유 — 이름이 바뀌는 것은 결과다
+
+사용자 질문 : "rsync 중에 disk name 이 바뀌어 끊기는데 원인이 뭔가."
+**답 : 이름이 바뀌어서 끊기는 것이 아니라, 끊겼기 때문에 이름이 바뀐다.**
+
+**★ 이건 이 PC 가 아니라 저장소 서버(`nfs-server`, 10.0.0.10) 이야기다.**
+그쪽 `/backup_hdd` 는 사람이 손으로 마운트해 쓰는 **USB 외장 디스크**이고,
+우리 파이프라인(`postrun`·`dataflow`·`backup-khu`)과는 무관하다.
+`ssh store` 로 붙어 실측했다 (§11.118 덕에 가능해졌다).
+
+**증상**
+
+```
+rsync: [generator] recv_generator: failed to stat ".../MERGED_002442.root.08467": Input/output error (5)
+rsync: [receiver]  mkstemp ".../.MERGED_002442.root.08026.c5mH6K" failed: Input/output error (5)
+143,437,671,969  53%  118.00MB/s   ->  rsync error ... (code 23)
+
+df -h        /dev/sdc1 -> /backup_hdd        마운트돼 있다고 나온다
+ls /dev/sd*  sda sda1 sdb sdb1               ★ sdc 가 존재하지 않는다
+```
+
+**원인 — dmesg 가 순서대로 담고 있다**
+
+```
+16:30:24  Buffer I/O error on dev sdc1 ... lost async page write
+16:30:24  Aborting journal on device sdc1-8
+16:30:29  device offline error, dev sdc, sector 2048 op WRITE     <- ★ 장치가 사라졌다
+16:30:29  EXT4-fs (sdc1): I/O error while writing superblock
+16:30:29  EXT4-fs (sdc1): Remounting filesystem read-only
+16:30:29  usb 2-2: new SuperSpeed USB device number 6             <- 같은 디스크가 재열거
+16:30:30  sd 17:0:0:0: [sdb] Attached SCSI disk                   <- 이번엔 sdb 로 붙었다
+16:31:56  EXT4-fs (sdb1): recovery complete                       <- 사람이 재마운트
+```
+
+**양쪽 UUID 가 `ad07fc77-ca3d-4763-afcb-8ee541213a34` 로 같다** — 같은 디스크다.
+
+```
+인클로저   JMicron JMS551 USB-SATA 브리지 (152d:0551)
+디스크     Seagate ST2000DM008  2 TB (3.5인치)
+```
+
+**★ 인과의 방향이 중요하다.**
+
+```
+USB 인클로저가 쓰기 도중 버스에서 떨어진다
+   -> ext4 저널 abort -> 파일시스템 강제 read-only -> 모든 작업이 EIO
+   -> rsync 사망
+   -> 그 디스크가 다시 붙으며 '다음 빈 이름'을 받는다 (sdc -> sdb)
+```
+
+`/dev/sdX` 는 **발견 순서로 붙는 이름**이지 디스크에 새겨진 것이 아니다.
+**이름 변경은 장치가 한 번 사라졌다는 흔적**이다. 그래서 UUID 로 바꾸는 것만으로는
+끊김이 멎지 않는다 — 그건 '엉뚱한 디스크를 잡는 것'만 막는다.
+
+**브리지 상태가 좋지 않다는 신호도 같이 나온다.**
+
+```
+sd 17:0:0:0: [sdb] Sector size 0 reported, assuming 512
+sd 17:0:0:0: [sdb] 0-byte physical blocks
+sd 17:0:0:0: [sdb] No Caching mode page found
+```
+
+**피해 — 확인했다. 잃은 것은 없다**
+
+```
+0 바이트 파일     138 개      원본은 지워졌는데 목적지가 비었다
+40MB 미만         139 개      정상은 약 80 MB
+남은 임시 조각      8 개      .MERGED_002442.root.*.XXXXXX
+```
+
+`--remove-source-files` 를 썼기 때문에 생긴 모양이다. **그런데 원본 RAW 가 온전하다.**
+
+```
+/data/RAW/002442   FADC 8546 / SADC 8549 / PRD 8548
+```
+
+**`Merged` 는 RAW 에서 다시 만들 수 있는 중간 산출물**이다 — 경희대 백업에서
+일부러 빼는 것도 같은 이유다(§11.14). 138개 전부 재생성 가능하므로 **영구 손실은
+없다.** 운이 좋았던 것이지 절차가 안전했던 것은 아니다.
+
+**★ 문제가 셋이다. 서로 다르니 따로 고쳐야 한다**
+
+| # | 무엇 | 성격 |
+|---|---|---|
+| A | USB 인클로저가 부하 중에 떨어진다 | **근본 원인.** 하드웨어 |
+| B | 디스크가 99% 찼다 (1.8T 중 27G) | 남은 443개 x 80MB = 약 35 GB. **어차피 못 끝난다** |
+| C | `--remove-source-files` 로 대조 없이 지웠다 | 절차. §8 위반 |
+
+**조치 순서**
+
+```
+1  umount /backup_hdd && e2fsck -f -y /dev/sdb1
+     ★ 'recovery complete' 는 저널 재생일 뿐 검사가 아니다.
+       저널이 abort 된 뒤에는 전체 검사를 해야 한다
+2  find /backup_hdd/.../Merged -maxdepth 1 -name 'MERGED_*' -size 0 -delete
+   rm -f /backup_hdd/.../Merged/.MERGED_*
+     안 지우면 다음 rsync 이 '이미 있다'고 건너뛴다
+3  용량을 해결한다 (더 큰 디스크 또는 분할)
+4  UUID 로 마운트한다
+     UUID=ad07fc77-ca3d-4763-afcb-8ee541213a34 /backup_hdd ext4 defaults,noauto,nofail 0 0
+5  --remove-source-files 를 쓰지 않는다. §8 대로 보내고 -> 대조하고 -> 지운다
+     rsync -a --partial-dir=.rsync-partial <원본>/ /backup_hdd/<대상>/
+     rsync -c -n -i <원본>/ /backup_hdd/<대상>/      '>f' 줄이 0 이어야 한다
+```
+
+**A(떨어지는 것) 를 잡으려면 볼 것**
+
+```
+1  3.5인치라 12V 외부 전원이 필요하다. 어댑터 용량이 충분한가
+   2베이 독이면 둘이 나눠 쓴다 — 부하가 걸릴 때 모자라기 쉽다
+2  USB 케이블을 짧고 좋은 것으로. 허브를 거치지 말고 뒷면 포트에 직결
+3  브리지 칩 발열 — 117 MB/s 로 20분 연속 쓰면 뜨거워진다
+4  smartctl -d sat -a /dev/sdb
+     UDMA_CRC_Error_Count 가 는다  -> 케이블·브리지
+     Reallocated / Pending 이 있다 -> 디스크 자체
+```
+
+**다음에 같은 증상이 나면 이 한 줄이면 갈린다**
+
+```bash
+ssh store 'dmesg -T | grep -iE "device offline|USB disconnect|Aborting journal|Attached SCSI disk|reset" | tail -20'
+```
+
+`device offline` + 곧이어 `Attached SCSI disk` 가 보이면 **또 떨어진 것**이다.
+
 
 ### 2026-08-25 (밤) — 10G 랜카드 교체를 위한 전체 정지. run 4307 은 결손 0 으로 완결
 
