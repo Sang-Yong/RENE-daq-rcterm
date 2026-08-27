@@ -13,6 +13,7 @@
 #     recovery_failed  자동 복구가 끝내 안 됐다. ★ 사람이 현장에 가야 한다
 #     fatal            감시자가 포기하고 종료한다
 #     backup_audit     로컬과 경희대를 대조한 결과 (scripts/backup-audit.sh)
+#     sheetlog         구글시트 런 로그에 등재했다 (scripts/sheetlog-auto.sh)
 #
 #  rcsupervisor 가 이것을 부른다 :
 #     rcsupervisor --notify-cmd <이 스크립트>
@@ -39,7 +40,8 @@ MAIL_MIN_INTERVAL=300
 NOTIFY_LOG=/Data/LOG/daq-notify.log
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
-                [recovery_failed]=both [fatal]=both [backup_audit]=mail )
+                [recovery_failed]=both [fatal]=both [backup_audit]=mail \
+                [sheetlog]=mail )
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -62,6 +64,7 @@ load_params() {
          on_recovery_failed) ON[recovery_failed]=$v ;;
          on_fatal)           ON[fatal]=$v ;;
          on_backup_audit)    ON[backup_audit]=$v ;;
+         on_sheetlog)        ON[sheetlog]=$v ;;
          *) : ;;
       esac
    done < "$f"

@@ -69,6 +69,7 @@ on_fatal            = both
 #   backup_audit     로컬과 경희대를 대조한 결과 (scripts/backup-audit.sh --mail)
 #                    급한 것이 아니므로 소리는 내지 않는다
 on_backup_audit     = mail
+on_sheetlog         = mail
 
 #  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
 #  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
