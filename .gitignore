@@ -35,3 +35,6 @@ token.json
 # 파이썬 도구가 남기는 것
 __pycache__/
 *.pyc
+
+# 자격증명이 든 설정의 백업본 (config/*.params 를 고치기 전에 남기는 사본)
+config/*.params.bak-*

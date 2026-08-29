@@ -60,6 +60,22 @@ USB 보드 문제라면 스스로 되살리는** 장치다.
 cp config/notify.params.example config/notify.params
 chmod 600 config/notify.params
 vi config/notify.params        # smtp_user / smtp_pass / mail_to / mail_to_expert
+
+**★ 수신자 목록은 둘이고 서로 독립이다.** 전문가는 일상 알림을 받지 않는다.
+
+| 설정 | 받는 사건 | 성격 |
+|---|---|---|
+| `mail_to` (책임자) | restart · stale · recovered · backup_audit · sheetlog | 일상. 하루 여러 통 |
+| `mail_to_expert` (전문가) | recovery_failed · fatal | **사람이 현장에 가야 할 때만** |
+
+`mail_to_expert` 가 비어 있으면 `mail_to` 로 간다(`send_mail.py:36`). 바꾼 뒤에는
+발송하지 말고 확인할 것 — **`--dry-run` 이 실제 수신자를 그대로 찍는다.**
+
+```bash
+python3 tools/notify/send_mail.py --params config/notify.params --to expert \
+        --subject '수신자 확인' --dry-run
+```
+
 ```
 
 **Gmail 을 쓴다면 계정 비밀번호가 아니라 '앱 비밀번호'여야 한다.**
