@@ -293,8 +293,28 @@ backup_reading() {       # run_pad
    done | grep -Eq "^(/[^ ]*/)?(rsync|ssh) .*(/|^)$rp(/| |$)"
 }
 
+# ---------------------------------------------------------------------
+#  목적지가 실제로 마운트돼 있는지 확인한다.  ★ 2026-09-01 추가
+#
+#  /scratch 가 빠진 채 3단계가 돌면 rsync 는 그것이 NFS 였다는 것을 모른다.
+#  루트 파일시스템에 남아 있는 빈 디렉터리에 런 하나(약 330 GB)를 그대로
+#  쏟아붓는다. 루트가 차면 DAQ 만이 아니라 시스템 전체가 멎는다.
+#  저장소 서버가 죽어 /scratch 가 빠져 있는 상태를 실제로 겪었다 (§11.133).
+#
+#  목적지가 마운트가 아닌 구성을 일부러 쓰려면 DATAFLOW_ALLOW_UNMOUNTED=1.
+# ---------------------------------------------------------------------
+dest_mounted() {                     # $1 = 확인할 경로
+   [ "${DATAFLOW_ALLOW_UNMOUNTED:-0}" = "1" ] && return 0
+   mountpoint -q "$1" 2>/dev/null
+}
+
 stage1() {
    local keep rp src
+   if ! dest_mounted "$MID"; then
+      log "${C_R}[1] $MID 가 마운트돼 있지 않다. 1단계를 건너뛴다${C_0}"
+      log "${C_R}    (그대로 옮기면 루트 파일시스템을 채운다)${C_0}"
+      return 0
+   fi
    keep=$(runs_in "$SSD/RAW" | tail -n "$KEEP_SSD")
    for rp in $(runs_in "$SSD/RAW"); do
       echo "$keep" | grep -qx "$rp" && continue
@@ -351,6 +371,11 @@ backup_complete() {       # run_pad
 # =====================================================================
 stage3() {
    local keep rp src
+   if ! dest_mounted "$NFS"; then
+      log "${C_R}[3] $NFS 가 마운트돼 있지 않다. 3단계를 건너뛴다${C_0}"
+      log "${C_R}    (그대로 옮기면 루트 파일시스템을 채운다. 저장소 서버부터 살릴 것)${C_0}"
+      return 0
+   fi
    keep=$(runs_in "$MID/RAW" | tail -n "$KEEP_MID")
    for rp in $(runs_in "$MID/RAW"); do
       [ "$KEEP_MID" -gt 0 ] && echo "$keep" | grep -qx "$rp" && continue
