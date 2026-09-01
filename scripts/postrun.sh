@@ -138,6 +138,32 @@ CODEDIR=$PRODDIR/Code
 SHELLDIR=$PRODDIR/Shell
 LOGDIR=$PRODDIR/LOG                 # 로그 루트. 껍데기는 여기 평면에 쓴다
 MERGEDIR=$LOGDIR/Merge_log          # merge 로그는 종류별 폴더에 (§11.103)
+
+# ---------------------------------------------------------------------
+#  DAQ 의 TCB 로그를 찾는다. production 매크로가 읽는 Run<런>_DLY_THR.log 를
+#  이것으로 만든다.
+#
+#  ★ 2026-09-01 에 고쳤다. 예전에는 `$RAWROOT/../LOG/TCB_<런>.log` 한 자리만
+#    봤는데, §11.103 에서 DAQ 로그를 `<로그루트>/RAW_log/` 로 옮긴 뒤로 그 자리에
+#    아무것도 없다. 그래서 옛 런을 재처리하면 DLY_THR 이 안 만들어지고
+#    production 이 런 전체에 걸쳐 2초 만에 실패한다 -- merge 는 멀쩡히 되므로
+#    원인이 잘 보이지 않는다. run 4241~4246 · 4280 이 그렇게 막혀 있었다 (§11.139).
+# ---------------------------------------------------------------------
+find_tcblog() {          # run_pad  ->  경로를 낸다. 못 찾으면 rc=1
+   #  ★ `local rp=$1 base="TCB_${rp}.log"` 로 한 줄에 쓰면 안 된다.
+   #    bash 는 local 의 낱말을 assignment 전에 전부 전개하므로 base 가
+   #    'TCB_.log' 가 된다. 2026-09-01 에 시험에서 잡았다.
+   local rp=$1
+   local base="TCB_${rp}.log" d
+   [ -r "$LOGDIR/RAW_log/$base" ] && { echo "$LOGDIR/RAW_log/$base"; return 0; }
+   for d in $(ls -dU "$LOGDIR/RAW_log".old* 2>/dev/null | sort -r); do
+      [ -r "$d/$base" ] && { echo "$d/$base"; return 0; }
+   done
+   [ -r "$LOGDIR/$base" ]         && { echo "$LOGDIR/$base"; return 0; }
+   [ -r "$RAWROOT/../LOG/$base" ] && { echo "$RAWROOT/../LOG/$base"; return 0; }
+   [ -r "/Data_ssd/LOG/$base" ]   && { echo "/Data_ssd/LOG/$base"; return 0; }
+   return 1
+}
 LOGROTATE=${POSTRUN_LOGROTATE:-$(dirname "$0")/logrotate-daq.sh}
 
 #  직전 서브런의 merge 로그를 찾는다.
@@ -564,10 +590,17 @@ process_range() {        # run_pad run_num from to maxarg
    #   if [ ! -f "$UseLog" ]; then cat TCBLOG | grep WJ > $UseLog; fi
    # 을 하는데, 병렬로 돌리면 여러 프로세스가 동시에 이 파일을 쓴다.
    # 미리 한 번만 만들어 두면 그 창이 사라진다.
-   local uselog="$dd/PRD/Run${rp}_DLY_THR.log"
-   local tcblog="$RAWROOT/../LOG/TCB_${rp}.log"
-   if [ ! -s "$uselog" ] && [ -r "$tcblog" ] && [ "$DRYRUN" -eq 0 ]; then
-      grep WJ "$tcblog" > "$uselog" 2>/dev/null && log "  DLY_THR 로그 생성 : $(basename "$uselog")"
+   local uselog="$dd/PRD/Run${rp}_DLY_THR.log" tcblog
+   tcblog=$(find_tcblog "$rp") || tcblog=""
+   if [ ! -s "$uselog" ] && [ -n "$tcblog" ] && [ "$DRYRUN" -eq 0 ]; then
+      grep WJ "$tcblog" > "$uselog" 2>/dev/null && log "  DLY_THR 로그 생성 : $(basename "$uselog")  <- $tcblog"
+   fi
+   #  ★ 이것이 없으면 production 매크로가 std::out_of_range 로 죽는다. 조용히
+   #    넘어가면 그 런 전체가 'Producing FAILED (2초)' 로 도배된다 (§11.139).
+   if [ ! -s "$uselog" ] && [ "$DRYRUN" -eq 0 ]; then
+      log "  PRD/Run${rp}_DLY_THR.log 이 없고 TCB 로그도 못 찾았다"
+      log "     production 이 이것을 읽는다. 없으면 매크로가 std::out_of_range 로 죽는다"
+      log "     찾아본 자리 : $LOGDIR/RAW_log{,.old*} · $LOGDIR · $RAWROOT/../LOG · /Data_ssd/LOG"
    fi
 
    t0=$(date +%s)

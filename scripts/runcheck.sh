@@ -206,17 +206,34 @@ merged_ok() {            # 파일 경로
 #   (variables_for_production.hh:98 reading_DLY_THR). 없으면 벡터가 비어
 #   std::out_of_range 로 죽는데, 메시지만 봐서는 데이터 문제로 보인다.
 #   postrun 은 구간 시작 전에 TCB 로그에서 한 번 만든다. 여기서도 같게 한다.
+#  ★ TCB 로그를 여러 자리에서 찾는다. §11.103 에서 DAQ 로그를 RAW_log 로
+#    옮긴 뒤로 옛 자리(`<런루트>/../LOG`) 에는 아무것도 없다. 한 자리만 보면
+#    옛 런에서 DLY_THR 을 못 만들고, 그러면 production 이 매 서브런
+#    std::out_of_range 로 죽는다 (§11.139).
+find_tcblog() {          # run_pad  ->  경로를 낸다. 못 찾으면 rc=1
+   #  ★ 한 줄에 몰아 쓰면 안 된다 -- bash 가 local 의 낱말을 assignment 전에
+   #    전부 전개해 base 가 'TCB_.log' 가 된다 (2026-09-01 시험에서 잡았다).
+   local rp=$1 dd=$2
+   local base="TCB_${rp}.log" d
+   [ -r "$LOGDIR/RAW_log/$base" ] && { echo "$LOGDIR/RAW_log/$base"; return 0; }
+   for d in $(ls -dU "$LOGDIR/RAW_log".old* 2>/dev/null | sort -r); do
+      [ -r "$d/$base" ] && { echo "$d/$base"; return 0; }
+   done
+   [ -r "$LOGDIR/$base" ]                     && { echo "$LOGDIR/$base"; return 0; }
+   [ -r "$(dirname "$dd")/../LOG/$base" ]     && { echo "$(dirname "$dd")/../LOG/$base"; return 0; }
+   [ -r "/Data_ssd/LOG/$base" ]               && { echo "/Data_ssd/LOG/$base"; return 0; }
+   return 1
+}
+
 ensure_dly_thr() {       # 런 디렉터리 run_pad
-   local dd=$1 rp=$2
+   local dd=$1 rp=$2 tcblog
    local uselog="$dd/PRD/Run${rp}_DLY_THR.log"
    [ -s "$uselog" ] && return 0
-   local tcblog="$(dirname "$dd")/../LOG/TCB_${rp}.log"
-   if [ -r "$tcblog" ]; then
-      mkdir -p "$dd/PRD"
-      grep WJ "$tcblog" > "$uselog" 2>/dev/null
-      [ -s "$uselog" ] && return 0
-      rm -f "$uselog"
-   fi
+   tcblog=$(find_tcblog "$rp" "$dd") || return 1
+   mkdir -p "$dd/PRD"
+   grep WJ "$tcblog" > "$uselog" 2>/dev/null
+   [ -s "$uselog" ] && { say "      ${C_G}DLY_THR 로그 생성${C_0} : $tcblog"; return 0; }
+   rm -f "$uselog"
    return 1
 }
 
