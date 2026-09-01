@@ -241,6 +241,38 @@ load_carry() {           # run_num subrun
 }
 
 # ---------------------------------------------------------------------
+#  ★ --fix 로 merge 를 다시 돌렸으면 그 출력을 껍데기와 같은 이름의 merge
+#    로그로 남긴다.
+#
+#    왜 필요한가 : --fix 는 껍데기(merge_FADC_SADC_v3_5v.sh)를 건너뛰고
+#    매크로를 직접 부른다(§11.52 이래의 우회법). 그러면 껍데기가 쓰던 로그가
+#    안 남는데, 그 로그가 바로 **다음 서브런의 carry 원천**이다. 그래서 예전에는
+#    서브런 N 을 고치는 순간 N+1 이 carry=no 로 손댈 수 없게 됐다.
+#    2026-09-01 run 4318 에서 실제로 그랬다 (§11.136).
+#
+#    ★ 방금 우리가 성공시킨 그 서브런의 로그만 쓴다. 남의 로그는 건드리지 않는다.
+# ---------------------------------------------------------------------
+write_merge_log() {      # run_num subrun 원본출력파일
+   local rn=$1 idx=$2 src=$3 base f err
+   base="log_merge_FADC_SADC_v3_5v_run${rn}_subrun${idx}.txt"
+   f="$MERGEDIR/$base"
+   mkdir -p "$MERGEDIR" 2>/dev/null
+   #  ★ 그룹으로 감싸야 리다이렉션 실패 사유까지 잡힌다 (§11.99 에서 밟았다)
+   if err=$( { printf '# runcheck.sh --fix 가 남긴 merge 로그 (%s)\n' "$(date '+%F %T')" > "$f"; } 2>&1 ); then
+      cat "$src" >> "$f" 2>/dev/null
+      if grep -q "final before_SADC_trgnum" "$f" 2>/dev/null; then
+         say "      ${C_G}merge 로그 기록${C_0} : $f  (다음 서브런의 carry 가 이어진다)"
+      else
+         say "      ${C_Y}merge 로그를 남겼으나 carry 세 줄이 안 보인다${C_0} : $f"
+      fi
+   else
+      say "      ${C_R}merge 로그를 쓰지 못했다${C_0} ($(echo "$err" | tail -1 | sed 's/.*: //'))"
+      say "         다음 서브런은 carry 를 못 읽는다. 그때는 이 서브런의 merge 를"
+      say "         한 번 더 돌려 출력에서 carry 를 읽을 것 (§11.136)"
+   fi
+}
+
+# ---------------------------------------------------------------------
 #  런 하나
 # ---------------------------------------------------------------------
 NGAP_TOTAL=0; NFIXED_TOTAL=0; NLEFT_TOTAL=0; NCMD_TOTAL=0
@@ -354,6 +386,8 @@ check_run() {            # run_num
       if ( cd "$CODEDIR" && eval "$cmd" ) >"$tmp/fixlog" 2>&1; then
          if [ -s "$dd/PRD/PRD_${rp}.$n.root" ]; then
             say "      ${C_G}복구 완료${C_0}"
+            #  merge 를 다시 돌린 경우에만. no_prd 는 merge 로그가 이미 있다.
+            [ "$kind" = no_prd ] || write_merge_log "$rn" "$idx" "$tmp/fixlog"
             nfix=$((nfix+1)); NFIXED_TOTAL=$((NFIXED_TOTAL+1))
          else
             say "      ${C_R}매크로는 끝났는데 PRD 가 없다${C_0}"; tail -5 "$tmp/fixlog" | sed 's/^/         /'

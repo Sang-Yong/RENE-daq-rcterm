@@ -131,9 +131,20 @@ say "[2/4] 진단 — 최근 실패가 USB 때문인가"
 
 #  주의: grep -c 는 0건일 때도 '0' 을 찍으면서 종료코드 1 을 낸다.
 #        여기에 '|| echo 0' 을 붙이면 '0' 이 두 줄 나와 뒤의 산술이 깨진다.
+#  ★ 2026-09-01 에 그물을 넓혔다. 그 전에는 이 함수가 TCB 고장을 0 건으로 셌다.
+#    근거로 삼았던 것이 §11.49 의 'FADC + LIBUSB_ERROR_IO' 한 사례뿐이라
+#    그 한 사례에 맞춰진 그물이었다 (§11.120).
+#
+#      전  LIBUSB_ERROR_IO            <- 코드를 IO 하나로 못박고 있었다
+#      후  LIBUSB_ERROR_              <- TIMEOUT · NO_DEVICE 계열까지 잡는다
+#          Fail to align DRAM         <- FADC 이벤트 버퍼가 안 올라온다.
+#                                        설정은 '성공'으로 끝나 조용히 0 Hz 가 된다.
+#                                        2026-09-01 에 usbreset 두 번째로 풀렸다
+#          no module linked           <- TCB 가 모듈을 못 본다
+#          is enabled but not linked  <- 같은 계열
 usb_err_count() {         # 로그 파일 하나의 USB 오류 건수
    [ -r "$1" ] || { echo 0; return 0; }
-   grep -c 'LIBUSB_ERROR_IO\|USB3Read: read error\|USB3ReadReg: read error\|error in reading buffer count' "$1" 2>/dev/null
+   grep -c 'LIBUSB_ERROR_\|USB3Read: read error\|USB3ReadReg: read error\|error in reading buffer count\|Fail to align DRAM\|no module linked\|is enabled but not linked' "$1" 2>/dev/null
    return 0
 }
 
@@ -141,7 +152,7 @@ usb_err_count() {         # 로그 파일 하나의 USB 오류 건수
 #    그냥 최신 N개를 보면 지금과 무관한 실패를 근거로 오진한다.
 #    (실측: 08-20 03:20 장애의 FADCDAQ_004299.log 가 몇 시간 뒤에도 최신 3개 안에 있었다)
 note "  최근 ${LOGAGEMIN}분 안에 쓰인 DAQ 로그만 본다"
-FADC_ERR=0; SADC_ERR=0; SUSPECT=""
+FADC_ERR=0; SADC_ERR=0; TCB_ERR=0; SUSPECT=""
 recent_logs() {           # 종류 하나의 최근 로그 목록
    find "$DAQLOG" -maxdepth 1 -name "$1_*.log" -mmin "-$LOGAGEMIN" 2>/dev/null | sort
 }
@@ -153,8 +164,16 @@ for f in $(recent_logs SADCDAQ); do
    n=$(usb_err_count "$f"); n=${n:-0}
    [ "$n" -gt 0 ] && { SADC_ERR=$((SADC_ERR+n)); note "  $(basename "$f") : USB 오류 $n 건"; }
 done
+#  ★ TCB 로그도 본다. 2026-09-01 전에는 이 세 줄이 없어서, 오류 43건짜리
+#    TCB 로그를 두고도 '0 건' 으로 세고 물러났다 (§11.120).
+#    TCB 는 BOARDS 목록(리셋 대상)에는 처음부터 있었는데 진단에서만 빠져 있었다.
+for f in $(recent_logs TCB); do
+   n=$(usb_err_count "$f"); n=${n:-0}
+   [ "$n" -gt 0 ] && { TCB_ERR=$((TCB_ERR+n)); note "  $(basename "$f") : USB 오류 $n 건"; }
+done
 [ "$FADC_ERR" -gt 0 ] && SUSPECT="$SUSPECT FADC"
 [ "$SADC_ERR" -gt 0 ] && SUSPECT="$SUSPECT SADC"
+[ "$TCB_ERR"  -gt 0 ] && SUSPECT="$SUSPECT TCB"
 
 # 보드가 아예 USB 에서 사라졌는가? 그것도 USB 문제다 (걸린 것보다 더 나쁘다).
 MISSING=""
@@ -171,7 +190,8 @@ fi
 
 if [ -z "$SUSPECT" ]; then
    say "USB 오류의 근거가 없다. 다른 원인이므로 usbreset 을 돌리지 않는다."
-   say "  (로그에 LIBUSB_ERROR 계열이 없고 보드 셋 다 보인다)"
+   say "  (FADCDAQ · SADCDAQ · TCB 로그에 USB 오류가 없고 보드 셋 다 보인다)"
+   say "  ★ 계수가 0 인데 여기까지 왔다면 검출기 쪽을 볼 것 — PMT HV 가 먼저다 (11.131)"
    [ "$NOTIFY_ON" -eq 1 ] && "$NOTIFY" --params "$PARAMS" recovery_failed \
         --msg "연속 실패했으나 USB 문제는 아니다 - 사람이 원인을 봐야 한다" \
         --detail-file "$DETAIL" >/dev/null 2>&1
@@ -308,6 +328,12 @@ if [ "$OK" -eq 1 ]; then
 fi
 
 say "★ ${MAXTRY}회 시도했으나 복구하지 못했다. 사람이 현장에 가야 한다."
+#  ★ usbreset(USBDEVFS_RESET)은 USB 링크만 다시 맺는다. 보드 안의 FPGA·펌웨어
+#    상태가 엉키면 전원을 끊어야만 풀린다. PC 재부팅으로는 안 된다 -- 보드가
+#    자체 크레이트 전원을 쓴다 (§11.119).
+say "  ★ 다음은 보드 크레이트 전원 재투입이다. usbreset 으로는 FPGA 상태가 안 풀린다."
+say "     전원을 내리면 트리거 설정이 날아가므로 src/NOTICE_CODE_RUN.sh 로 반드시 다시 설정할 것."
+say "     (안 하면 계수율이 정상의 20배가 넘는다 - 실측 23,527 Hz)"
 say "  기록 : $DETAIL"
 if [ "$NOTIFY_ON" -eq 1 ]; then
    "$NOTIFY" --params "$PARAMS" recovery_failed \
