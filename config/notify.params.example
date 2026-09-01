@@ -70,6 +70,14 @@ on_fatal            = both
 #                    급한 것이 아니므로 소리는 내지 않는다
 on_backup_audit     = mail
 on_sheetlog         = mail
+#   chain_down       후처리 사슬이 끊겼다 (scripts/chainwatch.sh)
+#                    /scratch 마운트 · postrun · dataflow 중 하나가 없다.
+#                    수집은 계속되므로 급하지는 않다 -- 다만 두면 SSD 가 찬다
+#   rate_low         수집은 도는데 ADC 별 계수율이 문턱 아래다
+#                    ★ 데이터가 지금 이 순간 비어 가는 중이다. 현장이 무인이면
+#                      both 로 올리는 것을 권한다
+on_chain_down       = mail
+on_rate_low         = mail
 
 #  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
 #  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
@@ -89,3 +97,21 @@ recover_min_rate    = 500     # 확인 런의 ADC 별 계수율이 이 [Hz] 를 
 recover_log_age_min = 60      # 최근 이 시간[분] 안에 쓰인 DAQ 로그만 진단에 쓴다.
                               # 옛 장애의 로그를 근거로 오진하지 않기 위해서다
 recover_keep_data   = 0       # 1 이면 확인 런의 파일을 남긴다. 0 이면 지운다
+
+# ---- 후처리 사슬 감시 (scripts/chainwatch.sh) ------------------------
+#  cron 이 5분마다 부른다 :
+#     */5 * * * * <저장소>/scripts/chainwatch.sh >/dev/null 2>&1
+#  상태만 보려면 (읽기 전용) :  scripts/chainwatch.sh --status
+#
+#  ★ tmux 세션 'daq' 도 없고 감시자도 없으면 아무 말도 하지 않는다.
+#    사람이 일부러 세운 것을 고장으로 알리지 않기 위해서다.
+chain_nfs_root      = /scratch   # 이것이 마운트돼 있어야 postrun 이 돈다
+chain_min_rate      = 400        # ADC 별 계수율 최솟값의 문턱 [Hz]. 정상은 약 1000
+                                 # ★ 합이 아니라 최솟값이다. 한 보드만 죽으면
+                                 #   합·평균은 멀쩡해 보인다
+chain_consecutive   = 2          # 이만큼 연속으로 이상이어야 알린다 (흔들림 무시)
+chain_warmup_sec    = 180        # 런 시작 후 이 시간[초] 안에는 계수율을 보지 않는다
+                                 # 부팅 직후에는 정상적으로 0 으로 나온다
+chain_realert_min   = 60         # 이상이 이어질 때 다시 알리는 간격 [분]
+chain_hb_max_age    = 120        # heartbeat 가 이보다 오래되면 '수집 중이 아니다'
+                                 # 로 보고 계수율을 판정하지 않는다

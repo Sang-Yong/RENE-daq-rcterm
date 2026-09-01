@@ -14,6 +14,9 @@
 #     fatal            감시자가 포기하고 종료한다
 #     backup_audit     로컬과 경희대를 대조한 결과 (scripts/backup-audit.sh)
 #     sheetlog         구글시트 런 로그에 등재했다 (scripts/sheetlog-auto.sh)
+#     chain_down       후처리 사슬이 끊겼다 -- /scratch·postrun·dataflow 중 하나가 없다
+#     rate_low         수집은 도는데 ADC 별 계수율이 문턱 아래다 (HV 를 먼저 의심)
+#                      위 둘은 scripts/chainwatch.sh 가 보낸다
 #
 #  rcsupervisor 가 이것을 부른다 :
 #     rcsupervisor --notify-cmd <이 스크립트>
@@ -41,7 +44,7 @@ NOTIFY_LOG=/Data/LOG/daq-notify.log
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
-                [sheetlog]=mail )
+                [sheetlog]=mail [chain_down]=mail [rate_low]=mail )
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -65,6 +68,8 @@ load_params() {
          on_fatal)           ON[fatal]=$v ;;
          on_backup_audit)    ON[backup_audit]=$v ;;
          on_sheetlog)        ON[sheetlog]=$v ;;
+         on_chain_down)      ON[chain_down]=$v ;;
+         on_rate_low)        ON[rate_low]=$v ;;
          *) : ;;
       esac
    done < "$f"
@@ -192,6 +197,22 @@ build_body() {
             echo "  '로컬에만 있다' 가 많으면 백업이 밀린 것이다 :"
             echo "     scripts/backup-trickle.sh --from <시작> --to <끝>"
             echo "  급한 상황은 아니다. 데이터는 로컬에 그대로 있다." ;;
+         chain_down)
+            echo "  수집은 돌고 있으나 뒤쪽 사슬이 끊겼다. 원시 데이터는 /Data_ssd 에"
+            echo "  계속 쌓이므로 급히 뛰어갈 일은 아니다. 다만 며칠 두면 SSD 가 찬다."
+            echo "  1) scripts/chainwatch.sh --status     무엇이 빠졌는지 한 줄로 나온다"
+            echo "  2) /scratch 가 빠졌으면 저장소 서버부터 :  mountpoint /scratch"
+            echo "     ping 10.0.0.10 · ssh store · ethtool -S <10G> 의 rx_unicast"
+            echo "  3) 마운트한 뒤 pane 에서 다시 띄운다 :"
+            echo "     postrun  : scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot /Data_ssd/RAW"
+            echo "     dataflow : scripts/dataflow.sh --params config/dataflow.params --follow" ;;
+         rate_low)
+            echo "  ★ 보드보다 검출기를 먼저 의심할 것. 2026-09-01 에 계수가 0 이었던"
+            echo "     원인은 PMT HV 였고, 보드 진단에 30분을 헛되이 썼다."
+            echo "  1) HV 를 본다 (rundesc 기준 PMT_A 1680V · PMT_B 1642V)"
+            echo "  2) 그 다음 보드 :  DAQ 로그의 LIBUSB 오류, TCB 로그의 DRAM 정렬"
+            echo "     'Fail to align DRAM' 이 보이면 usbreset 을 두 번 걸어 볼 것"
+            echo "  3) 지금 값은 위 heartbeat 의 daq0/daq1 줄에 있다 (ar= 가 평균 계수율)" ;;
       esac
    } > "$f" 2>/dev/null
 }
