@@ -368,6 +368,22 @@ if grep -q '쓰기 가능' "$T/out.txt"; then ok "쓰기 가능 여부를 낸다
 else bad "쓰기 여부가 없다" "$(sed -n '1,20p' "$T/out.txt")"; fi
 teardown
 
+#  ★ 마운트 루트는 못 쓰는데 목적지 폴더만 쓸 수 있는 경우.
+#    2026-09-03 에 실제로 이렇게 조치했다 — 루트는 root 소유로 두고
+#    RENE_data_backup 만 만들어 소유권을 넘긴다. 루트만 보면 멀쩡한 하드를
+#    '쓰기 권한 없음' 으로 잘못 낸다.
+setup 2 2 100000 100000
+mkdir -p "$T/hdd1/RENE_data_backup" "$T/hdd2/RENE_data_backup"
+chmod 555 "$T/hdd1" "$T/hdd2"          # 루트는 못 쓰고, 그 안 폴더는 쓸 수 있다
+run_sut
+RC1=$RC
+chmod 755 "$T/hdd1" "$T/hdd2"
+chk "정상 종료 (루트를 못 써도 목적지를 쓸 수 있으면 된다)" "$RC1" "0"
+if ! grep -q '쓰기 권한 없음' "$T/out.txt"; then ok "★ 멀쩡한 하드를 경고하지 않는다"
+else bad "틀린 경고를 낸다" "$(grep -A1 '쓸 하드' "$T/out.txt" | head -3)"; fi
+chk "실제로 옮겼다" "$(n_src_files)" "0"
+teardown
+
 echo ""
 echo "=========================================================="
 printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"

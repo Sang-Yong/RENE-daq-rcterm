@@ -142,6 +142,15 @@ disk_avail_kb()   { disk_df_field "$1" 4; }
 #
 #    실패 사유를 DEST_ERR 에 남긴다.
 # ---------------------------------------------------------------------
+#  ★ 기동 화면용 읽기 전용 probe. 아무것도 만들지 않는다.
+#    ★ 마운트 루트만 보면 안 된다 — 루트는 root 소유인 채로 목적지 폴더만
+#      만들어 소유권을 넘겨 주는 것이 정상적인 조치이고(2026-09-03 에 그렇게
+#      했다), 그때 루트만 보면 멀쩡한 하드를 '쓰기 권한 없음' 으로 잘못 낸다.
+dest_probe() {           # 마운트지점 -> 0 쓸 수 있다 / 1 못 쓴다
+	local dest="$1/$DEST_SUBDIR"
+	if [ -d "$dest" ]; then [ -w "$dest" ]; else [ -w "$1" ]; fi
+}
+
 DEST_ERR=""
 dest_ready() {           # 마운트지점
 	local dest="$1/$DEST_SUBDIR" t
@@ -792,8 +801,11 @@ for M in "${DISKS[@]}"; do
 	disk_ident "$M"
 	printf '    %-16s %s  여유 %s  %s\n' "$M" "${D_DEV:-?}" \
 		"$(fmt_kb "$(disk_avail_kb "$M")")" \
-		"$( [ -w "$M" ] && echo '쓰기 가능' || echo '⚠️  쓰기 권한 없음 — 아래 조치 필요' )"
-	[ -w "$M" ] || printf '                     sudo chown %s:%s %s\n' "$(id -un)" "$(id -gn)" "$M"
+		"$( dest_probe "$M" && echo '쓰기 가능' || echo '⚠️  쓰기 권한 없음 — 아래 조치 필요' )"
+	dest_probe "$M" || {
+		printf '                     sudo mkdir -p %s/%s\n' "$M" "$DEST_SUBDIR"
+		printf '                     sudo chown %s:%s %s/%s\n' "$(id -un)" "$(id -gn)" "$M" "$DEST_SUBDIR"
+	}
 done
 echo ""
 
