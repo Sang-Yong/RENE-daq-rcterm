@@ -711,6 +711,8 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   메일이 온다.** 결과는 언제나 메일로 오므로(하드 UUID·시리얼 포함) 어느 하드를
   뽑을지 본문만 보면 된다. **띄우기 전에 이미 도는 것부터 볼 것** (§11.141).
   메일이 안 오면 `scripts/mailq-send.sh --status` 로 큐를 본다.
+  **★ 새 하드를 끼웠으면 `sudo chown` 부터** — 갓 포맷한 하드의 루트는 root 소유라
+  백업 폴더를 만들 수 없다. 기동 화면이 `쓰기 권한 없음` 으로 알려준다 (§11.148).
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
@@ -993,6 +995,84 @@ tests/mailq-send.test.sh       42건 통과
 > **cron 이 도는 큐에 '보내지 않을 파일' 을 두지 말 것** — 큐에 들어가는 순간
 > 그것은 보낼 메일이다.
 
+#### 11.148 ★★ 첫 실행이 죽었다 — 원인은 분할이 아니라 갓 포맷한 하드의 권한
+
+사용자 신고 : "런 폴더 용량이 백업하드보다 커서 백업이 불가하다는 메시지와 함께
+중단됐다. 서브런별로 채울 수 있을 때까지 채우는 부분이 왜 미반영됐나."
+
+**★ 분할은 반영돼 있었고 정상 동작했다.** 로그가 그것을 그대로 보여준다.
+
+```
+[01:05:48]  002443 전송 시작 (part) -> /backup_hdd      <- 8,697 / 53,210 개로 잘랐다
+rsync: [Receiver] mkdir "/backup_hdd/RENE_data_backup/002443" failed:
+                  No such file or directory (2)
+[01:05:48] FAIL rsync 002443 rc=11
+[01:06:12] 종료 code=3 : 담을 수 없는 런이 남았습니다 (런 1673 개)   <- ★ 오진
+```
+
+**진짜 원인.** 두 하드를 그날 00:18 · 00:19 에 새로 포맷했다. 그래서 마운트 루트가
+`root:root 755` 이고 `frontend` 가 그 밑에 `RENE_data_backup` 을 만들 수 없다.
+
+```
+drwxr-xr-x 3 0 0 /backup_hdd        <- 갓 포맷한 상태
+drwxr-xr-x 3 0 0 /backup_hdd_2
+mkdir: cannot create directory '/backup_hdd/RENE_data_backup': Permission denied
+```
+
+**옛 하드에서는 안 나던 문제다** — 그 폴더가 이미 있었고 `frontend` 소유였다.
+`code8` 도 같은 구멍이 있으나 그 하드를 계속 써서 드러나지 않았다.
+
+**★ 내가 만든 진짜 결함은 셋이다. 권한은 사이트 상태이고, 아래가 코드 문제다.**
+
+```
+① mkdir -p "$DEST" 2>/dev/null      사유를 삼켰다. 그래서 아무도 권한을 의심하지 못했다
+② 그 검사가 계획 뒤에 있었다         1,723 개를 다 재고 첫 rsync 에서야 죽는다
+③ 진도가 없으면 무조건 stuck 으로     '--split 으로는 쪼갤 수 없다' 를 찍었다.
+                                     ★ 그 문장이 사람을 분할 코드로 보냈다.
+                                       게다가 SPLIT_MODE 가 이미 always 인데
+                                       "always 로 실행하세요" 라고 하는 자가당착이었다
+```
+
+**고침**
+
+| 무엇 | 어떻게 |
+|---|---|
+| `dest_ready()` | 하드에 들어가는 첫 줄에서 **만들어 보고 · 써 보고 · 지운다**. `-w` 만으로는 root 스쿼시·읽기전용 재마운트를 못 잡는다 |
+| 실패 메시지 | OS 가 낸 사유를 **그대로** 싣고 `sudo chown` 명령까지 찍는다 |
+| 전송 중 `mkdir` | 실패를 삼키지 않고 사유와 함께 낸다 |
+| 회차 뒤 판정 | `N_FAIL > 0` 이면 **`xferfail`**(전송 실패, exit 1), 아니면 `stuck`. `stuck` 은 **진짜로 쪼개기가 제약일 때만** `--split` 을 말한다 |
+| 기동 화면 | 하드마다 장치 · 여유 · **쓰기 가능 여부**를 먼저 보여준다 |
+
+**★ 곁들여 잡은 것 — `--dry-run` 이 메일을 보냈다.** 오류 경로가 전부 `finish` 를
+지나는데 거기서 큐에 넣고 있었다. 미리보기가 바깥으로 나가면 '아무것도 바꾸지
+않는다'는 약속이 깨진다. `queue_mail` 에서 한 번에 막았다.
+
+**새 시험 둘 — 이번 일을 그대로 재현한다**
+
+```
+[15] 런 하나가 어느 하드보다도 크다   -> 하드 셋에 걸쳐 나뉘고, 원본과 바이트 단위 일치,
+                                        중복 0, 매니페스트 3개.  ★ 사용자가 의심한 바로 그 기능
+[16] 마운트는 됐는데 쓸 수 없다       -> 계획을 세우기 전에 exit 1, OS 사유 그대로, chown 안내
+                                        같은 상황을 --dry-run 으로 하면 메일은 안 나간다
+[17] 전송 실패를 stuck 으로 오진 않는다 -> exit 1 이고 --split 을 지목하지 않는다
+[18] 기동 화면이 하드 상태를 먼저 보여준다
+```
+
+`storage-backup` **80건** + `mailq-send` **42건** 통과.
+
+**★ 이번 일에서 남길 교훈.** 오진 메시지는 틀린 정보보다 나쁘다 — 사람을 **멀쩡한
+코드로 보낸다.** 사용자가 분할 코드를 의심한 것은 전적으로 내 메시지 탓이다.
+진단은 **자기가 아는 유일한 설명을 고르지 말고, 근거가 없으면 없다고 말해야 한다.**
+
+**사람이 해야 할 것 (root 필요. 이 세션은 sudo 암호가 없어 못 했다)**
+
+```bash
+ssh store
+sudo chown frontend:frontend /backup_hdd /backup_hdd_2
+/home/frontend/data_backup_simple_code9.sh --dry-run     # 계획 확인
+nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log/code9.log 2>&1 &
+```
+
 #### 11.147 이 변경으로 늘어난 운용 항목
 
 ```
@@ -1002,6 +1082,9 @@ cron (DAQ PC)   */5 * * * * scripts/mailq-send.sh      메일 큐 비우기
                 ssh store '/home/frontend/data_backup_simple_code9.sh --dry-run'
 큐              store:/data/MAILQ  =  DAQ PC:/scratch/MAILQ   (sent/ · failed/ 하위)
 ```
+
+**★ 갓 포맷한 하드는 먼저 소유권을 넘겨야 한다** (§11.148). 기동 화면의 '쓸 하드'
+줄에 `쓰기 권한 없음` 이 보이면 거기 찍힌 `sudo chown` 을 먼저 실행한다.
 
 **★ 백업을 띄우기 전에 이미 도는 것부터 볼 것** (§11.141 은 여전히 유효하다).
 
@@ -1740,6 +1823,8 @@ ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep 
 
 ```bash
 ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'   # ★ 먼저
+#  ★ 두 하드가 갓 포맷돼 root 소유다. 이것을 먼저 하지 않으면 백업이 못 돈다 (§11.148)
+ssh store 'sudo chown frontend:frontend /backup_hdd /backup_hdd_2'      # root 암호 필요
 ssh store '/home/frontend/data_backup_simple_code9.sh --dry-run'
 ssh store 'nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log/code9.log 2>&1 &'
 ```
@@ -1754,6 +1839,7 @@ ssh store 'nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log
 | NM 프로파일 주소를 `.71` 로 되돌린다 | **재부팅하면 `.75` 로 떠서 공인망이 끊긴다** | §11.132 |
 | fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |
 | `enp0s31f6`·`enp1s0` 프로파일의 `.71` 정리 | 셋이 같은 주소를 갖고 있다 | §11.132 |
+| **`sudo chown frontend:frontend /backup_hdd /backup_hdd_2`** | **갓 포맷돼 root 소유다. 이것 없이는 백업이 한 발짝도 못 간다** | §11.148 |
 | `/backup_hdd*` 두 개를 fstab 에 UUID 로 | 지금은 손으로 마운트라 rename 에 무방비 | §11.124 |
 
 **★ 이어받을 때 밟기 쉬운 것**
