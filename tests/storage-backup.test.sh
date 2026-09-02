@@ -281,6 +281,93 @@ chk "종료코드 0" "$?" "0"
 chk "원본이 비었다" "$(n_src_files)" "0"
 teardown
 
+# ---------------------------------------------------------------------
+echo ""; echo "[15] ★ 런 하나가 어느 하드보다도 크다 — 하드 셋에 걸쳐 전부 담긴다"
+#  실제로 겪는 모습이다 : run 002443 은 6.71 TB 인데 하드는 1.8 TB 다.
+#  런 하나(파일 40개)를 하드 셋에 나눠 담아야 끝난다.
+setup 1 20 900 900 900
+BEFORE=$(src_manifest)
+NF_SRC=$(n_src_files)
+run_sut
+chk "종료코드 0" "$RC" "0"
+chk "원본이 비었다" "$(n_src_files)" "0"
+AFTER=$(disk_manifest)
+if [ "$BEFORE" = "$AFTER" ]; then ok "한 런이 하드 셋에 흩어져도 원본과 완전히 같다 ($NF_SRC 개)"
+else bad "파일이 사라지거나 어긋났다" "$(diff <(echo "$BEFORE") <(echo "$AFTER") | head -5 | tr '\n' ' ')"; fi
+chk "같은 파일이 두 하드에 겹치지 않았다" "$(disk_manifest | cut -f1 | sort | uniq -d | wc -l)" "0"
+NDISK=0
+for d in 1 2 3; do
+	[ "$(find "$T/hdd$d/RENE_data_backup" -type f ! -name '.part_manifest.txt' 2>/dev/null | wc -l)" -gt 0 ] \
+		&& NDISK=$((NDISK+1))
+done
+chk "하드 셋이 모두 쓰였다" "$NDISK" "3"
+NMAN=$(find "$T"/hdd*/RENE_data_backup -name '.part_manifest.txt' 2>/dev/null | wc -l)
+if [ "$NMAN" -ge 2 ]; then ok "어느 조각이 어느 하드에 있는지 매니페스트가 남았다 ($NMAN 개)"
+else bad "매니페스트가 없다" "$NMAN 개"; fi
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[16] ★ 마운트는 됐는데 쓸 수 없다 -> 계획을 세우기 전에 멈춘다"
+#  2026-09-03 에 실제로 겪은 것이다. 갓 포맷한 하드의 루트가 root:root 755 라
+#  RENE_data_backup 을 만들 수 없었는데, 그 mkdir 오류를 삼키고 있어서
+#  1,723 개 계획을 다 세운 뒤 첫 rsync 가 엉뚱한 오류로 죽었다.
+setup 3 3 100000 100000
+chmod 555 "$T/hdd1"
+run_sut
+chmod 755 "$T/hdd1"
+chk "종료코드 1" "$RC" "1"
+if grep -q '쓸 수 없습니다' "$T/out.txt"; then ok "쓸 수 없다고 분명히 말한다"
+else bad "사유가 없다" "$(tail -3 "$T/out.txt")"; fi
+#  ★ 로케일에 따라 'Permission denied' 또는 '허가 거부' 로 나온다.
+#    중요한 것은 OS 가 낸 사유를 삼키지 않고 그대로 넘기는 것이다.
+if grep -qE 'Permission denied|허가 거부' "$T/out.txt"; then ok "★ 진짜 사유(권한 거부)를 그대로 보여준다"
+else bad "사유를 삼켰다" "$(tail -3 "$T/out.txt")"; fi
+if grep -q 'chown' "$T/out.txt" || mailq_bodies | grep -q 'chown'; then ok "조치 명령을 알려준다"
+else bad "조치 안내가 없다"; fi
+if ! grep -q '담을지 계산 중' "$T/out.txt"; then ok "계획을 세우기 전에 멈췄다 (헛수고하지 않는다)"
+else bad "계획을 다 세운 뒤에 죽었다"; fi
+chk "원본 그대로" "$(n_src_files)" "18"
+chk "메일이 큐에 들어갔다 (실제 실행이므로)" "$(ls "$QUEUE"/*.mail 2>/dev/null | wc -l)" "1"
+teardown
+
+#  ★ 같은 오류라도 --dry-run 이면 메일이 나가면 안 된다.
+#    미리보기가 바깥으로 나가면 '아무것도 바꾸지 않는다'는 약속이 깨진다.
+setup 3 3 100000 100000
+chmod 555 "$T/hdd1"
+run_sut --dry-run
+chmod 755 "$T/hdd1"
+chk "--dry-run 도 오류는 낸다 (exit 1)" "$RC" "1"
+chk "★ 그래도 메일은 큐에 넣지 않는다" "$(ls "$QUEUE"/*.mail 2>/dev/null | wc -l)" "0"
+if grep -q '메일을 보내지 않습니다' "$T/out.txt"; then ok "보내지 않았다고 화면에 밝힌다"
+else bad "조용히 넘어갔다"; fi
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[17] ★ 전송이 실패한 것을 '쪼갤 수 없다'로 오진하지 않는다"
+setup 2 3 100000 100000
+mkdir -p "$T/fakebin"
+printf '#!/bin/bash\nexit 23\n' > "$T/fakebin/rsync"; chmod +x "$T/fakebin/rsync"
+PATH="$T/fakebin:$PATH" run_sut
+chk "종료코드 1 (3 이 아니다)" "$RC" "1"
+if grep -q '전송이 실패해' "$T/out.txt"; then ok "전송 실패라고 말한다"
+else bad "오진했다" "$(grep -E '⚠️|❌' "$T/out.txt" | tail -2)"; fi
+if ! grep -q 'split' "$T/out.txt"; then ok "★ --split 을 엉뚱하게 지목하지 않는다"
+else bad "여전히 --split 을 지목한다" "$(grep split "$T/out.txt" | head -2)"; fi
+if mailq_bodies | grep -q 'grep FAIL'; then ok "메일이 사유를 볼 곳을 알려준다"
+else bad "메일 안내가 없다"; fi
+chk "원본을 하나도 지우지 않았다" "$(n_src_files)" "12"
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[18] 시작할 때 하드 상태를 먼저 보여준다"
+setup 2 2 100000 100000
+run_sut --dry-run
+if grep -q '쓸 하드' "$T/out.txt"; then ok "하드 목록을 낸다"
+else bad "목록이 없다"; fi
+if grep -q '쓰기 가능' "$T/out.txt"; then ok "쓰기 가능 여부를 낸다"
+else bad "쓰기 여부가 없다" "$(sed -n '1,20p' "$T/out.txt")"; fi
+teardown
+
 echo ""
 echo "=========================================================="
 printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"

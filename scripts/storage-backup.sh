@@ -127,6 +127,37 @@ disk_cap_kb()     { disk_df_field "$1" 2; }
 disk_used_kb()    { disk_df_field "$1" 3; }
 disk_avail_kb()   { disk_df_field "$1" 4; }
 
+# ---------------------------------------------------------------------
+#  ★ 목적지에 실제로 쓸 수 있는가.  마운트돼 있다고 쓸 수 있는 것이 아니다.
+#
+#    2026-09-03 에 이것 때문에 백업이 통째로 헛돌았다. 갓 포맷한 하드의
+#    루트는 root:root 755 라 frontend 가 <마운트>/RENE_data_backup 을 만들 수
+#    없었다. 그런데 mkdir 의 오류를 2>/dev/null 로 삼키고 있어서, 1,723 개
+#    폴더의 계획을 다 세운 뒤 첫 rsync 가 "No such file or directory" 로 죽고
+#    나서야 무언가 잘못된 것이 드러났다. 게다가 그 뒤의 진단 메시지가
+#    엉뚱하게 '--split 으로는 쪼갤 수 없다' 를 가리켜 사람을 딴 곳으로 보냈다.
+#
+#    ★ -w 만으로는 부족하다. root 스쿼시나 읽기전용 재마운트는 권한 비트가
+#      멀쩡해 보인다. 실제로 파일을 하나 만들어 봐야 안다.
+#
+#    실패 사유를 DEST_ERR 에 남긴다.
+# ---------------------------------------------------------------------
+DEST_ERR=""
+dest_ready() {           # 마운트지점
+	local dest="$1/$DEST_SUBDIR" t
+	DEST_ERR=""
+	if ! DEST_ERR=$(mkdir -p "$dest" 2>&1); then
+		DEST_ERR="${DEST_ERR:-목적지 폴더를 만들 수 없다}"; return 1
+	fi
+	t="$dest/.write-test.$$"
+	if ! DEST_ERR=$(: > "$t" 2>&1); then
+		DEST_ERR="${DEST_ERR:-목적지에 파일을 쓸 수 없다}"; return 1
+	fi
+	rm -f "$t" 2>/dev/null
+	DEST_ERR=""
+	return 0
+}
+
 #  하드의 신원 — 메일 본문에 넣는다. 사람이 어느 하드인지 알아야 뽑아 간다.
 #  전역 D_DEV · D_UUID · D_MODEL · D_SERIAL 을 채운다.
 disk_ident() {
@@ -284,6 +315,13 @@ MAIL_QUEUED=0
 queue_mail() {           # 제목  본문파일
 	local subj=$1 body=$2 base tmp
 	[ "$MAIL_ENABLE" = 1 ] || return 0
+	#  ★ 미리보기는 바깥으로 나가지 않는다. --dry-run 은 아무것도 바꾸지
+	#    않는다고 적어 두었는데, 메일이 나가면 그 약속이 깨진다.
+	#    (오류로 멈추는 경로도 finish 를 지나므로 여기서 한 번에 막는다.)
+	if [ "$DRYRUN" -eq 1 ]; then
+		echo "   (--dry-run : 메일을 보내지 않습니다 — \"$subj\")"
+		return 0
+	fi
 	mkdir -p "$MAILQ_DIR" 2>/dev/null
 	if [ ! -d "$MAILQ_DIR" ] || [ ! -w "$MAILQ_DIR" ]; then
 		echo "⚠️  메일 큐에 쓸 수 없습니다 ($MAILQ_DIR). 메일 없이 계속합니다."
@@ -343,7 +381,6 @@ run_pass() {
 	PASS_T0=$(date +%s)
 
 	local DEST="$MOUNT_POINT/$DEST_SUBDIR"
-	mkdir -p "$DEST" 2>/dev/null
 
 	disk_ident "$MOUNT_POINT"
 	local UUID=$D_UUID
@@ -496,7 +533,13 @@ run_pass() {
 		echo "[$(date)]  $FOLDER_NAME 전송 시작 ($MODE) -> $MOUNT_POINT" >> "$LOG_FILE"
 		RSOPT=(-a --partial-dir=.rsync-partial --info=progress2 --files-from="$PLANDIR/list.$FOLDER_NAME")
 		[ -n "$BWLIMIT" ] && RSOPT+=(--bwlimit="$BWLIMIT")
-		mkdir -p "$DEST/$FOLDER_NAME" 2>/dev/null
+		#  ★ 여기서 조용히 실패하면 rsync 가 엉뚱한 오류로 죽는다. 사유를 그대로 낸다.
+		if ! MKERR=$(mkdir -p "$DEST/$FOLDER_NAME" 2>&1); then
+			N_FAIL=$((N_FAIL+1)); CONSEC_FAIL=$((CONSEC_FAIL+1))
+			echo "❌ $FOLDER_NAME : 목적지 폴더를 만들 수 없습니다 — $MKERR"
+			echo "[$(date)] FAIL mkdir $DEST/$FOLDER_NAME : $MKERR" >> "$LOG_FILE"
+			continue
+		fi
 		#  ★ --remove-source-files 를 쓰지 않는다. 대조를 통과한 뒤에 지운다.
 		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE"
 		RC=$?
@@ -738,6 +781,22 @@ LOG_MARK=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
 echo "Data backup start, by sykim, $(date) " >> "$LOG_FILE"
 echo "[$(date)] 세션 시작 하드=${DISKS[*]} bwlimit=${BWLIMIT:-없음} split=$SPLIT_MODE" >> "$LOG_FILE"
 
+#  ★ 시작할 때 하드 상태를 한 번에 보여준다. 8시간짜리 작업을 눈감고
+#    시작하지 않기 위한 것이고, 못 쓰는 하드를 미리 알아채기 위한 것이다.
+echo ""
+echo "  쓸 하드"
+for M in "${DISKS[@]}"; do
+	if ! disk_is_mounted "$M"; then
+		printf '    %-16s ❌ 마운트되어 있지 않음\n' "$M"; continue
+	fi
+	disk_ident "$M"
+	printf '    %-16s %s  여유 %s  %s\n' "$M" "${D_DEV:-?}" \
+		"$(fmt_kb "$(disk_avail_kb "$M")")" \
+		"$( [ -w "$M" ] && echo '쓰기 가능' || echo '⚠️  쓰기 권한 없음 — 아래 조치 필요' )"
+	[ -w "$M" ] || printf '                     sudo chown %s:%s %s\n' "$(id -un)" "$(id -gn)" "$M"
+done
+echo ""
+
 TOT_OK=0; TOT_PARTRUN=0; TOT_FAIL=0; TOT_KB=0; TOT_SKIP=0
 REMAIN_N=-1; REMAIN_LIST=""
 USED_DISKS=""; LAST_DISK=""; OUTCOME=""
@@ -776,6 +835,28 @@ EOF
   확인 :  ls /dev/sd*  ·  lsblk  ·  findmnt $M  ·  dmesg -T | tail -30
   마운트 :  sudo mount UUID=<그 디스크의 UUID> $M
   그런 뒤 같은 명령을 다시 실행하면 남은 것부터 이어집니다.
+EOF
+	fi
+
+	# --- ★ 목적지에 실제로 쓸 수 있는가 -----------------------------
+	#  마운트만 보고 넘어가면 계획을 다 세운 뒤에야 첫 rsync 에서 죽는다.
+	if ! dest_ready "$M"; then
+		echo "❌ $M 에 쓸 수 없습니다 — $DEST_ERR"
+		finish 1 "스토리지 백업 중단 — $M 에 쓸 수 없습니다" <<EOF
+$M 는 마운트되어 있지만 백업 폴더를 만들거나 쓸 수 없습니다.
+
+  하드      : $M   (${D_DEV:-?}  UUID=${D_UUID:-?})
+  목적지    : $M/$DEST_SUBDIR
+  사유      : $DEST_ERR
+
+★ 갓 포맷한 하드에서 가장 흔한 원인은 권한입니다. 마운트 지점의 루트가
+  root 소유이면 일반 계정은 그 밑에 폴더를 만들 수 없습니다.
+
+  확인 :  ls -ld $M
+  조치 :  sudo chown $(id -un):$(id -gn) $M
+          (또는  sudo mkdir -p $M/$DEST_SUBDIR && sudo chown $(id -un):$(id -gn) $M/$DEST_SUBDIR )
+
+  읽기전용으로 다시 마운트된 경우라면 :  mount | grep $M   ·  dmesg -T | tail -30
 EOF
 	fi
 
@@ -877,7 +958,12 @@ EOF
 		break
 	fi
 
-	#  하드는 안 찼는데 더 담을 것이 없다. 하드를 바꿔도 소용없다.
+	#  하드는 안 찼는데 진도가 안 나갔다. 왜인지를 갈라야 한다 —
+	#  ★ 전송이 실패한 것과 애초에 담을 수 없는 것은 조치가 전혀 다르다.
+	if [ "$N_FAIL" -gt 0 ]; then
+		OUTCOME=xferfail
+		break
+	fi
 	OUTCOME=stuck
 	break
 done
@@ -928,20 +1014,51 @@ nodisk)
   뽑아 가는 하드에 담긴 것은 모두 대조(개수+바이트)를 통과했습니다.
 EOF
 	;;
+xferfail)
+	echo "❌ 전송이 실패해 진도가 나가지 않았습니다 (이번 회차 실패 $N_FAIL 건, 남은 런 $REMAIN_N 개)."
+	echo "   ★ 원본은 지우지 않았습니다. 사유는 로그의 FAIL 줄에 있습니다 :"
+	echo "     grep FAIL $LOG_FILE | tail -20"
+	finish 1 "스토리지 백업 중단 — 전송이 실패했습니다 (실패 $N_FAIL 건)" <<EOF
+하드에 자리가 남아 있는데 전송이 실패해 한 발짝도 나가지 못했습니다.
+
+  마지막 하드 : $LAST_DISK   (여유 $(fmt_kb "$(disk_avail_kb "$LAST_DISK")"))
+  이번 회차   : 실패 $N_FAIL 건 · 옮김 $N_OK 개
+  남은 런     : $REMAIN_N 개
+
+★ 원본은 하나도 지우지 않았습니다. 대조를 통과한 것만 지우는 설계입니다.
+
+사유를 보는 곳 :
+  grep FAIL $LOG_FILE | tail -20
+
+자주 나오는 것 :
+  mkdir ... Permission denied          목적지 폴더를 만들 권한이 없다
+        -> ls -ld $LAST_DISK  ·  sudo chown $(id -un):$(id -gn) $LAST_DISK
+  No such file or directory            목적지 상위 폴더가 없다 (대개 위와 같은 원인)
+  Input/output error / rc=23           ★ 하드가 버스에서 떨어졌을 수 있다
+        -> ls /dev/sd*  ·  dmesg -T | tail -30
+EOF
+	;;
 stuck)
-	echo "⚠️  하드에 자리가 남았는데도 담을 수 없는 런이 있습니다 (런 $REMAIN_N 개)."
-	echo "   --split $SPLIT_MODE 로는 이 런들을 쪼갤 수 없습니다."
-	echo "   하드보다 큰 런을 나눠 담으려면 --split always (기본값) 로 실행하세요."
-	finish 3 "스토리지 백업 — 담을 수 없는 런이 남았습니다 (런 $REMAIN_N 개)" <<EOF
+	echo "⚠️  하드에 자리가 남았는데도 더 담지 못했습니다 (남은 런 $REMAIN_N 개)."
+	if [ "$N_TOOBIG" -gt 0 ] || [ "$SPLIT_MODE" != always ]; then
+		echo "   쪼개기 모드가 --split $SPLIT_MODE 입니다. 하드보다 큰 런은"
+		echo "   --split always (기본값) 라야 나눠 담깁니다."
+	else
+		echo "   계획이 비어 있었습니다. 남은 런이 전부 '다른 작업이 쓰는 중'이거나,"
+		echo "   용량을 잴 수 없는 상태일 수 있습니다."
+		echo "   확인 :  $0 --dry-run"
+	fi
+	finish 3 "스토리지 백업 — 더 담지 못했습니다 (남은 런 $REMAIN_N 개)" <<EOF
 하드에 자리가 남아 있는데도 더 담지 못했습니다. 하드를 바꿔도 해결되지 않으므로
 하드를 태우지 않고 여기서 멈췄습니다.
 
   마지막 하드 : $LAST_DISK   (여유 $(fmt_kb "$(disk_avail_kb "$LAST_DISK")"))
   남은 런     : $REMAIN_N 개
+  이번 회차   : 옮김 $N_OK · 건너뜀 $N_SKIP (그중 하드보다 큰 런 $N_TOOBIG) · 쓰는 중 $N_BUSY
   쪼개기 모드 : --split $SPLIT_MODE
 
-★ 하드보다 큰 런은 --split always (기본값) 라야 나눠 담깁니다.
-  --split auto / never 로 실행하셨다면 기본값으로 다시 실행해 보세요.
+★ 무엇을 담으려 했는지는 계획으로 볼 수 있습니다 (아무것도 바꾸지 않습니다) :
+  $0 --dry-run
 EOF
 	;;
 *)
