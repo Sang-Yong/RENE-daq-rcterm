@@ -169,6 +169,14 @@ scripts/sheetlog-auto.sh 구글시트 런 로그 자동 등재. cron 이 부른�
                          ★ 완결된 런까지만 쓴다. --status 는 읽기 전용
 scripts/chainwatch.sh    후처리 사슬·계수율 감시. cron 이 5분마다 부른다 (§11.138)
                          ★ 읽기 전용. --status 로 지금 무엇이 빠졌는지 본다
+scripts/storage-backup.sh 스토리지 서버의 외장하드 아카이브. 하드 여러 개를 순서대로
+                         ★ 이 PC 가 아니라 저장소 서버에서 돈다. 거기 배포 이름은
+                           /home/frontend/data_backup_simple_code9.sh (§11.143)
+                         ★ 기본이 --dry-run 이 아니다. 원본을 지운다. 먼저 --dry-run
+scripts/mailq-send.sh    위 스크립트가 /data/MAILQ 에 떨군 메일을 내보낸다
+                         ★ 이 PC 의 cron 이 5분마다. --status 는 읽기 전용 (§11.144)
+tests/storage-backup.test.sh   위 둘의 시험. 하드·자료·메일을 건드리지 않는다
+tests/mailq-send.test.sh       (§11.146. BACKUP_TEST_HOOK 으로 용량 판정만 갈아끼운다)
 scripts/badrun.sh        문제 런 판정 + 못 쓰는 원시 파일 격리 + 통합 목록
                          ★ 읽기 전용이 기본. --quarantine 이라야 파일을 옮긴다
 scripts/runcheck.sh      끝난 런의 산출물 개수 대조 + 빈 것의 사유 + 복구
@@ -289,6 +297,7 @@ required_argument, nullptr, 'p'}`, 기본 3600초, `tcb.cc`가
 | **모니터링 2단계 PRD 직독** | 재구성은 분석 Step2 와 single 목록이 **비트 단위로 동일**(run 4237 sub 100), 페어링은 Step3/Step4 와 **여덟 개 수 전부 일치**(run 4237 전체, single 7,266만) (§11.31) |
 | **10G 스토리지 링크** | 2026-08-26 개통. `/scratch` 읽기 **838 MB/s** · 쓰기 **534 MB/s** (옛 7.7 MB/s), RTT 10.6 -> **0.31 ms**, 오류 0 (§11.115) |
 | **저장소 서버 ssh** | `ssh store` (10.0.0.10:7777, 키 인증). §11.101 의 `No route to host` 는 방화벽 REJECT 였다 (§11.118) |
+| **외장하드 2개 순차 백업** | `scripts/storage-backup.sh` 시험 57건 + `mailq-send.sh` 42건 전부 통과. 실서버 `--dry-run` 정상, 메일 경로는 실제 발송 rc=0 까지 확인 (§11.143~11.146) |
 
 종료코드가 0/1/2 세 값으로 갈리는 것은 설계상 이상적이다 — supervisor가
 "설정 오류(재시작 무의미)" / "런 실패(재시작 가치 있음)" / "정상"을 구분할 수 있다.
@@ -696,6 +705,12 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **★ 전원을 내리기 전에 `sudo umount /scratch`.** `hard` 마운트라 스토리지가
   먼저 사라지면 종료가 그 자리에서 멎는다. fstab 에 `nofail` 이 없어 부팅도
   늘어질 수 있다 (§11.113).
+- **★ 저장소 서버의 외장하드 백업은 이제 하드 두 개를 순서대로 쓴다** (§11.143).
+  `ssh store` 로 가서 `/home/frontend/data_backup_simple_code9.sh`. 하드 하나가
+  차면 그 자리에서 다음 하드로 이어지고, **다음 하드가 없거나 가득 차면 멈추고
+  메일이 온다.** 결과는 언제나 메일로 오므로(하드 UUID·시리얼 포함) 어느 하드를
+  뽑을지 본문만 보면 된다. **띄우기 전에 이미 도는 것부터 볼 것** (§11.141).
+  메일이 안 오면 `scripts/mailq-send.sh --status` 로 큐를 본다.
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
@@ -821,14 +836,190 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 그리로 옮겼다 (절 번호 §11.x 는 그대로다). `CLAUDE.md` 는 매 세션 통째로
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
+### 2026-09-03 — 백업 하드를 두 개 순서대로 쓰게 하고, 결과를 메일로 보낸다
+
+#### 11.143 ★★ `scripts/storage-backup.sh` — 하드가 차면 다음 하드로 이어간다
+
+사용자 요청 : 하드를 두 개(`/backup_hdd` · `/backup_hdd_2`) 개별 마운트해 두었으니
+**하나가 담을 수 있을 때까지 담고 나면 다음 하드로 그대로 이어지게** 할 것. 그리고
+**다음 하드가 가득 차 있거나 마운트되어 있지 않으면 오류를 남기고 멈출 것.**
+
+**★ 이 스크립트는 이제 저장소가 정본이다.** §11.140 이 "그 서버에만 있다"고 적어
+둔 것을 바로잡았다 — `scripts/storage-backup.sh` 가 정본이고, 스토리지 서버에는
+`/home/frontend/data_backup_simple_code9.sh` 로 배포한다. **`code8` 은 손대지 않고
+그대로 남겨 두었다** (되돌릴 자리).
+
+```
+하드 두 개   /backup_hdd    /dev/sdb1  UUID e39bd49a-048e-4d7e-adab-e4bdf37d902f  1.8T
+             /backup_hdd_2  /dev/sdc1  UUID 09387574-057f-4e82-9a54-5de598765876  1.8T
+             둘 다 ST2000DM008. 2026-09-03 기준 양쪽 다 비어 있었다
+```
+
+**한 회차를 마친 뒤의 판단 — 여기가 이 변경의 전부다.**
+
+```
+남은 일이 없다 (원본이 비었거나 남은 것이 '사용 중' 런뿐)
+      -> ✅ 성공 종료 (exit 0).  ★ 다음 하드는 건드리지도 않는다
+남은 일이 있다  +  이 하드가 실제로 찼다
+      -> 다음 하드로 넘어간다.  그때 메일 한 통 (그 하드를 뽑아 가도 된다는 뜻)
+남은 일이 있다  +  이 하드는 안 찼다   (--split never 로 큰 런이 안 들어갈 때)
+      -> ★ 하드를 바꿔도 소용없다. 사유를 적고 멈춘다. 하드를 헛되이 태우지 않는다
+```
+
+넘어가는 그 순간에만 요청하신 오류 판정을 한다.
+
+```
+다음 하드가 마운트돼 있지 않다   -> 오류 + 메일 + exit 1
+다음 하드에 여유 공간이 없다      -> 오류 + 메일 + exit 1
+목록의 하드를 다 썼는데 남았다    -> "교체하세요" + 메일 + exit 3
+연속 3회 전송 실패                -> 하드웨어 의심. 다음 하드로 넘어가지 않는다 + exit 1
+```
+
+**★ 첫 하드가 이미 가득 차 있는 것은 오류가 아니다.** 지난 세션에서 채운 것이므로
+그냥 다음 하드로 넘어간다. 이것을 오류로 두면 이어받기가 매번 막힌다.
+
+code8 의 안전장치는 전부 그대로다 — flock + 프로세스 검사, 30분 정숙 검사,
+`.rsync-partial` 검사, skip 목록, **보낸다 -> 개수·바이트 대조 -> 통과한 것만
+지운다**, 지우기 직전 원본 재확인.
+
+#### 11.144 ★★ 메일 — 스토리지 서버에는 인터넷 경로가 없다
+
+설계를 가른 실측이다. **추측하지 말 것.**
+
+```
+ssh store 'ip route'          10.0.0.0/24 dev ens6f1  ... 이것 하나뿐. 기본 경로 없음
+ssh store 'getent hosts smtp.gmail.com'   rc=2        DNS 도 안 된다
+ssh store 'ls ~/.ssh'         authorized_keys 뿐 — 개인키가 없어 DAQ PC 로 되돌아
+                              붙지도 못한다 (그쪽 sshd 는 50022 에 있다)
+```
+
+그래서 **파일로 떨구고 DAQ PC 가 집어 보낸다.** `/data` 는 DAQ PC 에서 `/scratch`
+이므로 이미 있는 마운트만 쓴다 — **새 열쇠도, 새 신뢰 방향도 만들지 않았다.**
+
+```
+store   /data/MAILQ/<시각>-<pid>-<번호>.tmp 에 쓰고 -> .mail 로 rename (원자적)
+DAQ PC  cron 5분  ->  scripts/mailq-send.sh  ->  tools/notify/send_mail.py
+        성공 sent/ · 5회 실패 failed/ · 그 사이엔 큐에 두고 재시도
+        ★ /scratch 가 빠져 있으면 조용히 물러난다. 큐는 남아 나중에 나간다
+```
+
+보내는 때는 **하드가 가득 차 넘어갈 때 한 통 + 세션이 끝날 때 종합 한 통 +
+오류로 멈출 때 한 통.** 수신자는 `mail_to`(책임자 1명)다 — 하드가 찬 것은
+11명이 현장에 가야 하는 일이 아니다.
+
+본문에 **장치명 · UUID · 모델 · 시리얼 · 용량/사용/여유/채움률 · 담긴 런 범위 ·
+남은 일 · 그 세션 로그 끝 40줄**이 들어간다. 새벽에 이것만 보고 어느 하드를
+뽑을지 알 수 있어야 한다.
+
+**설계에서 신경 쓴 것**
+
+- **메일이 안 나가도 백업은 계속된다.** `queue_mail` 은 어떤 실패에도 0 을
+  돌려준다. 큐 디렉터리를 못 써도 그 사실만 화면에 적고 백업을 마친다.
+  알림이 감시 대상을 죽이면 없느니만 못하다 (`daq-notify.sh` 와 같은 원칙).
+- **`mailq-send.sh --dry-run` 은 큐를 소비하지 않는다.** 시험을 쓰다 잡은 결함이다 —
+  사람이 설정을 점검하려고 돌렸다가 아직 안 나간 알림을 지워 버리면 아무도 못 본다.
+- **겹쳐 돌지 못한다.** cron 5분보다 한 회차가 길어질 수 있어(망이 느릴 때)
+  `flock` 으로 막는다. 보내다 죽어 `.sending` 으로 남은 것은 30분 뒤 되살린다.
+
+#### 11.145 ★★ 시험이 잡은 두 함정 — 둘 다 `pgrep -f` 와 계획 파일이다
+
+**① `pgrep -f` 가 이번엔 '조상' 과 '이미 죽은 것' 을 잡았다.**
+§11.67 · §11.119 · §11.141 에 이어 네 번째다. code8 의 걸러내기는 **자손만** 뺀다.
+
+```
+조상       나를 띄운 셸의 argv 에 스크립트 경로가 통째로 들어 있으면 그대로 걸린다
+           (ssh 로 긴 명령을 보내거나 heredoc 으로 띄울 때가 그렇다)
+이미 죽음   $( ) 는 이 스크립트의 명령줄을 물려받은 서브셸을 잠깐 만든다.
+           pgrep 은 그것을 잡는데 우리가 ps 로 확인할 때는 벌써 사라져 있어
+           조상 추적이 빈손으로 끝나고 -> '남의 백업' 으로 오인한다
+```
+
+**시험에서 이것 때문에 한 회차도 시작하지 못했다** (57건 중 38건 실패).
+고침은 셋이다 — 내 조상 목록을 미리 만들어 빼고, `ps -o args=` 가 비면
+(죽은 것이면) 건너뛰고, 자손 추적은 그대로 둔다.
+
+> **★ code8 에도 같은 구멍이 있다.** 타이밍에 따라 "이미 백업이 돌고 있습니다" 로
+> 안 도는 일이 생길 수 있다. code8 은 되돌릴 자리로 남겨 둔 것이라 고치지 않았다.
+
+**② 회차 사이에 계획 파일을 지워야 한다. 이것이 가장 위험한 자리였다.**
+
+```
+$PLANDIR/list.<런>  이 앞 하드의 것으로 남아 있으면
+   -> 이번 회차가 그것을 그대로 읽어
+   -> 보내지도 않은 파일을 '대조 통과' 로 보고 원본에서 지운다
+```
+
+시험 [6] 이 이것을 잡는다 — 하드 셋에 걸쳐 옮긴 뒤 **원본 목록(경로+바이트)과
+세 하드를 합친 목록이 완전히 같은가**를 본다. 한 파일이라도 새면 깨진다.
+
+#### 11.146 검증 — 하드도 자료도 메일도 건드리지 않고 99건
+
+용량·마운트 판정을 `disk_is_mounted` / `disk_cap_kb` / `disk_used_kb` /
+`disk_avail_kb` 네 함수로 빼고, `BACKUP_TEST_HOOK` 으로 갈아끼울 수 있게 했다
+(§11.135 의 `DATAFLOW_ALLOW_UNMOUNTED` 와 같은 성격의 탈출구). **rsync 는 진짜로
+돌고 파일도 진짜로 옮겨진다** — 그래야 '보내지 않은 것을 지우지 않는가' 를 볼 수 있다.
+
+```
+tests/storage-backup.test.sh   57건 통과
+   하드1 -> 하드2 이어담기 · 첫 하드에 다 들어가면 둘째를 안 건드림
+   다음 하드 미마운트 / 가득참 -> exit 1 + 메일 · 하드 소진 -> exit 3
+   ★ 회차 사이 계획 파일 누수 없음 (원본과 바이트 단위 일치, 중복 0)
+   연속 실패 -> 중단하고 다음 하드로 안 넘어감 · '사용 중' 런만 남으면 정상 종료
+   --dry-run · 첫 하드가 이미 가득 · 첫 하드 미마운트 · --no-mail
+   큐를 못 써도 백업은 끝난다 · cron 환경(env -i)
+
+tests/mailq-send.test.sh       42건 통과
+   발송/실패/재시도/5회 포기 · 본문에 'subject:' 'body:' 가 있어도 정확히 가름
+   .sending 되살리기 · 갓 만든 .sending 은 안 건드림 · 마운트 없으면 조용히 물러남
+   겹쳐 돌지 않음(flock) · --status 읽기 전용 · --dry-run 이 큐를 안 비움 · cron 환경
+```
+
+**실서버 확인 (읽기 전용)** — `data_backup_simple_code9.sh --dry-run`
+
+```
+/backup_hdd 여유 1.70 TB 에 run 002443 을 8,697 / 53,210 개로 잘라 담는 계획
+   FADC 8537 (서브런 00000~10536) · Merged 2 · PRD 2 · PNG 156
+   1.70 TB · 50 MB/s 로 약 9시간 53분 -> 끝나면 여유 2.0 GB
+   그 뒤 /backup_hdd_2 로 이어진다
+```
+
+**메일 경로 실측** — 스토리지 서버에서 `/data/MAILQ` 에 넣은 파일이 DAQ PC 의
+`/scratch/MAILQ` 로 보이고, `send_mail.py` 가 `[RENE DAQ] ...  -> sfc5302@gmail.com`
+으로 해석해 **실제 발송 rc=0** 까지 확인했다.
+
+> **★ 그 확인 중에 의도하지 않은 메일이 한 통 나갔다.** cron 을 먼저 설치한 뒤
+> 배관 확인용 파일을 넣었는데, 지우기 전에 5분 주기가 먼저 돌아 제목이
+> `배관 확인 (발송하지 않음)` 인 메일이 그대로 발송됐다. 내용은 무해하다.
+> **cron 이 도는 큐에 '보내지 않을 파일' 을 두지 말 것** — 큐에 들어가는 순간
+> 그것은 보낼 메일이다.
+
+#### 11.147 이 변경으로 늘어난 운용 항목
+
+```
+cron (DAQ PC)   */5 * * * * scripts/mailq-send.sh      메일 큐 비우기
+                ★ 기존 crontab 은 ~/crontab.bak-<날짜시각> 로 백업해 두었다
+상태 보기       scripts/mailq-send.sh --status         읽기 전용
+                ssh store '/home/frontend/data_backup_simple_code9.sh --dry-run'
+큐              store:/data/MAILQ  =  DAQ PC:/scratch/MAILQ   (sent/ · failed/ 하위)
+```
+
+**★ 백업을 띄우기 전에 이미 도는 것부터 볼 것** (§11.141 은 여전히 유효하다).
+
+```
+ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'
+```
+
 ### 2026-09-02 — 저장소 서버의 외장하드 아카이브 스크립트를 다시 만들었다
 
 #### 11.140 ★★ `/backup_hdd` 아카이브 — 폴더 하나가 1,700개를 막고 있었다
 
 **★ 이것은 우리 파이프라인이 아니다.** 저장소 서버(`ssh store`) 안에서 `/data/RAW`
 를 USB 외장하드로 **옮기고 원본을 지우는** 아카이브 작업이고, 스크립트는
-`/home/frontend/data_backup_simple_code*.sh` 다 (**이 저장소에는 없다.** 그 서버에만
-있으므로 고칠 일이 있으면 `ssh store` 로 간다. `code7` 이 원본, `code8` 이 새 판이다).
+`/home/frontend/data_backup_simple_code*.sh` 다 (`code7` 이 원본, `code8` 이 새 판이다).
+
+> **★ 2026-09-03 에 이 절이 낡았다.** 그때 "이 저장소에는 없다" 고 적었으나, 이제는
+> `scripts/storage-backup.sh` 가 정본이고 그 서버에 `code9` 로 배포한다 (§11.143).
+> **아래 `code8` 이야기는 그 배경으로 읽을 것.** `code8` 은 되돌릴 자리로 남겨 두었다.
 `postrun`·`dataflow`·`backup-khu` 와는 별개다. **다만 `/data/RAW` 는 우리 `/scratch/RAW` 와 같은 곳이라 충돌한다** —
 아래 §11.141 의 경고를 볼 것.
 
@@ -1501,20 +1692,21 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 그래서 돌던 bash 는 옛 inode 를 그대로 붙들고 §11.42 의 사고가 나지 않는다.
 다만 **다음 실행부터** 새 코드가 적용되므로, 지금 도는 작업에는 반영되지 않는다.
 
-#### 11.142 ★★ 여기서 이어받는다 — 2026-09-02 03:00 기준
+#### 11.142 ★★ 여기서 이어받는다 — 2026-09-03 01:00 기준
 
 **세션을 새로 열면 §0.0 다음에 이 절만 읽으면 된다.**
 
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4322 · tmux 세션 'daq' · 약 1,000 Hz         tmux attach -t daq
-후처리     postrun --follow (run 4322 를 따라간다)
+수집       run 4322 · tmux 세션 'daq'                        tmux attach -t daq
+후처리     postrun --follow --jobs 3 --lag 3 (run 4322 를 따라간다)
 이동       dataflow --follow  (마운트 가드 있음, §11.135)
-재처리     /Data_ssd/LOG/reprocess-priority.sh   지금 run 4246
-경희대백업 /Data_ssd/LOG/backup-priority.sh      지금 run 4246
+재처리     /Data_ssd/LOG/reprocess-priority.sh   지금 run 4245 (--from 0 --to 8016)
+경희대백업 /Data_ssd/LOG/backup-priority.sh      지금 run 4240 RAW 22,874 개
 감시       chainwatch cron 5분 · sheetlog cron 매시 07분
-저장소서버 사용자 백업이 /backup_hdd 로 002456 아카이브 중 (별개 작업, §11.140)
+           ★ mailq-send cron 5분 (새로 넣었다, §11.144)
+저장소서버 백업은 지금 돌고 있지 않다. 두 하드 다 비어 있다 (1.7T 여유 × 2)
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -1523,45 +1715,63 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 cat /Data/LOG/rcterm.hb                 # 수집
 scripts/chainwatch.sh --status          # 후처리 사슬 · 계수율
 scripts/runcheck.sh --last 2            # 끝난 런 대조
+scripts/mailq-send.sh --status          # 스토리지 백업 메일 큐
 tail -2 /Data_ssd/LOG/reprocess-priority.log
 tail -2 /Data_ssd/LOG/backup-priority.log
-ssh store 'ps -eo pid,lstart,args | grep data_backup | grep -v grep'
+ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'
 ```
 
-**진행 중인 큰 작업 둘 (약 3일)**
+**진행 중인 큰 작업 둘**
 
 `4200번대 PRD 결손 재처리 + 경희대 백업` — 백업이 없는 런을 우선으로 돌린다
 (§11.139). 둘 다 재개 가능하고 nice/ionice 로 양보한다.
 
 ```
-완결   4280 · 4241 · 4224 · 4242 · 4243
-진행   4246 (1562/5104)
-남음   4245(8017) · 4240(2231) · 4244(15589) · 4219(6035)
+완결   4280 · 4241 · 4224 · 4242 · 4243 · 4246
+진행   재처리 4245 · 백업 4240
+남음   4240(2231) · 4244(15589) · 4219(6035)
 불가   4138:00009 — 원본이 손상됐다 (§11.107)
 ```
 
-**사람이 해야 하는 것**
+**★ 바로 다음에 할 수 있는 것 — 저장소 서버 외장하드 백업을 시작한다**
+
+두 하드가 비어 있고 `/data/RAW` 에 런 1,723 개가 쌓여 있다. 새 스크립트가
+하드 두 개를 순서대로 쓴다 (§11.143). **먼저 dry-run 으로 계획을 볼 것.**
+
+```bash
+ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'   # ★ 먼저
+ssh store '/home/frontend/data_backup_simple_code9.sh --dry-run'
+ssh store 'nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log/code9.log 2>&1 &'
+```
+
+첫 하드는 run 002443(6.71 TB)을 8,697 개로 잘라 담아 약 10시간이면 찬다. 그 뒤
+`/backup_hdd_2` 로 저절로 이어지고, **하드가 찰 때마다 메일이 온다.**
+
+**사람이 해야 하는 것** (전부 root 가 필요해 이 세션에서 못 했다)
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| `git push origin main` | 커밋 5개가 이 PC 에만 있다. 자격증명 캐시 만료 | — |
 | NM 프로파일 주소를 `.71` 로 되돌린다 | **재부팅하면 `.75` 로 떠서 공인망이 끊긴다** | §11.132 |
 | fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |
 | `enp0s31f6`·`enp1s0` 프로파일의 `.71` 정리 | 셋이 같은 주소를 갖고 있다 | §11.132 |
+| `/backup_hdd*` 두 개를 fstab 에 UUID 로 | 지금은 손으로 마운트라 rename 에 무방비 | §11.124 |
 
 **★ 이어받을 때 밟기 쉬운 것**
 
 ```
 1  ★ 저장소 서버에서 무언가 띄우기 전에 이미 도는 것부터 볼 것 (§11.141)
-     ssh store 'ps -eo pid,lstart,args | grep data_backup | grep -v grep'
      /data/RAW 는 우리 /scratch/RAW 와 같은 곳이다. 아카이브가 원본을 지운다
-2  pgrep -f 로 프로세스를 찾지 말 것 — 저장소 경로에 'rcterm' 이 들어 있고
-     $(...) 서브셸까지 잡힌다. pgrep -x 를 쓰거나 조상을 빼야 한다 (§11.67)
+2  pgrep -f 로 프로세스를 찾지 말 것. 세 방향으로 오탐한다 —
+     저장소 경로에 'rcterm' 이 들어 있고, $( ) 서브셸이 잡히고,
+     ★ 나를 띄운 셸의 argv 까지 잡힌다. pgrep -x 를 쓰거나 계보를 빼라
+     (§11.67 · §11.119 · §11.141 · §11.145)
 3  운영 디렉터리에서 소스를 고치지 말 것. 별도 클론에서 고치고 git pull (§8)
      git 은 새 inode 로 만들어 돌고 있는 스크립트에 안전하다 (실측, §11.139)
 4  0 Hz 이면 보드를 파기 전에 HV 부터 물을 것 (§11.131)
 5  bash `local a=$1 b="${a}"` 는 b 가 빈다. 나눠 쓸 것 (§11.139)
 6  du -sb 로 두 파일시스템을 대조하지 말 것 — 디렉터리 크기가 다르다 (§11.140)
+7  ★ cron 이 도는 메일 큐(/scratch/MAILQ)에 '보내지 않을 파일' 을 두지 말 것.
+     넣는 순간 그것은 보낼 메일이다 (§11.146 에서 한 통 잘못 나갔다)
 ```
 
 ### 2026-08-28 — `/backup_hdd` 를 되살리고, 시트 등재를 자동화했다
