@@ -1789,7 +1789,11 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 경희대백업 /Data_ssd/LOG/backup-priority.sh      지금 run 4240 RAW 22,874 개
 감시       chainwatch cron 5분 · sheetlog cron 매시 07분
            ★ mailq-send cron 5분 (새로 넣었다, §11.144)
-저장소서버 백업은 지금 돌고 있지 않다. 두 하드 다 비어 있다 (1.7T 여유 × 2)
+저장소서버 ★ 외장하드 백업이 돌고 있다 (2026-09-03 02:16 시작, pid 77524/77526)
+             run 002443 을 8,699 개(1.70 TB)로 잘라 /backup_hdd 에 담는 중. 50 MB/s
+             약 10시간 뒤 하드가 차면 메일이 오고 /backup_hdd_2 로 저절로 이어진다
+             ssh 와 무관하게 산다 (부모가 init 이다. 실측 확인)
+             진행 : ssh store 'tail -c 300 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -1' 
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -1816,21 +1820,21 @@ ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep 
 불가   4138:00009 — 원본이 손상됐다 (§11.107)
 ```
 
-**★ 바로 다음에 할 수 있는 것 — 저장소 서버 외장하드 백업을 시작한다**
+**★ 외장하드 백업이 돌고 있다 — 다음에 볼 것은 첫 하드 교체다**
 
-두 하드가 비어 있고 `/data/RAW` 에 런 1,723 개가 쌓여 있다. 새 스크립트가
-하드 두 개를 순서대로 쓴다 (§11.143). **먼저 dry-run 으로 계획을 볼 것.**
+2026-09-03 02:16 에 시작했다. 권한은 사용자가 조치했다 — 마운트 루트는 root 로
+두고 **`RENE_data_backup` 만 만들어 소유권을 넘기는 형태**다(§11.148).
 
-```bash
-ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'   # ★ 먼저
-#  ★ 두 하드가 갓 포맷돼 root 소유다. 이것을 먼저 하지 않으면 백업이 못 돈다 (§11.148)
-ssh store 'sudo chown frontend:frontend /backup_hdd /backup_hdd_2'      # root 암호 필요
-ssh store '/home/frontend/data_backup_simple_code9.sh --dry-run'
-ssh store 'nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log/code9.log 2>&1 &'
+```
+지금        run 002443 을 8,699 개(1.70 TB)로 잘라 /backup_hdd 에 담는 중, 50 MB/s
+약 10시간 뒤  하드가 차면 메일 -> /backup_hdd_2 로 저절로 이어진다
+확인        ssh store 'tail -c 300 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -1'
+            ssh store 'df -h /backup_hdd /backup_hdd_2'
 ```
 
-첫 하드는 run 002443(6.71 TB)을 8,697 개로 잘라 담아 약 10시간이면 찬다. 그 뒤
-`/backup_hdd_2` 로 저절로 이어지고, **하드가 찰 때마다 메일이 온다.**
+**★ 하드가 실제로 차서 넘어가는 순간은 아직 아무도 못 봤다.** 그것이 이 변경의
+핵심이므로 첫 교체 메일이 오면 로그를 확인할 것. 원본은 **한 런의 전송과 대조가
+다 끝난 뒤에만** 지우므로, 그때까지 `/data/RAW/002443` 은 그대로 있다.
 
 **사람이 해야 하는 것** (전부 root 가 필요해 이 세션에서 못 했다)
 
@@ -1839,7 +1843,6 @@ ssh store 'nohup /home/frontend/data_backup_simple_code9.sh > ~/sykim/backup_log
 | NM 프로파일 주소를 `.71` 로 되돌린다 | **재부팅하면 `.75` 로 떠서 공인망이 끊긴다** | §11.132 |
 | fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |
 | `enp0s31f6`·`enp1s0` 프로파일의 `.71` 정리 | 셋이 같은 주소를 갖고 있다 | §11.132 |
-| **`sudo chown frontend:frontend /backup_hdd /backup_hdd_2`** | **갓 포맷돼 root 소유다. 이것 없이는 백업이 한 발짝도 못 간다** | §11.148 |
 | `/backup_hdd*` 두 개를 fstab 에 UUID 로 | 지금은 손으로 마운트라 rename 에 무방비 | §11.124 |
 
 **★ 이어받을 때 밟기 쉬운 것**
