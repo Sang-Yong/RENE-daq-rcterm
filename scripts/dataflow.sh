@@ -51,6 +51,19 @@ KEEP_SSD=${DATAFLOW_KEEP_SSD:-2}         # ssd 에 남길 런 수 (수집 중인
 KEEP_MID=${DATAFLOW_KEEP_MID:-0}         # 백업 뒤에도 mid 에 남길 런 수
 MINFREE_GB=${DATAFLOW_MINFREE_GB:-700}   # /Data_ssd 여유가 이 아래면 경고
 DROP_MERGED=${DATAFLOW_DROP_MERGED:-0}   # 3단계에서 Merged 를 버린다 (기본 아니오)
+#  ★ Merged 보관 창 — 최근 이 개수의 런만 Merged 를 남기고 나머지는 지운다.
+#    0 이면 청소하지 않는다 (기본).  --merged-keep N 또는 params 로 켠다.
+#
+#    왜 지워도 되나 : Merged 에는 PRD 에 없는 물리 정보가 없다. 2026-09-04 에
+#    run 4322 서브런 100 으로 실측했다 — 이벤트 수(57,523) · FADC 채널 ID
+#    · SADC 채널 ID 30종의 개수까지 같고, 파형 총합이 349,409.1 로 일치한다.
+#    Merged 에만 있는 값은 fTrgTime 하나인데 그것은 TCB 시계를 풀어 놓은
+#    것이라(되감김 4회분) PRD 의 TCBTRGTime 에서 복원된다.
+#    나머지(fStartTime·fEndTime·fTrgType·fNHit)는 전 이벤트가 상수다.
+#
+#    그래서 Merged 는 물리 자료가 아니라 '재처리 캐시'다. 남겨 두는 값어치는
+#    production 을 다시 돌릴 때 merge(서브런당 28초)를 건너뛰는 것뿐이다.
+KEEP_MERGED=${DATAFLOW_KEEP_MERGED:-0}   # Merged 를 남길 최근 런 수 (0 = 청소 안 함)
 VERIFY=${DATAFLOW_VERIFY:-1}             # 지우기 전에 체크섬으로 대조한다 (CLAUDE.md §8)
 POLL=${DATAFLOW_POLL:-600}
 NICE=${DATAFLOW_NICE:-10}
@@ -58,7 +71,9 @@ BACKUP_SH=$REPO/scripts/backup-khu.sh
 PARAMS=""
 
 STAGE=0; ONCE=0; FOLLOW=0; DRYRUN=0
-LOCK=/tmp/.dataflow.$(id -u).lock
+#  ★ 시험에서 갈아끼울 수 있어야 한다. 운영 중인 dataflow 와 잠금이 겹치면
+#    시험이 조용히 exit 0 으로 끝나 아무것도 검증하지 못한다.
+LOCK=${DATAFLOW_LOCK:-/tmp/.dataflow.$(id -u).lock}
 
 C_R='\033[1;31m'; C_G='\033[1;32m'; C_Y='\033[1;33m'; C_C='\033[1;36m'; C_0='\033[0m'
 ts()  { date '+%Y-%m-%d %H:%M:%S'; }
@@ -77,6 +92,12 @@ usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; cat <<EOF
   --no-backup          2단계(외부 백업)를 건너뛴다. 3단계는 바로 진행한다
   --keep-ssd N         ssd 에 남길 런 수         (${KEEP_SSD})
   --keep-mid N         백업 뒤 mid 에 남길 런 수 (${KEEP_MID})
+  --merged-keep N      최근 N 개 런의 Merged 만 남기고 나머지는 지운다.
+                       ssd · mid · nfs 세 곳을 모두 훑는다. 0 이면 청소하지 않는다(기본).
+                       ★ Merged 에는 PRD 에 없는 물리 정보가 없다(실측, 위 주석).
+                         재처리할 때 merge 를 건너뛰는 캐시일 뿐이다.
+                       ★ --dry-run 이면 무엇이 지워질지 개수·용량만 보여준다.
+  --stage M            Merged 청소만 한다 (1·2·3 단계를 건너뛴다).
   --drop-merged        3단계에서 Merged 를 옮기지 않고 지운다.
                        런당 115 GB 이고 RAW 에서 다시 만들 수 있다.
                        **데이터를 지우는 옵션이므로 기본은 꺼져 있다**
@@ -108,6 +129,7 @@ load_params() {
          KEEP_MID)       KEEP_MID=$v ;;
          MIN_FREE_GB)    MINFREE_GB=$v ;;
          DROP_MERGED)    DROP_MERGED=$v ;;
+         KEEP_MERGED)    KEEP_MERGED=$v ;;
          VERIFY|verify)  VERIFY=$v ;;
          POLL)           POLL=$v ;;
          NICE)           NICE=$v ;;
@@ -130,6 +152,7 @@ while [ $# -gt 0 ]; do
       --keep-ssd)     KEEP_SSD=$2; shift 2 ;;
       --keep-mid)     KEEP_MID=$2; shift 2 ;;
       --drop-merged)  DROP_MERGED=1; shift ;;
+      --merged-keep)  KEEP_MERGED=$2; shift 2 ;;
       --no-verify)    VERIFY=0; shift ;;   # ★권장하지 않는다★
       --verify)       VERIFY=1; shift ;;
       --min-free-gb)  MINFREE_GB=$2; shift 2 ;;
@@ -171,6 +194,80 @@ has_symlink_subdir() {    # run_dir
    local s
    for s in Merged PRD PNG; do [ -L "$1/$s" ] && return 0; done
    return 1
+}
+
+# ---------------------------------------------------------------------
+#  ★ 이 런의 Merged 를 지워도 되는가.  이유를 표준출력에 한 낱말로 남긴다.
+#
+#    관문이 둘로 갈리는 이유 —— 외장하드로 아카이브된 런은 RAW 가 없어서
+#    is_processed() 가 영원히 거짓이다. 그 갈래를 따로 두지 않으면 정작
+#    용량을 가장 많이 먹는 옛 런이 청소에서 통째로 빠진다.
+# ---------------------------------------------------------------------
+merged_droppable() {      # run_dir -> 0 지워도 된다 / 1 아니다
+   local d=$1 f p empty
+   [ -d "$d/Merged" ] || { echo "merged없음"; return 1; }
+   #  옛 --outroot 구성의 심볼릭 링크는 건드리지 않는다. 지우면 실체가 날아간다.
+   has_symlink_subdir "$d" && { echo "심볼릭링크"; return 1; }
+
+   p=$(find -L "$d/PRD" -maxdepth 1 -name '*.root' 2>/dev/null | wc -l)
+   [ "$p" -gt 0 ] || { echo "PRD없음"; return 1; }
+
+   #  ★ 반쪽짜리 PRD 위에서 Merged 를 지우지 않는다. 0 바이트가 하나라도 있으면
+   #    그 서브런은 다시 만들어야 하고, 그때 Merged 가 있으면 훨씬 싸다.
+   empty=$(find -L "$d/PRD" -maxdepth 1 -name '*.root' -size 0 2>/dev/null | wc -l)
+   [ "$empty" -eq 0 ] || { echo "PRD빈파일${empty}개"; return 1; }
+
+   f=$(find -L "$d" -maxdepth 1 -name 'FADC_*.root.*' 2>/dev/null | wc -l)
+   if [ "$f" -gt 0 ]; then
+      #  RAW 가 아직 있다 -> 후처리 완결을 개수로 확인한다
+      [ "$p" -eq "$f" ] || { echo "후처리미완료(PRD $p/FADC $f)"; return 1; }
+      echo "완결"; return 0
+   fi
+   #  RAW 가 없다 -> 이미 아카이브된 런이다. PRD 가 산출물의 전부다.
+   echo "아카이브됨"; return 0
+}
+
+# ---------------------------------------------------------------------
+#  M단계 — Merged 청소.  최근 KEEP_MERGED 개 런만 남기고 나머지를 지운다.
+#  세 뿌리를 모두 훑는다. 용량의 대부분은 nfs 에 쌓여 있다.
+# ---------------------------------------------------------------------
+stage_merged() {
+   [ "${KEEP_MERGED:-0}" -gt 0 ] || {
+      [ "$STAGE" = "M" ] && log "${C_Y}[M] KEEP_MERGED=0 이라 청소하지 않는다 (--merged-keep N 으로 켠다)${C_0}"
+      return 0
+   }
+   local root rp d why keep n sz tot_n=0 tot_gb=0
+   #  ★ 보관 창은 '세 뿌리를 합친 전체 런 목록'의 뒤에서 센다. 뿌리마다 따로
+   #    세면 뿌리가 셋이라 3배를 남기게 된다.
+   keep=$( { runs_in "$SSD/RAW"; runs_in "$MID/RAW"; runs_in "$NFS/RAW"; } \
+           | sort -n -u | tail -n "$KEEP_MERGED" )
+   for root in "$SSD" "$MID" "$NFS"; do
+      [ -d "$root/RAW" ] || continue
+      #  nfs 가 빠져 있으면 손대지 않는다 (§11.135 와 같은 이유)
+      if [ "$root" = "$NFS" ] && ! dest_mounted "$NFS"; then
+         log "${C_Y}[M] $NFS 가 마운트돼 있지 않다. 건너뛴다${C_0}"; continue
+      fi
+      for rp in $(runs_in "$root/RAW"); do
+         echo "$keep" | grep -qx "$rp" && continue          # 보관 창 안
+         is_acquiring "$rp" && continue                     # 수집 중
+         d="$root/RAW/$rp"
+         [ -d "$d/Merged" ] || continue
+         if ! why=$(merged_droppable "$d"); then
+            log "${C_Y}[M] run $rp ($root) : Merged 를 두었다 — $why${C_0}"; continue
+         fi
+         n=$(find "$d/Merged" -type f 2>/dev/null | wc -l)
+         sz=$(size_gb "$d/Merged")
+         tot_n=$((tot_n + n)); tot_gb=$((tot_gb + ${sz:-0}))
+         if [ "$DRYRUN" -eq 1 ]; then
+            log "  [DRY] [M] run $rp ($root) : Merged $n 개 / ${sz:-?}G 를 지운다 ($why)"
+         else
+            log "${C_C}[M] run $rp ($root) : Merged $n 개 / ${sz:-?}G 삭제 ($why)${C_0}"
+            rm -rf "$d/Merged"
+         fi
+      done
+   done
+   [ "$tot_n" -gt 0 ] && log "${C_C}[M] 합계 : Merged $tot_n 개 / 약 ${tot_gb}G $([ "$DRYRUN" -eq 1 ] && echo '(dry-run, 지우지 않았다)' || echo '삭제')${C_0}"
+   return 0
 }
 
 # ---------------------------------------------------------------------
@@ -343,7 +440,7 @@ stage1() {
 # =====================================================================
 stage2() {
    if [ "$BACKUP_ENABLE" != "1" ]; then
-      [ "$STAGE" -eq 2 ] && log "${C_Y}[2] 백업이 꺼져 있다 (--no-backup)${C_0}"
+      [ "$STAGE" = "2" ] && log "${C_Y}[2] 백업이 꺼져 있다 (--no-backup)${C_0}"
       return 0
    fi
    local args=(--mid "$MID" --all)
@@ -439,7 +536,8 @@ one_pass() {
       1) stage1 ;;
       2) stage2 ;;
       3) stage3 ;;
-      *) stage1; stage2; stage3 ;;
+      M|m) stage_merged ;;
+      *) stage1; stage2; stage3; stage_merged ;;
    esac
 }
 
