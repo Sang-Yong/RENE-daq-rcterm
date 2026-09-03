@@ -64,6 +64,17 @@ DROP_MERGED=${DATAFLOW_DROP_MERGED:-0}   # 3단계에서 Merged 를 버린다 (�
 #    그래서 Merged 는 물리 자료가 아니라 '재처리 캐시'다. 남겨 두는 값어치는
 #    production 을 다시 돌릴 때 merge(서브런당 28초)를 건너뛰는 것뿐이다.
 KEEP_MERGED=${DATAFLOW_KEEP_MERGED:-0}   # Merged 를 남길 최근 런 수 (0 = 청소 안 함)
+#  ★ 한 주기에 지울 파일 수 상한.  M단계는 주기의 맨 끝에 도는데, 처음 켤 때는
+#    지울 것이 20만 개가 넘어 12시간이 걸린다. 그동안 1·2·3 단계가 통째로 밀린다.
+#    상한을 두면 매 주기 조금씩 지우고 나머지 단계는 제때 돈다.
+#
+#    ★ 런 수가 아니라 파일 수로 잰다. 런 하나가 3 GB ~ 1,331 GB 로 400배 차이라
+#      런 수로는 걸리는 시간을 묶을 수 없다. 삭제는 NFS 메타데이터가 병목이라
+#      (실측 4.6 파일/초) 파일 수가 곧 시간이다. 20000 이면 약 1.2 시간.
+#
+#    ★ 상한은 런을 시작하기 전에만 본다. 그래야 상한보다 큰 런(최대 38,795 개)도
+#      언젠가 지워진다 -- 중간에 끊으면 그런 런은 영영 남는다.
+MERGED_MAX_FILES=${DATAFLOW_MERGED_MAX_FILES:-20000}   # 0 = 무제한
 VERIFY=${DATAFLOW_VERIFY:-1}             # 지우기 전에 체크섬으로 대조한다 (CLAUDE.md §8)
 POLL=${DATAFLOW_POLL:-600}
 NICE=${DATAFLOW_NICE:-10}
@@ -97,6 +108,9 @@ usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; cat <<EOF
                        ★ Merged 에는 PRD 에 없는 물리 정보가 없다(실측, 위 주석).
                          재처리할 때 merge 를 건너뛰는 캐시일 뿐이다.
                        ★ --dry-run 이면 무엇이 지워질지 개수·용량만 보여준다.
+  --merged-max N       한 주기에 지울 Merged 파일 수 상한 (기본 20000, 0 = 무제한).
+                       ★ M단계는 주기의 맨 끝에 돌기 때문에, 상한이 없으면 처음 켤 때
+                         1·2·3 단계가 몇 시간씩 밀린다. 런 수가 아니라 파일 수로 잰다.
   --stage M            Merged 청소만 한다 (1·2·3 단계를 건너뛴다).
   --drop-merged        3단계에서 Merged 를 옮기지 않고 지운다.
                        런당 115 GB 이고 RAW 에서 다시 만들 수 있다.
@@ -130,6 +144,7 @@ load_params() {
          MIN_FREE_GB)    MINFREE_GB=$v ;;
          DROP_MERGED)    DROP_MERGED=$v ;;
          KEEP_MERGED)    KEEP_MERGED=$v ;;
+         MERGED_MAX_FILES) MERGED_MAX_FILES=$v ;;
          VERIFY|verify)  VERIFY=$v ;;
          POLL)           POLL=$v ;;
          NICE)           NICE=$v ;;
@@ -153,6 +168,7 @@ while [ $# -gt 0 ]; do
       --keep-mid)     KEEP_MID=$2; shift 2 ;;
       --drop-merged)  DROP_MERGED=1; shift ;;
       --merged-keep)  KEEP_MERGED=$2; shift 2 ;;
+      --merged-max)   MERGED_MAX_FILES=$2; shift 2 ;;
       --no-verify)    VERIFY=0; shift ;;   # ★권장하지 않는다★
       --verify)       VERIFY=1; shift ;;
       --min-free-gb)  MINFREE_GB=$2; shift 2 ;;
@@ -236,7 +252,7 @@ stage_merged() {
       [ "$STAGE" = "M" ] && log "${C_Y}[M] KEEP_MERGED=0 이라 청소하지 않는다 (--merged-keep N 으로 켠다)${C_0}"
       return 0
    }
-   local root rp d why keep n sz tot_n=0 tot_gb=0
+   local root rp d why keep n sz tot_n=0 tot_gb=0 capped=0
    #  ★ 보관 창은 '세 뿌리를 합친 전체 런 목록'의 뒤에서 센다. 뿌리마다 따로
    #    세면 뿌리가 셋이라 3배를 남기게 된다.
    keep=$( { runs_in "$SSD/RAW"; runs_in "$MID/RAW"; runs_in "$NFS/RAW"; } \
@@ -252,6 +268,12 @@ stage_merged() {
          is_acquiring "$rp" && continue                     # 수집 중
          d="$root/RAW/$rp"
          [ -d "$d/Merged" ] || continue
+         #  ★ 상한은 '런을 시작하기 전' 에만 본다. 시작한 런은 끝까지 지운다 --
+         #    그래야 상한보다 큰 런도 언젠가 지워진다.
+         if [ "${MERGED_MAX_FILES:-0}" -gt 0 ] && [ "$tot_n" -ge "$MERGED_MAX_FILES" ]; then
+            log "${C_Y}[M] 이번 주기 상한 $MERGED_MAX_FILES 개에 닿았다. 나머지는 다음 주기에${C_0}"
+            capped=1; break 2
+         fi
          if ! why=$(merged_droppable "$d"); then
             log "${C_Y}[M] run $rp ($root) : Merged 를 두었다 — $why${C_0}"; continue
          fi
@@ -266,7 +288,7 @@ stage_merged() {
          fi
       done
    done
-   [ "$tot_n" -gt 0 ] && log "${C_C}[M] 합계 : Merged $tot_n 개 / 약 ${tot_gb}G $([ "$DRYRUN" -eq 1 ] && echo '(dry-run, 지우지 않았다)' || echo '삭제')${C_0}"
+   [ "$tot_n" -gt 0 ] && log "${C_C}[M] 합계 : Merged $tot_n 개 / 약 ${tot_gb}G $([ "$DRYRUN" -eq 1 ] && echo '(dry-run, 지우지 않았다)' || echo '삭제')$([ "$capped" = 1 ] && echo ' — 상한에서 멈췄다')${C_0}"
    return 0
 }
 

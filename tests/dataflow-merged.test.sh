@@ -191,6 +191,52 @@ chk "종료코드 0" "$?" "0"
 chk "정상 동작" "$(has_merged "$NFS/RAW/000001")" "no"
 teardown
 
+# ---------------------------------------------------------------------
+echo ""; echo "[13] ★ 회차당 상한 — 넘어서면 멈추고 다음 주기로 미룬다"
+setup
+for r in 000001 000002 000003 000004 000005; do mkrun "$NFS" "$r" 3 3 4; done
+mkrun "$NFS" 000006 3 3 3     # 보관 창
+run_sut --stage M --merged-keep 1 --merged-max 6
+chk "종료코드 0" "$RC" "0"
+#  런당 Merged 4 개.  상한 6 이면 : 1번(0->4) 시작, 2번(4->8) 시작, 3번은 8>=6 이라 멈춤
+chk "두 런만 지웠다" "$(n_merged)" "4"
+if grep -q '상한 6 개에 닿았다' "$T/out.txt"; then ok "상한에서 멈췄다고 알린다"
+else bad "상한 안내가 없다" "$(grep -i 상한 "$T/out.txt" | head -2)"; fi
+if grep -q '상한에서 멈췄다' "$T/out.txt"; then ok "합계에도 밝힌다"
+else bad "합계 안내가 없다"; fi
+teardown
+
+echo ""; echo "[14] ★ 상한보다 큰 런도 결국 지워진다 (시작한 런은 끝까지)"
+#  상한을 '지우는 중' 에 보면 이런 런은 영영 남는다.
+setup
+mkrun "$NFS" 000001 3 3 50    # 상한(5)보다 훨씬 큰 런
+mkrun "$NFS" 000002 3 3 3
+run_sut --stage M --merged-keep 1 --merged-max 5
+chk "큰 런도 지워졌다" "$(has_merged "$NFS/RAW/000001")" "no"
+teardown
+
+echo ""; echo "[15] --merged-max 0 이면 상한 없이 전부 지운다"
+setup
+for r in 000001 000002 000003 000004; do mkrun "$NFS" "$r" 3 3 10; done
+mkrun "$NFS" 000005 3 3 3
+run_sut --stage M --merged-keep 1 --merged-max 0
+chk "보관 창 1 개만 남는다" "$(n_merged)" "1"
+if ! grep -q '상한' "$T/out.txt"; then ok "상한을 말하지 않는다"
+else bad "상한이 걸렸다" "$(grep -i 상한 "$T/out.txt" | head -1)"; fi
+teardown
+
+echo ""; echo "[16] 다음 주기에 이어서 지운다 (두 번 돌리면 마저 끝난다)"
+setup
+for r in 000001 000002 000003 000004; do mkrun "$NFS" "$r" 3 3 4; done
+mkrun "$NFS" 000005 3 3 3
+run_sut --stage M --merged-keep 1 --merged-max 6
+n1=$(n_merged)
+run_sut --stage M --merged-keep 1 --merged-max 6
+n2=$(n_merged)
+chk "1회차 뒤 남은 Merged 3 개" "$n1" "3"
+chk "2회차 뒤 남은 Merged 1 개 (보관 창)" "$n2" "1"
+teardown
+
 echo ""
 echo "=========================================================="
 printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"
