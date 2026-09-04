@@ -50,6 +50,9 @@
 #  가끔 쓰는 옵션 (평소에는 필요 없다)
 #     --dry-run        계획만 보고 끝낸다. 아무것도 옮기거나 지우지 않는다
 #     --disks a,b      쓸 하드를 순서대로 (기본 /backup_hdd,/backup_hdd_2)
+#     --skip a,b       이 하위 폴더를 백업에서 뺀다 (기본 Merged).
+#                      뺀 것은 원본에 남는다 -- 지우는 것은 dataflow 의 M단계 몫이다
+#     --no-skip        아무것도 빼지 않는다 (Merged 까지 담는다)
 #     --no-mail        메일을 큐에 넣지 않는다
 #     --no-bwlimit     속도 제한 해제 (기본 50M)
 #     --margin 10      안전 마진을 10 GB 로 (기본 2 GB)
@@ -90,6 +93,18 @@ QUIET_MIN="${BACKUP_QUIET_MIN:-30}"
 SKIP_LIST="${BACKUP_SKIP_LIST:-/home/frontend/sykim/backup_log/backup_skip.txt}"
 #  ★ 메일 큐. 이 서버는 인터넷이 없어 직접 못 보낸다. 파일로 떨구면
 #    DAQ PC 의 cron(scripts/mailq-send.sh) 이 5분마다 집어 보낸다.
+#  ★ 백업에서 뺄 하위 폴더 (쉼표 구분).  --skip / --no-skip 으로도 준다.
+#
+#    Merged 를 기본으로 빼는 이유는 둘이다.
+#      1) 물리 정보가 없다. PRD 와 같은 이벤트·채널·파형을 담고 있음을 실측으로
+#         확인했다 (CLAUDE.md 11.149). 재처리할 때 merge 를 건너뛰는 캐시일 뿐이다.
+#      2) ★ 경합이 사라진다. DAQ PC 의 dataflow 가 같은 트리(/scratch = 여기 /data)
+#         에서 Merged 를 청소하는데, 그것이 백업이 옮기는 중인 파일을 지워
+#         2026-09-04 에 rsync 가 rc=24 (vanished source files) 로 죽었다.
+#         7시간 38분어치 전송이 날아갔다. 담지 않으면 부딪힐 일이 없다.
+#
+#    빼면 그 폴더는 원본에 남는다. 지우는 것은 dataflow 의 M단계 몫이다.
+SKIP_DIRS="${BACKUP_SKIP_DIRS-Merged}"
 MAILQ_DIR="${BACKUP_MAILQ:-/data/MAILQ}"
 MAIL_ENABLE="${BACKUP_MAIL:-1}"
 DRYRUN=0
@@ -98,6 +113,8 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run)     DRYRUN=1; shift ;;
 		--disks)       MOUNTS_RAW=$2; shift 2 ;;
+		--skip)        SKIP_DIRS=$2; shift 2 ;;
+		--no-skip)     SKIP_DIRS=""; shift ;;
 		--no-mail)     MAIL_ENABLE=0; shift ;;
 		--mailq)       MAILQ_DIR=$2; shift 2 ;;
 		--no-bwlimit)  BWLIMIT=""; shift ;;
@@ -105,10 +122,36 @@ while [ $# -gt 0 ]; do
 		--margin)      SAFETY_MARGIN=$(( ${2%[gG]} * 1024 * 1024 )); shift 2 ;;   # GB
 		--no-split)    SPLIT_MODE=never; shift ;;
 		--bwlimit)     BWLIMIT=$2; shift 2 ;;
-		-h|--help)     sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help)     sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "모르는 옵션 : $1" >&2; exit 2 ;;
 	esac
 done
+
+#  ★ 원본 파일 목록.  SKIP_DIRS 에 적힌 하위 폴더는 통째로 뺀다.
+#    find 의 -prune 은 그 폴더로 아예 들어가지 않으므로, 폴더가 커도 값이 싸다.
+#  ★ 백업할 파일이 하나라도 있나 (SKIP_DIRS 를 뺀 기준).
+#    '남은 일이 있나' 판정이 이 눈으로 보지 않으면, 남은 것이 Merged 뿐인 런을
+#    계속 '남았다' 고 읽어 하드를 헛되이 넘긴다.
+has_backup_files() {     # 런 폴더
+	local args=() d
+	if [ -n "$SKIP_DIRS" ]; then
+		local IFSO=$IFS; IFS=','
+		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
+		IFS=$IFSO
+	fi
+	[ -n "$(find "$1" "${args[@]+"${args[@]}"}" -type f -print -quit 2>/dev/null)" ]
+}
+
+list_files() {           # 런 폴더 안에서 실행한다 -> "<바이트>\t<상대경로>"
+	local args=() d
+	if [ -n "$SKIP_DIRS" ]; then
+		local IFSO=$IFS; IFS=','
+		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
+		IFS=$IFSO
+	fi
+	find . "${args[@]+"${args[@]}"}" -type f -printf '%s\t%P\n' 2>/dev/null \
+		| sort -t"$(printf '\t')" -k2
+}
 
 IFS=',' read -r -a DISKS <<< "$MOUNTS_RAW"
 [ "${#DISKS[@]}" -ge 1 ] || { echo "❌ 쓸 하드가 지정되지 않았습니다." >&2; exit 2; }
@@ -267,8 +310,8 @@ remaining_work() {
 	for F in */; do
 		F=${F%/}
 		[ -d "$F" ] || continue
-		#  파일이 하나도 없는 껍데기는 옮길 것이 아니다
-		[ -n "$(find "$F" -type f -print -quit 2>/dev/null)" ] || continue
+		#  백업할 파일이 없는 런은 옮길 것이 아니다 (껍데기 · Merged 만 남은 런)
+		has_backup_files "$F" || continue
 		is_busy "$F" >/dev/null && continue
 		REMAIN_N=$((REMAIN_N+1))
 		[ "$REMAIN_N" -le 10 ] && REMAIN_LIST="$REMAIN_LIST $F"
@@ -433,10 +476,16 @@ run_pass() {
 		SZ=$(folder_size "$F") || continue
 
 		if [ "$SZ" -lt "$USABLE" ]; then
-			( cd "$F" && find . -type f -printf '%s\t%P\n' 2>/dev/null | sort -t"$(printf '\t')" -k2 ) \
-				> "$PLANDIR/sizes.$F"
+			( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
 			cut -f2- "$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
 			NF=$(wc -l < "$PLANDIR/list.$F")
+			#  ★ 담을 파일이 하나도 없으면 계획에 넣지 않는다.
+			#    SKIP_DIRS 로 Merged 를 빼면 '남은 것이 Merged 뿐인 런' 이 생긴다.
+			#    0 개짜리 계획으로 넣으면 매 회차 '부분 백업했다' 로 세어 한 하드
+			#    안에서 영원히 회차를 반복한다 (시험에서 3,531 회차까지 갔다).
+			if [ "$NF" -eq 0 ]; then
+				rm -f "$PLANDIR/list.$F" "$PLANDIR/sizes.$F"; continue
+			fi
 			printf '%s\tfull\t%s\t%s\n' "$F" "$NF" "$SZ" >> "$PLANDIR/plan.tsv"
 			SIM=$((SIM - SZ)); P_FILES=$((P_FILES+NF)); P_KB=$((P_KB+SZ)); P_FULL=$((P_FULL+1))
 			continue
@@ -459,17 +508,31 @@ run_pass() {
 		fi
 
 		#  들어가는 파일만 골라 목록을 만든다 (이 목록을 2단계에서 그대로 쓴다)
-		( cd "$F" && find . -type f -printf '%s\t%P\n' 2>/dev/null | sort -t"$(printf '\t')" -k2 ) \
-			> "$PLANDIR/sizes.$F"
-		awk -F'\t' -v cap=$(( USABLE * 1024 )) '{ if (s + $1 <= cap) { s += $1; print $2 } }' \
-			"$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
+		( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
+		#  ★ 이미 목적지에 같은 크기로 있는 파일은 공간을 새로 먹지 않는다.
+		#    이것을 안 빼면, 앞 회차가 보내 놓고 실패해 원본이 남은 파일들로
+		#    할당량이 다 차서 "옮겼다"고 하고는 하드가 한 바이트도 안 준다.
+		#    2026-09-04 에 12,683 개를 38초에 '옮기고' 427 GB 를 남긴 채
+		#    멈춘 것이 이것이다.
+		( [ -d "$DEST/$F" ] && cd "$DEST/$F" && list_files ) > "$PLANDIR/dst.$F" 2>/dev/null \
+			|| : > "$PLANDIR/dst.$F"
+		#  ★ NR==FNR 관용구를 쓰지 않는다. 목적지가 비어 있으면(대개 그렇다)
+		#    첫 파일에 줄이 없어 두 번째 파일을 첫 파일로 오인하고, 한 줄도
+		#    내보내지 않는다. 파일 이름으로 가른다.
+		awk -F'\t' -v cap=$(( USABLE * 1024 )) -v DST="$PLANDIR/dst.$F" '
+			FILENAME==DST { have[$2]=$1; next }
+			{ c = ($2 in have && have[$2]==$1) ? 0 : $1
+			  if (s + c <= cap) { s += c; print $2 } }' \
+			"$PLANDIR/dst.$F" "$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
 		NF=$(wc -l < "$PLANDIR/list.$F")
 		if [ "$NF" -eq 0 ]; then
 			N_SKIP=$((N_SKIP+1)); SKIPPED_LIST="$SKIPPED_LIST $F"
 			rm -f "$PLANDIR/list.$F" "$PLANDIR/sizes.$F"; continue
 		fi
-		B=$(awk -F'\t' -v cap=$(( USABLE * 1024 )) '{ if (s + $1 <= cap) s += $1 } END{ print s+0 }' \
-			"$PLANDIR/sizes.$F")
+		B=$(awk -F'\t' -v cap=$(( USABLE * 1024 )) -v DST="$PLANDIR/dst.$F" '
+			FILENAME==DST { have[$2]=$1; next }
+			{ c = ($2 in have && have[$2]==$1) ? 0 : $1; if (s + c <= cap) s += c }
+			END{ print s+0 }' "$PLANDIR/dst.$F" "$PLANDIR/sizes.$F")
 		TOT=$(wc -l < "$PLANDIR/sizes.$F")
 		printf '%s\tpart\t%s\t%s\t%s\n' "$F" "$NF" "$((B/1024))" "$TOT" >> "$PLANDIR/plan.tsv"
 		SIM=$((SIM - B/1024)); P_FILES=$((P_FILES+NF)); P_KB=$((P_KB+B/1024)); P_PART=$((P_PART+1))
@@ -552,6 +615,23 @@ run_pass() {
 		#  ★ --remove-source-files 를 쓰지 않는다. 대조를 통과한 뒤에 지운다.
 		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE"
 		RC=$?
+
+		#  ★ rc=24 는 '보내려던 원본이 그 사이 사라졌다' 는 뜻이다. 통째로
+		#    실패로 볼 일이 아니다 -- 실제로 간 것은 갔다. 2026-09-04 에
+		#    dataflow 의 Merged 청소가 원본을 지워 이 코드가 났고, 7시간
+		#    38분어치 전송이 통째로 버려졌다.
+		#    원본과 목적지에 모두 있는 것만 남겨 그것만 대조·삭제한다.
+		if [ "$RC" -eq 24 ]; then
+			echo "⚠️  $FOLDER_NAME : 전송 도중 원본 일부가 사라졌습니다 (rc=24)."
+			echo "   간 것만 추려서 대조합니다. 사라진 것은 다음 회차에 다시 계획합니다."
+			echo "[$(date)] WARN rsync $FOLDER_NAME rc=24 (원본 사라짐). 살아남은 것만 처리" >> "$LOG_FILE"
+			while IFS= read -r rel; do
+				[ -e "$FOLDER_NAME/$rel" ] && [ -e "$DEST/$FOLDER_NAME/$rel" ] && printf '%s\n' "$rel"
+			done < "$PLANDIR/list.$FOLDER_NAME" > "$PLANDIR/alive.$FOLDER_NAME"
+			mv -f "$PLANDIR/alive.$FOLDER_NAME" "$PLANDIR/list.$FOLDER_NAME"
+			echo "   살아남은 파일 $(wc -l < "$PLANDIR/list.$FOLDER_NAME") 개"
+			[ -s "$PLANDIR/list.$FOLDER_NAME" ] && RC=0
+		fi
 
 		if [ "$RC" -ne 0 ]; then
 			N_FAIL=$((N_FAIL+1)); CONSEC_FAIL=$((CONSEC_FAIL+1))
@@ -902,15 +982,35 @@ EOF
 	# --- 이 하드를 채운다 -------------------------------------------
 	LAST_DISK=$M
 	USED_DISKS="$USED_DISKS $M"
-	run_pass "$M"
-	PASS_EL=$(( $(date +%s) - PASS_T0 ))
+
+	#  ★ 계획은 한 번 세우면 그때의 여유만큼만 담는다. 그것을 다 옮기고도
+	#    자리가 남으면 다시 계획해서 계속 채운다. 안 그러면 하드가 덜 찬 채
+	#    'stuck' 으로 끝난다 (2026-09-04 : 427 GB 를 남기고 멈췄다).
+	#
+	#    ★ 진전이 없으면 그 자리에서 그만둔다. 안 그러면 무한 반복이다.
+	D_OK=0; D_PART=0; D_FAIL=0; D_KB=0; D_SKIP=0; ROUND=0; D_EL=0
+	while : ; do
+		ROUND=$((ROUND+1))
+		[ "$ROUND" -gt 1 ] && echo "  (${ROUND}회차 — 자리가 남아 다시 계획합니다)"
+		run_pass "$M"
+		PASS_EL=$(( $(date +%s) - PASS_T0 )); D_EL=$((D_EL + PASS_EL))
+		D_OK=$((D_OK + N_OK)); D_PART=$((D_PART + N_PART)); D_FAIL=$((D_FAIL + N_FAIL))
+		D_KB=$((D_KB + MOVED_KB)); D_SKIP=$((D_SKIP + N_SKIP))
+		[ "$PASS_RC" -eq 2 ] && break                       # 하드웨어 의심
+		[ "$DRYRUN" -eq 1 ] && break
+		[ "$((N_OK + N_PART))" -eq 0 ] && break             # 진전 없음
+		AVAIL=$(disk_avail_kb "$M")
+		[ "$((AVAIL - SAFETY_MARGIN))" -lt "$MIN_USEFUL" ] && break   # 이제 찼다
+		remaining_work || break                             # 더 옮길 것이 없다
+	done
+	N_OK=$D_OK; N_PART=$D_PART; N_FAIL=$D_FAIL; MOVED_KB=$D_KB; N_SKIP=$D_SKIP
 	TOT_OK=$((TOT_OK + N_OK)); TOT_PARTRUN=$((TOT_PARTRUN + N_PART))
 	TOT_FAIL=$((TOT_FAIL + N_FAIL)); TOT_KB=$((TOT_KB + MOVED_KB))
 	TOT_SKIP=$((TOT_SKIP + N_SKIP))
 	{
 		echo "[$M]"
 		disk_block "$M"
-		echo "  이번 회차: 옮김 $N_OK 개 · 나눠담음 $N_PART 개 · 실패 $N_FAIL 개 · $(fmt_kb "$MOVED_KB") · 소요 $(fmt_sec "$PASS_EL")"
+		echo "  이번 하드: 옮김 $N_OK 개 · 나눠담음 $N_PART 개 · 실패 $N_FAIL 개 · $(fmt_kb "$MOVED_KB") · ${ROUND}회차 · 소요 $(fmt_sec "$D_EL")"
 		echo ""
 	} >> "$PLANDIR/disks.txt"
 

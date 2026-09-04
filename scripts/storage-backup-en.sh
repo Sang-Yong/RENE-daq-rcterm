@@ -62,6 +62,10 @@
 #     --dry-run        show the plan and stop. Moves and deletes nothing
 #     --disks a,b      disks to use, in order (default
 #                      /backup_hdd,/backup_hdd_2)
+#     --skip a,b       leave these sub-directories out of the backup
+#                      (default Merged). What is left out stays in the source -
+#                      removing it is dataflow's M stage
+#     --no-skip        leave nothing out (back Merged up too)
 #     --no-mail        do not queue any mail
 #     --no-bwlimit     no speed limit (default 50M)
 #     --margin 10      safety margin in GB (default 2)
@@ -104,6 +108,21 @@ QUIET_MIN="${BACKUP_QUIET_MIN:-30}"
 SKIP_LIST="${BACKUP_SKIP_LIST:-/home/frontend/sykim/backup_log/backup_skip.txt}"
 #  * Mail queue. This server has no internet, so it cannot send mail itself.
 #    Dropped here, the DAQ PC cron (scripts/mailq-send.sh) picks it up every 5 min.
+#  * Sub-directories to leave out of the backup (comma separated).
+#    --skip / --no-skip override it.
+#
+#    Merged is excluded by default for two reasons.
+#      1) It holds no physics. Measured against PRD - same events, same
+#         channels, identical waveforms (CLAUDE.md 11.149). It is a cache that
+#         lets a reprocess skip the merge step, nothing more.
+#      2) * It removes a race. The DAQ PC's dataflow sweeps Merged from the
+#         same tree (its /scratch is this machine's /data), and on 2026-09-04
+#         it deleted files this backup was in the middle of sending. rsync died
+#         with rc=24, vanished source files, losing 7 h 38 m of transfer.
+#         Nothing to collide over if we never send it.
+#
+#    An excluded folder stays in the source. Removing it is dataflow's job.
+SKIP_DIRS="${BACKUP_SKIP_DIRS-Merged}"
 MAILQ_DIR="${BACKUP_MAILQ:-/data/MAILQ}"
 MAIL_ENABLE="${BACKUP_MAIL:-1}"
 DRYRUN=0
@@ -112,6 +131,8 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run)     DRYRUN=1; shift ;;
 		--disks)       MOUNTS_RAW=$2; shift 2 ;;
+		--skip)        SKIP_DIRS=$2; shift 2 ;;
+		--no-skip)     SKIP_DIRS=""; shift ;;
 		--no-mail)     MAIL_ENABLE=0; shift ;;
 		--mailq)       MAILQ_DIR=$2; shift 2 ;;
 		--no-bwlimit)  BWLIMIT=""; shift ;;
@@ -119,10 +140,36 @@ while [ $# -gt 0 ]; do
 		--margin)      SAFETY_MARGIN=$(( ${2%[gG]} * 1024 * 1024 )); shift 2 ;;   # GB
 		--no-split)    SPLIT_MODE=never; shift ;;
 		--bwlimit)     BWLIMIT=$2; shift 2 ;;
-		-h|--help)     sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help)     sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
+
+#  * Source file list. Sub-directories named in SKIP_DIRS are left out whole.
+#    find -prune never descends into them, so a large folder costs nothing.
+#  * Does this run hold anything to back up (ignoring SKIP_DIRS)?
+#    If the "is there work left" check does not use the same rule, a run whose
+#    only remainder is Merged reads as work forever and disks get burned for it.
+has_backup_files() {     # run folder
+	local args=() d
+	if [ -n "$SKIP_DIRS" ]; then
+		local IFSO=$IFS; IFS=','
+		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
+		IFS=$IFSO
+	fi
+	[ -n "$(find "$1" "${args[@]+"${args[@]}"}" -type f -print -quit 2>/dev/null)" ]
+}
+
+list_files() {           # run from inside the run folder -> "<bytes>\t<relative path>"
+	local args=() d
+	if [ -n "$SKIP_DIRS" ]; then
+		local IFSO=$IFS; IFS=','
+		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
+		IFS=$IFSO
+	fi
+	find . "${args[@]+"${args[@]}"}" -type f -printf '%s\t%P\n' 2>/dev/null \
+		| sort -t"$(printf '\t')" -k2
+}
 
 IFS=',' read -r -a DISKS <<< "$MOUNTS_RAW"
 [ "${#DISKS[@]}" -ge 1 ] || { echo "ERROR: no disks were given." >&2; exit 2; }
@@ -281,8 +328,8 @@ remaining_work() {
 	for F in */; do
 		F=${F%/}
 		[ -d "$F" ] || continue
-		#  An empty shell of a folder has nothing to move
-		[ -n "$(find "$F" -type f -print -quit 2>/dev/null)" ] || continue
+		#  A run with nothing to back up is not work (empty shell, or only skipped dirs)
+		has_backup_files "$F" || continue
 		is_busy "$F" >/dev/null && continue
 		REMAIN_N=$((REMAIN_N+1))
 		[ "$REMAIN_N" -le 10 ] && REMAIN_LIST="$REMAIN_LIST $F"
@@ -447,10 +494,17 @@ run_pass() {
 		SZ=$(folder_size "$F") || continue
 
 		if [ "$SZ" -lt "$USABLE" ]; then
-			( cd "$F" && find . -type f -printf '%s\t%P\n' 2>/dev/null | sort -t"$(printf '\t')" -k2 ) \
-				> "$PLANDIR/sizes.$F"
+			( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
 			cut -f2- "$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
 			NF=$(wc -l < "$PLANDIR/list.$F")
+			#  * Nothing to send means nothing to plan.
+			#    With Merged in SKIP_DIRS a run can end up holding only skipped
+			#    files. Planned as a zero-file entry it counts as a partial
+			#    backup every round and the disk loops forever (3,531 rounds in
+			#    testing before this was caught).
+			if [ "$NF" -eq 0 ]; then
+				rm -f "$PLANDIR/list.$F" "$PLANDIR/sizes.$F"; continue
+			fi
 			printf '%s\tfull\t%s\t%s\n' "$F" "$NF" "$SZ" >> "$PLANDIR/plan.tsv"
 			SIM=$((SIM - SZ)); P_FILES=$((P_FILES+NF)); P_KB=$((P_KB+SZ)); P_FULL=$((P_FULL+1))
 			continue
@@ -473,17 +527,31 @@ run_pass() {
 		fi
 
 		#  Build a list of just the files that fit (step 2 uses this list as-is)
-		( cd "$F" && find . -type f -printf '%s\t%P\n' 2>/dev/null | sort -t"$(printf '\t')" -k2 ) \
-			> "$PLANDIR/sizes.$F"
-		awk -F'\t' -v cap=$(( USABLE * 1024 )) '{ if (s + $1 <= cap) { s += $1; print $2 } }' \
-			"$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
+		( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
+		#  * A file already at the destination with the same size costs no new
+		#    space. Without this, files a failed earlier pass left behind fill
+		#    the whole quota, so the pass reports a move and the disk does not
+		#    shrink by a byte. On 2026-09-04 that "moved" 12,683 files in 38
+		#    seconds and stopped with 427 GB still free.
+		( [ -d "$DEST/$F" ] && cd "$DEST/$F" && list_files ) > "$PLANDIR/dst.$F" 2>/dev/null \
+			|| : > "$PLANDIR/dst.$F"
+		#  * Not the NR==FNR idiom: when the destination is empty - which is the
+		#    normal case - the first file has no lines, so awk takes the second
+		#    file for the first and emits nothing. Tell them apart by name.
+		awk -F'\t' -v cap=$(( USABLE * 1024 )) -v DST="$PLANDIR/dst.$F" '
+			FILENAME==DST { have[$2]=$1; next }
+			{ c = ($2 in have && have[$2]==$1) ? 0 : $1
+			  if (s + c <= cap) { s += c; print $2 } }' \
+			"$PLANDIR/dst.$F" "$PLANDIR/sizes.$F" > "$PLANDIR/list.$F"
 		NF=$(wc -l < "$PLANDIR/list.$F")
 		if [ "$NF" -eq 0 ]; then
 			N_SKIP=$((N_SKIP+1)); SKIPPED_LIST="$SKIPPED_LIST $F"
 			rm -f "$PLANDIR/list.$F" "$PLANDIR/sizes.$F"; continue
 		fi
-		B=$(awk -F'\t' -v cap=$(( USABLE * 1024 )) '{ if (s + $1 <= cap) s += $1 } END{ print s+0 }' \
-			"$PLANDIR/sizes.$F")
+		B=$(awk -F'\t' -v cap=$(( USABLE * 1024 )) -v DST="$PLANDIR/dst.$F" '
+			FILENAME==DST { have[$2]=$1; next }
+			{ c = ($2 in have && have[$2]==$1) ? 0 : $1; if (s + c <= cap) s += c }
+			END{ print s+0 }' "$PLANDIR/dst.$F" "$PLANDIR/sizes.$F")
 		TOT=$(wc -l < "$PLANDIR/sizes.$F")
 		printf '%s\tpart\t%s\t%s\t%s\n' "$F" "$NF" "$((B/1024))" "$TOT" >> "$PLANDIR/plan.tsv"
 		SIM=$((SIM - B/1024)); P_FILES=$((P_FILES+NF)); P_KB=$((P_KB+B/1024)); P_PART=$((P_PART+1))
@@ -566,6 +634,24 @@ run_pass() {
 		#  * --remove-source-files is not used. Deletion happens after verification.
 		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE"
 		RC=$?
+
+		#  * rc=24 means source files vanished while they were being sent. That
+		#    is not a whole-run failure - what went, went. On 2026-09-04
+		#    dataflow's Merged sweep deleted the source out from under this and
+		#    7 h 38 m of transfer was thrown away over it.
+		#    Keep only what is present in both source and destination, and
+		#    verify and delete just those.
+		if [ "$RC" -eq 24 ]; then
+			echo "WARNING: $FOLDER_NAME : some source files vanished mid-transfer (rc=24)."
+			echo "   Keeping what arrived; the rest is replanned next round."
+			echo "[$(date)] WARN rsync $FOLDER_NAME rc=24 (vanished sources). Handling survivors" >> "$LOG_FILE"
+			while IFS= read -r rel; do
+				[ -e "$FOLDER_NAME/$rel" ] && [ -e "$DEST/$FOLDER_NAME/$rel" ] && printf '%s\n' "$rel"
+			done < "$PLANDIR/list.$FOLDER_NAME" > "$PLANDIR/alive.$FOLDER_NAME"
+			mv -f "$PLANDIR/alive.$FOLDER_NAME" "$PLANDIR/list.$FOLDER_NAME"
+			echo "   survivors: $(wc -l < "$PLANDIR/list.$FOLDER_NAME") files"
+			[ -s "$PLANDIR/list.$FOLDER_NAME" ] && RC=0
+		fi
 
 		if [ "$RC" -ne 0 ]; then
 			N_FAIL=$((N_FAIL+1)); CONSEC_FAIL=$((CONSEC_FAIL+1))
@@ -916,15 +1002,36 @@ EOF
 	# --- fill this disk ---------------------------------------------
 	LAST_DISK=$M
 	USED_DISKS="$USED_DISKS $M"
-	run_pass "$M"
-	PASS_EL=$(( $(date +%s) - PASS_T0 ))
+
+	#  * A plan only covers the free space at the moment it was built. If room
+	#    remains once it has been carried out, plan again and keep filling.
+	#    Otherwise the disk is left short and the pass ends as 'stuck'
+	#    (2026-09-04: it stopped with 427 GB free).
+	#
+	#    * Stop the moment a round makes no progress, or this never ends.
+	D_OK=0; D_PART=0; D_FAIL=0; D_KB=0; D_SKIP=0; ROUND=0; D_EL=0
+	while : ; do
+		ROUND=$((ROUND+1))
+		[ "$ROUND" -gt 1 ] && echo "  (round ${ROUND} - room left, planning again)"
+		run_pass "$M"
+		PASS_EL=$(( $(date +%s) - PASS_T0 )); D_EL=$((D_EL + PASS_EL))
+		D_OK=$((D_OK + N_OK)); D_PART=$((D_PART + N_PART)); D_FAIL=$((D_FAIL + N_FAIL))
+		D_KB=$((D_KB + MOVED_KB)); D_SKIP=$((D_SKIP + N_SKIP))
+		[ "$PASS_RC" -eq 2 ] && break                       # suspect the hardware
+		[ "$DRYRUN" -eq 1 ] && break
+		[ "$((N_OK + N_PART))" -eq 0 ] && break             # no progress
+		AVAIL=$(disk_avail_kb "$M")
+		[ "$((AVAIL - SAFETY_MARGIN))" -lt "$MIN_USEFUL" ] && break   # full now
+		remaining_work || break                             # nothing left to move
+	done
+	N_OK=$D_OK; N_PART=$D_PART; N_FAIL=$D_FAIL; MOVED_KB=$D_KB; N_SKIP=$D_SKIP
 	TOT_OK=$((TOT_OK + N_OK)); TOT_PARTRUN=$((TOT_PARTRUN + N_PART))
 	TOT_FAIL=$((TOT_FAIL + N_FAIL)); TOT_KB=$((TOT_KB + MOVED_KB))
 	TOT_SKIP=$((TOT_SKIP + N_SKIP))
 	{
 		echo "[$M]"
 		disk_block "$M"
-		echo "  This pass: moved $N_OK · spanned $N_PART · failed $N_FAIL · $(fmt_kb "$MOVED_KB") · took $(fmt_sec "$PASS_EL")"
+		echo "  This disk: moved $N_OK · spanned $N_PART · failed $N_FAIL · $(fmt_kb "$MOVED_KB") · ${ROUND} round(s) · took $(fmt_sec "$D_EL")"
 		echo ""
 	} >> "$PLANDIR/disks.txt"
 

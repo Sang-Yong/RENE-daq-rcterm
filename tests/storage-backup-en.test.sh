@@ -384,6 +384,97 @@ else bad "틀린 경고를 낸다" "$(grep -A1 '쓸 하드' "$T/out.txt" | head 
 chk "실제로 옮겼다" "$(n_src_files)" "0"
 teardown
 
+# ---------------------------------------------------------------------
+echo ""; echo "[19] ★ A : Merged 는 백업하지 않는다 (기본값)"
+setup 2 3 100000 100000
+for r in 000001 000002; do mkdir -p "$SRC/$r/Merged"
+  for i in 1 2 3 4 5; do dd if=/dev/zero of="$SRC/$r/Merged/MERGED_$r.root.0000$i" bs=1024 count=200 status=none; done; done
+find "$SRC" -exec touch -d '1 day ago' {} + 2>/dev/null
+run_sut
+chk "종료코드 0" "$RC" "0"
+chk "★ 하드에 Merged 가 없다" "$(find "$T/hdd1" "$T/hdd2" -type d -name Merged 2>/dev/null | wc -l)" "0"
+chk "FADC 는 담겼다" "$(find "$T"/hdd*/RENE_data_backup -name 'FADC_*' 2>/dev/null | wc -l)" "6"
+chk "PRD 도 담겼다"  "$(find "$T"/hdd*/RENE_data_backup -name 'PRD_*' 2>/dev/null | wc -l)" "6"
+chk "★ Merged 는 원본에 남는다 (dataflow 몫)" "$(find "$SRC" -name 'MERGED_*' | wc -l)" "10"
+chk "FADC 는 원본에서 지워졌다" "$(find "$SRC" -name 'FADC_*' | wc -l)" "0"
+#  ★ 남은 것이 Merged 뿐인 런을 '아직 남았다' 로 읽으면 회차가 무한 반복된다.
+#    (실제로 3,531 회차까지 갔다.) 회차 수로 못박는다.
+NR_=$(grep -c 'To be written to this disk' "$T/out.txt")
+if [ "$NR_" -le 3 ]; then ok "★ 회차가 폭주하지 않는다 ($NR_ 회)"
+else bad "회차가 폭주했다" "$NR_ 회"; fi
+teardown
+
+echo ""; echo "[20] --no-skip 이면 Merged 도 담는다"
+setup 1 3 100000 100000
+mkdir -p "$SRC/000001/Merged"
+for i in 1 2 3; do dd if=/dev/zero of="$SRC/000001/Merged/MERGED_000001.root.0000$i" bs=1024 count=200 status=none; done
+find "$SRC" -exec touch -d '1 day ago' {} + 2>/dev/null
+run_sut --no-skip
+chk "종료코드 0" "$RC" "0"
+chk "Merged 가 담겼다" "$(find "$T"/hdd*/RENE_data_backup -name 'MERGED_*' 2>/dev/null | wc -l)" "3"
+chk "원본이 비었다" "$(n_src_files)" "0"
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[21] ★ B : 이미 목적지에 있는 파일은 용량으로 세지 않는다"
+#  2026-09-04 에 겪은 것 : 앞 회차가 보내 놓고 실패해 원본이 남은 파일들로
+#  할당량이 다 차서 '옮겼다'고 하고는 하드가 한 바이트도 안 줄었다.
+setup 6 4 900 100000
+#  하드1 에 첫 런을 미리 넣어 둔다 (앞 회차가 보내고 실패한 모양)
+mkdir -p "$T/hdd1/RENE_data_backup/000001/PRD"
+cp "$SRC/000001"/FADC_* "$T/hdd1/RENE_data_backup/000001/" 2>/dev/null
+cp "$SRC/000001/PRD"/*  "$T/hdd1/RENE_data_backup/000001/PRD/" 2>/dev/null
+BEFORE=$(src_manifest)
+run_sut
+chk "종료코드 0" "$RC" "0"
+chk "원본이 비었다" "$(n_src_files)" "0"
+if [ "$BEFORE" = "$(disk_manifest)" ]; then ok "합쳐서 원본과 완전히 같다"
+else bad "파일이 어긋났다" "$(diff <(echo "$BEFORE") <(disk_manifest) | head -3 | tr '\n' ' ')"; fi
+chk "★ 겹쳐 담기지 않았다" "$(disk_manifest | cut -f1 | sort | uniq -d | wc -l)" "0"
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[22] ★ C : 자리가 남으면 한 하드 안에서 다시 계획해 끝까지 채운다"
+#  ★ 다회차가 실제로 필요한 상황은 이것이다 — 계획은 폴더 용량(du)으로 자리를
+#    잡는데 그 안에 백업하지 않는 Merged 가 들어 있어, 실제로 쓰는 자리는 훨씬
+#    적다. 그래서 한 계획을 다 옮기고도 하드에 자리가 남는다.
+setup 8 2 3000 100000
+for r in $(seq 1 8); do d=$(printf '%06d' $r); mkdir -p "$SRC/$d/Merged"
+  for i in 1 2 3 4 5; do dd if=/dev/zero of="$SRC/$d/Merged/MERGED_$d.root.0000$i" bs=1024 count=200 status=none; done; done
+find "$SRC" -exec touch -d '1 day ago' {} + 2>/dev/null
+run_sut
+chk "종료코드 0" "$RC" "0"
+chk "백업 대상(FADC·PRD)은 다 옮겨졌다" "$(find "$SRC" \( -name 'FADC_*' -o -name 'PRD_*' \) | wc -l)" "0"
+chk "Merged 는 원본에 남는다" "$(find "$SRC" -name 'MERGED_*' | wc -l)" "40"
+if grep -q 'room left, planning again' "$T/out.txt"; then ok "★ 다시 계획했다고 알린다"
+else bad "다시 계획하지 않았다" "$(grep -c 'To be written to this disk' "$T/out.txt") 번만 계획"; fi
+NR_=$(grep -c 'To be written to this disk' "$T/out.txt")
+if [ "$NR_" -ge 2 ]; then ok "계획을 두 번 이상 세웠다 ($NR_ 번)"
+else bad "계획이 한 번뿐이다"; fi
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[23] ★ D : 전송 중 원본이 사라져도(rc=24) 간 것은 살린다"
+setup 2 4 100000 100000
+mkdir -p "$T/fakebin"
+#  진짜 rsync 를 돌린 뒤 원본 하나를 지우고 24 로 끝낸다 = 'vanished source files'
+cat > "$T/fakebin/rsync" <<RS
+#!/bin/bash
+/usr/bin/rsync "\$@"
+rm -f "$SRC/000001/FADC_000001.root.00002"
+exit 24
+RS
+chmod +x "$T/fakebin/rsync"
+PATH="$T/fakebin:$PATH" run_sut
+chk "★ 통째로 실패하지 않는다 (exit 0)" "$RC" "0"
+if grep -q 'source files vanished mid-transfer' "$T/out.txt"; then ok "사유를 밝힌다"
+else bad "안내가 없다" "$(grep -E '❌|⚠️' "$T/out.txt" | head -2)"; fi
+if grep -q 'survivors:' "$T/out.txt"; then ok "살아남은 개수를 센다"
+else bad "개수 안내가 없다"; fi
+chk "간 파일은 하드에 있다" "$([ -e "$T/hdd1/RENE_data_backup/000001/FADC_000001.root.00001" ] && echo yes || echo no)" "yes"
+chk "★ 원본을 지웠다 (진전이 있었다)" "$(find "$SRC/000001" -name 'FADC_*' 2>/dev/null | wc -l)" "0"
+teardown
+
 echo ""
 echo "=========================================================="
 printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"
