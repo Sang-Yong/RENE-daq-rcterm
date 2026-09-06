@@ -1970,25 +1970,19 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 그래서 돌던 bash 는 옛 inode 를 그대로 붙들고 §11.42 의 사고가 나지 않는다.
 다만 **다음 실행부터** 새 코드가 적용되므로, 지금 도는 작업에는 반영되지 않는다.
 
-#### 11.142 ★★ 여기서 이어받는다 — 2026-09-03 01:00 기준
+#### 11.142 ★★ 여기서 이어받는다 — 2026-09-07 기준
 
 **세션을 새로 열면 §0.0 다음에 이 절만 읽으면 된다.**
 
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4322 · tmux 세션 'daq'                        tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3 (run 4322 를 따라간다)
-이동       dataflow --follow  (마운트 가드 있음, §11.135)
-재처리     /Data_ssd/LOG/reprocess-priority.sh   지금 run 4245 (--from 0 --to 8016)
-경희대백업 /Data_ssd/LOG/backup-priority.sh      지금 run 4240 RAW 22,874 개
-감시       chainwatch cron 5분 · sheetlog cron 매시 07분
-           ★ mailq-send cron 5분 (새로 넣었다, §11.144)
-저장소서버 ★ 외장하드 백업이 돌고 있다 (2026-09-03 02:16 시작, pid 77524/77526)
-             run 002443 을 8,699 개(1.70 TB)로 잘라 /backup_hdd 에 담는 중. 50 MB/s
-             약 10시간 뒤 하드가 차면 메일이 오고 /backup_hdd_2 로 저절로 이어진다
-             ssh 와 무관하게 산다 (부모가 init 이다. 실측 확인)
-             진행 : ssh store 'tail -c 300 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -1' 
+수집       run 4332 · tmux 세션 'daq'                      tmux attach -t daq
+후처리     postrun --follow --jobs 3 --lag 3
+이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
+재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
+백업       저장소 서버 data_backup_simple_code9.sh          하드2 를 채우는 중
+감시       chainwatch cron 5분 · sheetlog 매시 07분 · mailq-send 5분
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -1996,66 +1990,63 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 ```bash
 cat /Data/LOG/rcterm.hb                 # 수집
 scripts/chainwatch.sh --status          # 후처리 사슬 · 계수율
-scripts/runcheck.sh --last 2            # 끝난 런 대조
-scripts/mailq-send.sh --status          # 스토리지 백업 메일 큐
-tail -2 /Data_ssd/LOG/reprocess-priority.log
-tail -2 /Data_ssd/LOG/backup-priority.log
+scripts/mailq-send.sh --status          # 저장소 서버가 보낸 메일 큐
+tail -2 /Data_ssd/LOG/reprocess-old42-{A,B}.log
 ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'
+ssh store 'tail -c 400 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -3'
 ```
 
-**진행 중인 큰 작업 둘**
-
-`4200번대 PRD 결손 재처리 + 경희대 백업` — 백업이 없는 런을 우선으로 돌린다
-(§11.139). 둘 다 재개 가능하고 nice/ionice 로 양보한다.
+**최근에 크게 바뀐 것 넷** (자세한 것은 각 절)
 
 ```
-완결   4280 · 4241 · 4224 · 4242 · 4243 · 4246
-진행   재처리 4245 · 백업 4240
-남음   4240(2231) · 4244(15589) · 4219(6035)
-불가   4138:00009 — 원본이 손상됐다 (§11.107)
+§11.143~11.147  외장하드 백업을 하드 2개 순차로 + 결과를 메일로
+                (그 서버는 인터넷이 없어 /data/MAILQ 에 떨구고 DAQ PC cron 이 보낸다)
+§11.149~11.150  Merged 에 물리 정보가 없음을 실측 -> dataflow 에 M단계(청소) 추가
+                /scratch 여유 19 T -> 58 T
+§11.151~11.152  백업이 rc=24 로 끊긴 사고. 원인은 내가 켠 청소가 원본을 지운 것.
+                Merged 를 백업에서 빼고(A) · 이미 있는 파일은 안 세고(B) ·
+                자리가 남으면 다시 계획하고(C) · rc=24 는 생존자만 살린다(D)
+§11.153         옛 런 42개 조사 -> 재처리 21 · 격리 2 · merge 불가 4 · 할 것 없음 16
 ```
 
-**★ 외장하드 백업이 돌고 있다 — 다음에 볼 것은 첫 하드 교체다**
-
-2026-09-03 02:16 에 시작했다. 권한은 사용자가 조치했다 — 마운트 루트는 root 로
-두고 **`RENE_data_backup` 만 만들어 소유권을 넘기는 형태**다(§11.148).
+**용량 (2026-09-07)**
 
 ```
-지금        run 002443 을 8,699 개(1.70 TB)로 잘라 /backup_hdd 에 담는 중, 50 MB/s
-약 10시간 뒤  하드가 차면 메일 -> /backup_hdd_2 로 저절로 이어진다
-확인        ssh store 'tail -c 300 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -1'
-            ssh store 'df -h /backup_hdd /backup_hdd_2'
+/Data_ssd  3.1 T 여유      /scratch  58 T 여유 (청소 전 19.4 T)
+외장하드1  1.7 T / 100% 참 (뽑아 보관 대상)    외장하드2  1.1 T / 60%
 ```
 
-**★ 하드가 실제로 차서 넘어가는 순간은 아직 아무도 못 봤다.** 그것이 이 변경의
-핵심이므로 첫 교체 메일이 오면 로그를 확인할 것. 원본은 **한 런의 전송과 대조가
-다 끝난 뒤에만** 지우므로, 그때까지 `/data/RAW/002443` 은 그대로 있다.
-
-**사람이 해야 하는 것** (전부 root 가 필요해 이 세션에서 못 했다)
+**사람이 해야 하는 것**
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| NM 프로파일 주소를 `.71` 로 되돌린다 | **재부팅하면 `.75` 로 떠서 공인망이 끊긴다** | §11.132 |
+| 뽑은 하드에 라벨 (시리얼 병기) | UUID 는 포맷하면, lsblk 시리얼은 꽂을 때마다 바뀐다. **`udevadm` 시리얼만 안 바뀐다** | §11.153 |
+| 시트의 `Disk Label` · `Storage Location` | 내가 알 수 없는 값이다 | — |
+| `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
+| NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |
 | fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |
-| `enp0s31f6`·`enp1s0` 프로파일의 `.71` 정리 | 셋이 같은 주소를 갖고 있다 | §11.132 |
-| `/backup_hdd*` 두 개를 fstab 에 UUID 로 | 지금은 손으로 마운트라 rename 에 무방비 | §11.124 |
 
 **★ 이어받을 때 밟기 쉬운 것**
 
 ```
-1  ★ 저장소 서버에서 무언가 띄우기 전에 이미 도는 것부터 볼 것 (§11.141)
-     /data/RAW 는 우리 /scratch/RAW 와 같은 곳이다. 아카이브가 원본을 지운다
-2  pgrep -f 로 프로세스를 찾지 말 것. 세 방향으로 오탐한다 —
-     저장소 경로에 'rcterm' 이 들어 있고, $( ) 서브셸이 잡히고,
-     ★ 나를 띄운 셸의 argv 까지 잡힌다. pgrep -x 를 쓰거나 계보를 빼라
+1  ★★ 두 기계가 같은 트리를 만진다. 저장소 서버의 /data = 이 PC 의 /scratch.
+     서로의 프로세스를 볼 수 없다. 지우는 작업을 켜기 전에 저쪽에서 백업이
+     도는지 반드시 볼 것 (§11.151 에서 7시간 38분을 날렸다)
+2  ★ postrun 에는 잠금이 없다. 두 벌이 같은 런을 처리하면 carry 가 어긋난다.
+     띄우기 전에 pgrep 으로 확인할 것
+3  pgrep -f 로 프로세스를 찾지 말 것. 네 방향으로 오탐한다 —
+     저장소 경로의 'rcterm' · $( ) 서브셸 · 나를 띄운 셸의 argv ·
+     ★ 이미 죽어 ps 가 빈손인 것. pgrep -x 를 쓰거나 계보를 빼라
      (§11.67 · §11.119 · §11.141 · §11.145)
-3  운영 디렉터리에서 소스를 고치지 말 것. 별도 클론에서 고치고 git pull (§8)
-     git 은 새 inode 로 만들어 돌고 있는 스크립트에 안전하다 (실측, §11.139)
-4  0 Hz 이면 보드를 파기 전에 HV 부터 물을 것 (§11.131)
-5  bash `local a=$1 b="${a}"` 는 b 가 빈다. 나눠 쓸 것 (§11.139)
-6  du -sb 로 두 파일시스템을 대조하지 말 것 — 디렉터리 크기가 다르다 (§11.140)
-7  ★ cron 이 도는 메일 큐(/scratch/MAILQ)에 '보내지 않을 파일' 을 두지 말 것.
-     넣는 순간 그것은 보낼 메일이다 (§11.146 에서 한 통 잘못 나갔다)
+4  ★ pkill -f 는 자기 셸을 죽인다. PID 로만 죽일 것 (이 세션에서 세 번 밟았다)
+5  ★ ps -eo pid= -p <pid> 는 -e 가 이겨 모든 프로세스를 낸다. 조건이 영원히 참이다.
+     ps -p <pid> 로 볼 것
+6  운영 디렉터리에서 소스를 고치지 말 것. 별도 클론에서 고치고 git pull (§8)
+7  0 Hz 이면 보드를 파기 전에 HV 부터 물을 것 (§11.131)
+8  bash `local a=$1 b="${a}"` 는 b 가 빈다. 나눠 쓸 것 (§11.139)
+9  awk 의 NR==FNR 은 첫 파일이 비면 무너진다. FILENAME 으로 가를 것 (§11.152)
+10 du -sb 로 두 파일시스템을 대조하지 말 것 (§11.140)
+11 cron 이 도는 메일 큐에 '보내지 않을 파일' 을 두지 말 것 (§11.146)
 ```
 
 ### 2026-08-28 — `/backup_hdd` 를 되살리고, 시트 등재를 자동화했다

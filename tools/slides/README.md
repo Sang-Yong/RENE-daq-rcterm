@@ -7,6 +7,8 @@
 python3 tools/slides/make_overview_ko.py      # 종합 (한글)   23장
 python3 tools/slides/make_overview_en.py      # 종합 (영문)   22장
 python3 tools/slides/make_operations_ko.py    # 운용자용 (한글) 12장
+python3 tools/slides/make_review_dev_ko.py    # 종합 리뷰 · 개발 측면 10장
+python3 tools/slides/make_review_ops_ko.py    # 종합 리뷰 · 운영 측면 12장
 python3 tools/slides/audit.py docs/*.pptx     # 배치 점검
 ```
 
@@ -19,6 +21,8 @@ python3 tools/slides/audit.py docs/*.pptx     # 배치 점검
 | `deck.py` | 색·글꼴·배치·그림 조각. 새 발표자료는 이것만 import 하면 된다 |
 | `make_overview_ko.py` · `_en.py` | 종합 — 구조 / 개선한 것 / 실측 / 앞으로 |
 | `make_operations_ko.py` | 운용자용 — 화면 읽는 법, 조작, 알람, 대처 |
+| `make_review_dev_ko.py` | 종합 리뷰(개발) — 후처리 · 이동 · 10G · 외장하드 · Merged 청소를 **왜 그렇게 만들었나**로 |
+| `make_review_ops_ko.py` | 종합 리뷰(운영) — **코드를 모르는 사람이 읽는다**. 용어는 그 자리에서 풀고, 비유와 그림으로 |
 | `audit.py` | 슬라이드 밖으로 나간 도형과 넘치는 글상자를 찾는다 |
 
 ## `audit.py` 가 필요한 이유
