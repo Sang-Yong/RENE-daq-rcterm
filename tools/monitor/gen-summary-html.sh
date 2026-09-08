@@ -123,9 +123,14 @@ awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v SRC="$SRC" '
       acc[$1 $2]   = $8
       rll[$1]      = $10
       src[$1]      = $3
-      lihe[$1]     = $14
-      lihestat[$1] = $16
-      fns[$1]      = $18
+      #  fast-n · Li/He 는 **n-Gd 행**만 싣는다. n-H 는 후보 6만 개의 94 % 가 우발이라
+      #  Li/He 적합이 잡음(수백 ± 수천)이고 fast-n 사이드밴드도 n-H 창의 것이다.
+      #  태그를 안 가리면 정렬상 뒤에 오는 _nH 가 덮어써 표에 n-H 값이 실린다(실측).
+      if ($2 == "_nGd") {
+         lihe[$1]     = $14
+         lihestat[$1] = $16
+         fns[$1]      = $18
+      }
       next
    }
 
