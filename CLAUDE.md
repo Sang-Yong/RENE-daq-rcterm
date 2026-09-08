@@ -937,6 +937,53 @@ FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까�
 `veto-history.sh 4335 4335` 를 돌려 `/Data_ssd/LOG/veto-check-4335.log` 에 S_THR 과 패널
 반응을 남긴다. 적용은 rcterm 이 런 시작 때 파일을 복사하므로 **다음 로테이션(09-10 04:46)**.
 
+#### 11.169 ★★ 감시자 재기동 직후 FADC 보드가 USB 에서 떨어졌다 — 문턱 탓이 아니다 (2026-09-09 05:18~05:27)
+
+사용자 지시로 새 THR 을 바로 적용하려고 감시자를 세웠다 올렸다. **run 4334 는 정상
+마감**됐다(`kill -TERM` 한 번, exit 0, DB 에 stime·etime·nfadc 1,803,772 기록).
+그런데 **다음 다섯 런이 연속 실패**했고 감시자가 포기했다.
+
+```
+05:18:10  run 4334 ENDRUN 의 마지막 읽기    FADC  USB3Read LIBUSB_ERROR_TIMEOUT [sid=3]   ← 4332·4333 엔 없다
+05:18:45  run 4335 trigger started 직후     FADC  USB3Read LIBUSB_ERROR_IO      [sid=3]   → exit 2
+05:19~22  run 4336·4337·4338·4339          FADC  CupFADCT::Open: open falied, check connection and power
+05:22:20  usb-recover.sh → 1 (not-usb)    감시자 FATAL. 알람 + 전문가 11명에게 recovery_failed 메일
+05:24:57  src/usbreset (손으로)            FADC 만 device descriptor read error -110 반복
+05:26:24  usb 2-1.4 USB disconnect        lsusb 에서 NKFADC500 이 사라짐. TCB·M64ADC 는 그대로
+```
+
+**★ 문턱 변경과 무관하다.** 새 THR 은 SADC(veto) 쪽이고, 죽은 것은 FADC 보드의 USB
+링크다. 그리고 첫 오류(05:18:10)는 **새 config 가 한 번도 적용되기 전**, 4334 를
+마감하는 읽기에서 났다. 4335 의 TCB 로그는 SADCT THR 이 새 값(`180 180 150 …`)으로
+정상 설정되고 `trigger started` 까지 간 뒤 FADC 읽기에서 죽었다.
+
+**§11.119 와 같은 계열이고 답도 같다 — 보드 크레이트 전원 재투입.** usbreset 뒤에도
+커널이 descriptor 를 못 읽는다(`error -110` → `device not accepting address, error -71`).
+USB 링크가 아니라 보드 안이 멈춘 것이다.
+
+**★ `usb-recover.sh` 가 또 못 잡았다 (§11.120 에 이어 두 번째). 구멍이 둘 더 있다.**
+
+```
+① 60분 안의 로그만 보는데 /Data_ssd/LOG 만 본다.  postrun 의 logrotate 가 4335~4338 을
+   /scratch/DAQ_LOG/RAW_log/ 로 이미 옮겨 놓아 LIBUSB_ERROR_IO 줄이 시야 밖이었다
+② 남아 있던 4339 의 'CupFADCT::Open: open falied, check connection and power' 는 패턴에 없다
+```
+
+**사람이 할 것 (현장)** — §11.119 의 순서 그대로
+
+```
+1  보드 크레이트 전원 OFF → 10초 이상 → ON.  lsusb | grep Anchor 로 셋 다 보이는지
+2  src/NOTICE_CODE_RUN.sh        전원을 내리면 트리거 설정이 날아간다. 안 하면 23,000 Hz (§11.119)
+3  src/usbreset  →  확인 런    rcterm --params config/rcterm.params --no-db --run 999999 --max-runs 1 --run-length 0.05 --quiet
+                                합격 : exit 0 · 약 1000 Hz · TCB/FADC/SADC 로그에 LIBUSB 0건
+                                ★ 이 확인 런이 새 THR 의 첫 적용이기도 하다 (veto 계수율을 같이 본다)
+4  감시자 재기동                tmux pane daq:1.2 에서 (명령은 rcsupervisor.log 의 launch 줄 그대로)
+5  scripts/daq-alarm.sh --silence
+```
+
+DB : 4335~4339 는 `onlbit=0 · boot failed`. 4335 만 원시 파일 2개(서브런 0, 사실상 빈 것)가 남아
+있어 `badrun.sh --scan --run 4335` 대상이다.
+
 #### 11.167 ★★ 문턱값 이력과 VETO 패널 추이 — "08-26 에 문턱을 낮췄는데 뮤온이 줄었다"
 
 사용자 질문에 PRD 의 `S_THR`/`F_THR` 와 설정 파일 4,213 개를 대조했다(`tools/psd/veto-history.sh`,
@@ -2342,14 +2389,15 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 그래서 돌던 bash 는 옛 inode 를 그대로 붙들고 §11.42 의 사고가 나지 않는다.
 다만 **다음 실행부터** 새 코드가 적용되므로, 지금 도는 작업에는 반영되지 않는다.
 
-#### 11.142 ★★ 여기서 이어받는다 — 2026-09-09 00:30 기준
+#### 11.142 ★★ 여기서 이어받는다 — 2026-09-09 05:30 기준
 
 **세션을 새로 열면 §0.0 다음에 이 절만 읽으면 된다.**
 
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4332 · tmux 세션 'daq'                      tmux attach -t daq
+수집       ★ 정지 (05:22 감시자 FATAL). FADC 보드 USB 이탈 → 크레이트 전원 재투입 필요 (§11.169)
+           tmux 세션 'daq' 는 살아 있다                    tmux attach -t daq
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
