@@ -60,7 +60,7 @@ getp() {          # getp <키> <기본값>
 MU_SHOWER_NPE=$(getp mu_shower_npe 20000)
 LIHE_FIT_LO_S=$(getp lihe_fit_lo_s 0.002)
 LIHE_FIT_HI_S=$(getp lihe_fit_hi_s 10.0)
-LIHE_MIN_CAND=$(getp lihe_min_cand 100)
+LIHE_MIN_CAND=$(getp lihe_min_cand 50)
 FN_E_LO_MEV=$(getp fn_e_lo_mev 12.0)
 FN_E_HI_MEV=$(getp fn_e_hi_mev 50.0)
 LIHE_LI_FRAC=$(getp lihe_li_frac 1.0)

@@ -337,8 +337,10 @@ static bool LinearExtrap(const std::vector<double> &promptMev, double lo, double
    TH1D h("hfn", "", nb, lo, hi);
    h.SetDirectory(nullptr);
    for (double e : promptMev) h.Fill(e);
+   //  χ² 적합. 우도("L")는 pol1 이 음수를 예측하는 빈에서 실패해 rc≠0 이 되기
+   //  쉽다(run 4305 n-H 사이드밴드 1,602 개에서 실측). 표본 5 개 이상만 받는다.
    TF1 f("ffn", "pol1", lo, hi);
-   int rc = h.Fit(&f, "QRN0L");
+   int rc = h.Fit(&f, "QRN0");
    if (rc != 0) return false;
    //  밀도(빈당 계수/빈 폭)로 적분해야 개수가 된다
    n = f.Integral(sLo, sHi) / h.GetBinWidth(1);
@@ -534,8 +536,6 @@ static void Impl(const std::vector<int> &runs, const TString &out,
             for (double e : sideE) sideMev.push_back(NpeToMeV(e));
             double nLin = -1;
             bool okLin = LinearExtrap(sideMev, fnELoMev, fnEHiMev, sigLo, sigHi, nLin);
-            r.nFnSideLin    = okLin ? nLin : nFlat;
-            r.nFnSideScaled = (nFlat >= 0) ? 0.5 * (nFlat + r.nFnSideLin) : -1;
             //  사이드밴드 에너지 구간에 든 사건 중 포화 사건 비율 (schema 1 이면 -1)
             if (dstSchema >= 2) {
                long long nSat = 0, nSg = 0;
@@ -543,6 +543,14 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                for (const auto &e : sing) if (e._pe_sum >= wf.s1lo && e._pe_sum <= wf.s1hi) nSg++;
                r.fnSatFrac = (nSat + nSg > 0) ? (double)nSat / (double)(nSat + nSg) : 0;
             }
+            r.nFnSideLin = okLin ? nLin : nFlat;
+            //  ★ 사이드밴드가 대부분 포화 사건이면(실측 run 4305 : 100 %) 에너지 축이
+            //    잘린 적분값이라 스펙트럼 모양이 뜻을 잃는다 -- 잘린 값이 위쪽에 쌓여
+            //    기울기가 양수가 되고 1차 외삽이 0 으로 떨어진다(실측 n-Gd 7.7 대 0.0).
+            //    그때는 0차(평평) 값만 쓴다. 1차 값은 정보로 남긴다.
+            const bool energyAxisClipped = (r.fnSatFrac > 0.5);
+            r.nFnSideScaled = (nFlat < 0) ? -1
+                            : energyAxisClipped ? nFlat : 0.5 * (nFlat + r.nFnSideLin);
             if (wf.s1lo < w2.s1hi)
                printf("  [WARN] run %d%-5s : fast-n 사이드밴드 하한(%.0f NPE)이 S1 신호창 "
                       "상한(%.0f NPE)보다 낮다. n_fn_side 에 IBD prompt 가 섞인다\n",
@@ -571,9 +579,10 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                 replaced ? "REDO" : " NEW", run, tag.c_str(),
                 r.nPaired, r.nIbd, r.nIbdAcci, r.nAcciRp, r.nMultRej, r.nSingle, r.liveS, r.rll);
          printf("         ★예비 : lihe=%.1f±%.1f (%s)  rev=%.1f±%.1f  fn_side=%lld "
-                "(평평 %.1f / 선형 %.1f, sat_frac %.2f)  psd γ %.4f±%.4f  n-like %lld\n",
+                "(환산 %.1f, 선형 %.1f, sat_frac %.2f%s)  psd γ %.4f±%.4f  n-like %lld\n",
                 r.nLihe, r.eLihe, r.liheStat.c_str(), r.nLiheRev, r.eLiheRev,
-                r.nFnSide, 2 * r.nFnSideScaled - r.nFnSideLin, r.nFnSideLin, r.fnSatFrac,
+                r.nFnSide, r.nFnSideScaled, r.nFnSideLin, r.fnSatFrac,
+                r.fnSatFrac > 0.5 ? " -> 평평만" : "",
                 r.psdMean, r.psdRms, r.nIbdPsdNlike);
       }
       //  런 하나가 몇 분 걸릴 수 있다. 중간에 끊겨도 한 것은 남도록 그때그때 쓴다.

@@ -15,7 +15,7 @@ mu_shower_npe = 20000   # 이 NPE 초과 target 뮤온을 '샤워링' 으로 본
                         #   R_μ 가 1/τ_Li 의 2 배 안이면 lihe_stat=degen 으로 낸다
 lihe_fit_lo_s = 0.002   # 적합 창 [s]. 첫 빈 중심(0.025 s)보다 작으면 아무 빈도 안 뺀다
 lihe_fit_hi_s = 10.0
-lihe_min_cand = 100     # 창 안 표본이 이보다 적으면 적합하지 않는다 (lowstat)
+lihe_min_cand = 50      # 창 안 표본이 이보다 적으면 적합하지 않는다 (lowstat). 24h 런의 n-Gd 후보가 ~80 이라 100 이면 늘 lowstat
 lihe_li_frac  = 1.0     # ⁹Li 분율 R (Eq.2). 1.0 = ⁹Li 만. 이 통계로는 띄울 수 없어 고정
 #
 # ---- fast-n : prompt 창을 사이드밴드로 올린 페어링을 0차·1차 외삽 ----

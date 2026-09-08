@@ -846,6 +846,112 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 그리로 옮겼다 (절 번호 §11.x 는 그대로다). `CLAUDE.md` 는 매 세션 통째로
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
+### 2026-09-08 (밤) — 배경 레시피 v2 : 논문 정의로 다시 세우고, 2차 프로덕션(DST)을 스키마 2 로
+
+사용자 지시 : "있는 코드를 맹신하지 말고 논문(RENE PTEP 2025 · NEOS 박사논문 2편 ·
+NEOS PRL)에서 IBD·accidental·fast-n·Li/He·기타 배경의 정의를 이해한 뒤 RENE 트리에
+맞는 선택 기준을 세우고, 필요하면 2차 프로덕션을 바꿔라. 런별로 누적 모니터링."
+**세션이 한 번 끊겨(단축키) 이어받았다.** 앞 세션이 오전에 만든 5단계
+(§11.154~11.160)는 그대로 두고, "★예비" 로 남겨 둔 두 레시피를 다시 세웠다.
+설계 `docs/superpowers/specs/2026-09-08-background-recipes-v2-design.md` (work-web).
+
+#### 11.161 ★★ 논문에서 읽은 정의 — 그리고 실측이 가른 것 셋
+
+논문 4편의 전문을 확보했다(구글 드라이브 텍스트 추출이 잘려 있어 PDF 를 받아
+`pdftotext` 로 풀었다. **드라이브 링크 두 개의 이름표가 서로 바뀌어 있었다** —
+`1ycXf…` 가 김진유(NEOS-II 2022), `1No4_…` 가 고영주(NEOS-I 2017)).
+
+```
+NEOS-I  (고영주 §4.3)   prompt 1-10 · delayed n-Gd 4-10 · dt 1-30 µs(τ≈7) · veto 150 µs ·
+                        multiplicity [tp-30, tp+150] · fast-n 은 PSD(p_psd = (r-m_γ)/σ_γ, 3.5σ 기각)
+NEOS-II (김진유 §5)     delayed 4→3.96 MeV 시간변화 · PSD 컷 = 중성자 56 % 기각/γ 99 % 수용,
+                        보정 표본 = 뮤온 뒤 1-50 µs 의 single · multiplicity 45 µs 전/150 µs 후
+NEOS PRL 118 121802     accidental 은 time-delayed coincidence(7±1/일), PSD 가 off 배경의 73 % 제거
+Daya Bay 1402.6876      fast-n = prompt 12-100 MeV 사이드밴드 0차·1차 외삽 평균.
+                        ⁹Li/⁸He = dt-since-last-muon 을 Eq.2 로 적합 :
+                        N_LiHe[R λ_Li e^{-λ_Li t} + (1-R) λ_He e^{-λ_He t}] + N_unc R_μ e^{-R_μ t}
+RENE PTEP 2025 093C03   accidental = R₁·R₂·T (< IBD 의 1 %) · PSD 가 핵심이라 EJ-309 10 % 첨가 ·
+                        n-Gd 6-10 MeV. ⁹Li 는 시뮬레이션뿐
+```
+
+**실측 (읽기 전용) 셋이 v1 레시피가 왜 틀렸는지를 갈랐다.**
+
+```
+① PSD 분리력  AmBe run 4221 sub 100-104, 꼬리비율(피크+40 ns 이후/전체)
+      n-Gd 포획이 뒤따르는 prompt   0.316 ± 0.029    아닌 single  0.289 ± 0.043    FoM 0.53 (NEOS 2.8)
+      run 4332 는 같은 양이 0.40 -> 파형이 런마다 다르다 = 런 품질 지표로는 쓸 수 있다
+② 포화        run 4332 : NPE 1500-3000 의 2.8 %, 3000-5000 의 12 %, **7265 이상의 93 %** 가 포화
+      -> v1 fast-n 사이드밴드(12 MeV 이상)는 clean single 만 세어 표본의 7 % 로 만든 값이었다
+③ 뮤온 rate   run 4305 DST : target 뮤온 3.05 Hz, pe>3000 1.33 Hz(1/R 0.75 s), pe>20000 0.63 Hz(1/R 1.6 s),
+      pe>50000 은 0 (적분창 1 µs). v1 의 문턱 3000 은 1/R 이 τ_Li=0.257 s 와 축퇴 -> 후보의 56 % 흡수
+```
+
+#### 11.162 ★★ 무엇을 바꿨나 — DST 스키마 2 + 지표 schema 2
+
+| | 무엇 | 왜 |
+|---|---|---|
+| DST | `T_Singles` 에 `psd` 열, **`T_Sat` 트리 신설**(포화라 버린 사건), `T_Info.schema=2` | 사이드밴드가 포화 사건을 세려면, PSD 통계를 내려면 파형에서만 나온다 |
+| Li/He | Daya Bay Eq.2 그대로. **우발항 = R_μ e^{−R_μ t}, R_μ 는 데이터에서 고정**, 문턱 20000, Li 분율 고정 | v1 은 우발항이 상수였다 |
+| Li/He 대조 | 같은 적합을 **다음** 샤워링 뮤온까지의 시간(시간 역방향)에 → `n_lihe_rev` | 물리 상관이 없으니 0 이어야 한다. 아니면 적합이 우발을 흡수한 것 |
+| fast-n | 사이드밴드 = single ∪ `T_Sat`. 0차·1차 외삽 평균 + 1차 단독 + 포화 비율 | 포화 93 % |
+| accidental | `n_acci_rp` = R_S1·R_S2·(dt_max−dt_min)·live 를 off-window 옆에 | 방법 자체의 교차검증 |
+| 다중중성자 | `n_mult_rej` = multiplicity 가 걸러낸 쌍의 우발 초과분 | NEOS 'correlated bg' 지표 |
+| PSD | `psd_mean`/`psd_rms`(1-3 MeV γ-band) · `n_ibd_psd_nlike`(mean+3σ 밖) | 분리력이 약해 추이용 |
+| 뺀 것 | `fn_tag_s`/`n_fn_mutag` | fast-n 은 µs 단위인데 0.1 s 안 후보 수를 세고 있었다 = 순수 우발 |
+
+**single 의 개수·순서·pe 는 손대지 않았다** — legacy 패리티 게이트가 그대로다.
+`metrics_summary.tsv` 는 앞 18 열 자리를 지키고(웹·시트가 14/16/18 열을 읽는다)
+19 열부터 새 열을 붙여 42 열, `# schema 2`.
+
+**합성 DST 검증** (`tests/monitor-bg.test.sh` 12/12) — Poisson 뮤온(0.2 Hz) 위에
+Li/He 500 을 심으면 **507.5 ± 26.2**, 역방향 **0.0 ± 3.9**. 포화 사이드밴드 40쌍
+→ `n_fn_side=40`, `fn_sat_frac=1.00`. n-like psd 60 → 63 (3 은 3σ 꼬리 기대치).
+
+#### 11.163 ★ 곁들여 잡은 것 — run 4324 가 웹 게이트를 영영 막고 있었다
+
+원시 파일이 **전부** `badrun/` 으로 격리된 런은 FADC 가 0 이라 완결 판정(FADC==PRD,
+FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까지 통째로 막는다.
+`websummary.sh` 의 `run_complete` 에 "FADC 0 이고 badrun/ 이 있으면 완결" 을
+더했다(badrun 이 없는 FADC 0 런 = 수집 전 자리는 여전히 막는다). 시험 [1b].
+
+#### 11.164 ★ 실데이터 — run 4305 를 스키마 2 로 다시 만들고 v2 로 계산했다
+
+```
+DST 재생성   1440 서브런 2,063 s (/scratch, 후처리·백업과 동시. 서브런당 1.4 s)
+             singles 7,601,557 (스키마 1 과 **같은 수**) · sat 104,644 · muons 68,654,229
+패리티      metrics.sh --verify : 공통 2 행, 불일치 0            <- legacy 와 여전히 같다
+샤워링 뮤온  pe > 20000 : 54,030 개, R_μ 0.625 Hz, 1/R 1.60 s (τ_Li 0.257 s 의 6 배)
+
+              n-Gd                                  n-H
+IBD / acci    82 / 17  (rate-곱 44.7, multiplicity 전)  62,601 / 58,894 (rate-곱 71,706 대 off-window 69,611)
+mult_rej      557 (!)                                6,460
+Li/He         0.0 ± 2.9  (역방향 0.0 ± 5.8)           4.7 ± 1,454  (역방향 0.0 ± 96)
+fast-n        사이드밴드 27 쌍 -> 평평 외삽 7.7/일      1,602 쌍 -> 455/일
+              sat_frac 1.00 (전부 포화) -> 1차 외삽은 0 으로 떨어져 **평평만 쓴다**
+PSD γ-band    0.3992 ± 0.0585 (1-3 MeV single)       n-like 0 / 5
+```
+
+**읽는 법.**
+- Li/He 는 0 과 맞는다 — 예상대로(이 크기·깊이에서 ~0.5/일). **상한**으로 읽는다.
+  n-H 의 오차 1,454 는 후보 6만 개의 94 % 가 우발이라 그렇다. 역방향 대조가 둘 다 0.
+- **fast-n 은 n-Gd 후보(우발 뺀 65/일)의 약 12 %** 다. NEOS 20 mwe 에서 얻은
+  견적(~16/일)과 크기가 맞는다. 다만 사이드밴드가 **100 % 포화 사건**이라 에너지 축이
+  잘려 있다 — 1차 외삽이 0 으로 떨어지는 이유이고, 그래서 `fn_sat_frac > 0.5` 면
+  평평 외삽만 쓰도록 했다.
+- **`mult_rej` 557 이 눈에 띈다.** on-time 650 쌍 중 568 이 multiplicity 에 걸리는데
+  off-time 은 28 중 11 뿐이다 — 우발로는 설명되지 않는 **상관 다중 사건**(뮤온 유발
+  중성자 다발)이 하루 550 쌍 규모로 있다는 뜻이다. NEOS 가 multiplicity 로 잡는
+  바로 그 배경이고, 이 지표가 추이로 보인다.
+- rate-곱 accidental 은 n-H 에서 off-window 와 3 % 안에서 맞고(71,706 대 69,611),
+  n-Gd 에서는 1.6 배 크다(44.7 대 27.7) — 통계가 28 쌍뿐이라 그 차이는 ±5σ 안이다.
+- PSD γ-band 0.399 ± 0.059 는 run 4332 의 0.40 과 같다(4221 은 0.29). 추이로 볼 값이다.
+
+**DST 일괄 생성** — 완결 런 40 개(4280~4332, 4305 제외)를
+`/Data_ssd/LOG/dstbuild-batch.sh` 로 3개 병렬·nice 15 로 돌리고 있다
+(로그 `/Data_ssd/LOG/dstbuild-batch.log`, 런별 `dstbuild-<런>.log`). 24h 런 하나가
+약 35 분, 전체 약 5 시간. 끝나면 `metrics.sh --list <전부> --verify` 로 지표를 채운다.
+
+
 ### 2026-09-08 — 런 서머리 웹 모니터링 5단계 구축 (Task 1~10, 구글사이트 발행까지)
 
 `RENE-daq-rcterm/tools/monitor` 의 옛 3단계(run-summary → ibd-summary →
@@ -2134,7 +2240,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 그래서 돌던 bash 는 옛 inode 를 그대로 붙들고 §11.42 의 사고가 나지 않는다.
 다만 **다음 실행부터** 새 코드가 적용되므로, 지금 도는 작업에는 반영되지 않는다.
 
-#### 11.142 ★★ 여기서 이어받는다 — 2026-09-07 기준
+#### 11.142 ★★ 여기서 이어받는다 — 2026-09-09 00:30 기준
 
 **세션을 새로 열면 §0.0 다음에 이 절만 읽으면 된다.**
 
@@ -2150,6 +2256,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
                 수동 실행/확인은 지금도 된다
+DST 일괄   /Data_ssd/LOG/dstbuild-batch.sh  완결 런 40개를 스키마 2 로 (§11.164)
+                로그 /Data_ssd/LOG/dstbuild-batch.log. 끝나면 metrics.sh --list ... --verify
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -2164,7 +2272,16 @@ ssh store 'tail -c 400 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -3'
 tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cron 미설치라도 읽힌다)
 ```
 
-**최근에 크게 바뀐 것 다섯** (자세한 것은 각 절)
+**최근에 크게 바뀐 것 여섯** (자세한 것은 각 절)
+
+```
+§11.161~11.164  ★ 배경 레시피 v2 — 논문 정의(NEOS 박사논문 2편 · PRL · Daya Bay · RENE PTEP)로
+                다시 세우고 실측으로 걸렀다. DST 스키마 2(psd 열 + T_Sat), Li/He 는 Daya Bay
+                Eq.2(우발항 R_μ e^{-R_μ t}) + 시간 역방향 대조, fast-n 은 포화 사건을 합친
+                사이드밴드, accidental rate-곱 교차검증, 다중중성자 지표, PSD 안정성 지표,
+                배경 추이 그림 6쪽. run 4305 실측 §11.164. 격리된 run 4324 가 웹 게이트를
+                막던 것도 고쳤다(§11.163). 설계 docs/superpowers/specs/2026-09-08-background-recipes-v2-design.md
+```
 
 ```
 §11.143~11.147  외장하드 백업을 하드 2개 순차로 + 결과를 메일로
@@ -2194,6 +2311,9 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| 구글 시트/드라이브 `--init` + cron 매시 27분 `websummary.sh` | 웹 발행이 아직 안 켜져 있다 | §11.157 · §11.159 |
+| `metrics_source=dst` 승인 | DST 일괄 생성 뒤 여러 런에서 `--verify` 반복 통과하면 | §11.155 · §11.164 |
+| 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드에 라벨 (시리얼 병기) | UUID 는 포맷하면, lsblk 시리얼은 꽂을 때마다 바뀐다. **`udevadm` 시리얼만 안 바뀐다** | §11.153 |
 | 시트의 `Disk Label` · `Storage Location` | 내가 알 수 없는 값이다 | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |

@@ -291,11 +291,14 @@ mu_shower_npe  fn_e_lo  fn_e_hi  lihe_fit_lo  lihe_fit_hi  lihe_li_frac  psd_nsi
 
 | 키 | 기본값 | 뜻 |
 |---|---|---|
-| `mu_shower_npe` | 3000 | 이 NPE 초과 target 뮤온을 '샤워링'으로 본다 |
+| `mu_shower_npe` | 20000 | 이 NPE 초과 target 뮤온을 '샤워링'으로 본다. **뜻은 rate 손잡이다** — run 4305 실측 3000 → 1.33 Hz(τ_Li 와 축퇴), 20000 → 0.63 Hz |
 | `lihe_fit_lo_s` / `lihe_fit_hi_s` | 0.002 / 10.0 | Li/He 적합 창 [s] |
-| `lihe_min_cand` | 100 | 창 안 표본이 이보다 적으면 적합하지 않는다(`lowstat`) |
-| `fn_e_lo_mev` / `fn_e_hi_mev` | 12.0 / 50.0 | fast-n prompt 사이드밴드 [MeV] |
-| `fn_tag_s` | 0.1 | 직전 샤워링 뮤온에서 이 시간 안의 후보 수 = `n_fn_mutag` |
+| `lihe_min_cand` | 50 | 창 안 표본이 이보다 적으면 적합하지 않는다(`lowstat`). 24h 런의 n-Gd 후보가 ~80 이다 |
+| `lihe_li_frac` | 1.0 | Daya Bay Eq.2 의 ⁹Li 분율 R. 이 통계로는 띄울 수 없어 고정 |
+| `fn_e_lo_mev` / `fn_e_hi_mev` | 12.0 / 50.0 | fast-n prompt 사이드밴드 [MeV]. `T_Sat` 을 합쳐 센다 |
+| `psd_nsig` | 3.0 | 1–3 MeV γ-band 평균에서 몇 σ 밖을 n-like 로 세나 |
+
+옛 키 `fn_tag_s` 는 v2 에서 쓰지 않는다(있으면 경고만).
 
 **IBD 컷 오버라이드 10종**(`s1_lo_npe s1_hi_npe s2_lo_mev s2_hi_mev dt_min_us
 dt_max_us dt_acci_us iso_pre_us iso_post_us lower_npe`, `PairWindows` 멤버와
@@ -378,6 +381,23 @@ PSD    AmBe run 4221 : 포획이 뒤따르는 prompt 0.316±0.029 / 아닌 singl
 Li/He 참값 500 을 심으면 **507.5 ± 26.2** 로 되찾고, 시간 역방향은 **0.0 ± 3.9**.
 포화 사이드밴드 40쌍을 T_Sat 에 두면 `n_fn_side=40`, `fn_sat_frac=1.00`.
 n-like psd 60개를 심으면 63 을 센다(3 은 3σ 꼬리의 기대치).
+
+**run 4305 실측 (v2, 2026-09-08)** — DST 스키마 2 재생성 2,063 s, single 수는
+스키마 1 과 같고 `--verify` 불일치 0.
+
+```
+              n-Gd                                  n-H
+IBD / acci    82 / 17  (rate-곱 44.7)                62,601 / 58,894 (rate-곱 71,706)
+mult_rej      557                                   6,460
+Li/He         0.0 ± 2.9  (역방향 0.0 ± 5.8)           4.7 ± 1,454  (역방향 0.0 ± 96)
+fast-n        27 쌍 -> 평평 7.7/일 (sat_frac 1.00)     1,602 쌍 -> 455/일
+PSD γ-band    0.3992 ± 0.0585                        n-like 0 / 5
+```
+
+fast-n 은 n-Gd 후보(우발 뺀 65/일)의 약 12 %. 사이드밴드가 전부 포화 사건이라
+1차 외삽은 뜻을 잃어(`fn_sat_frac > 0.5`) 평평 외삽만 쓴다. `mult_rej` 557 은
+우발로 설명되지 않는 상관 다중 사건(뮤온 유발 중성자 다발)이 하루 550 쌍 규모로
+있다는 뜻이다. 상세는 CLAUDE.md §11.164.
 
 **여전히 못 하는 것** — fast-n 은 이 사이트에서 가장 큰 배경일 가능성이 높다
 (NEOS 20 mwe 에서 off 배경의 73 % 가 PSD 로 제거된 fast-n → 톤당 60/일 → RENE
