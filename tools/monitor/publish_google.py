@@ -106,8 +106,27 @@ def main():
     for k in ("sheet_id", "tsv_dir", "webroot"):
         if not p.get(k) and not (a.init and k == "sheet_id"):
             sys.exit(f"[FATAL] {a.params} 에 {k} 가 비어 있다")
+    if a.init:
+        #  --init 은 sheet_id 없이도 돌지만(위 예외) drive_folder_id/map_file
+        #  없이는 못 돈다 -- 업로드 갈 곳과 기록할 곳이라서다. 여기서
+        #  걸러야 dry-run 미리보기도 실제 실행과 같은 곳에서 막힌다.
+        for k in ("drive_folder_id", "map_file"):
+            if not p.get(k):
+                sys.exit(f"[FATAL] {a.params} 에 {k} 가 비어 있다")
     rows = build_rows(p)
     print(f"[INFO] 표 행 : {len(rows)} (출처 {p.get('metrics_source','legacy')})")
+    if a.dry_run and a.init:
+        #  --init 의 dry-run -- 자격증명을 찾지도, 네트워크를 건드리지도
+        #  않는다(find_creds 도 urllib/gspread import 도 이 아래에 없다).
+        #  실제로 무엇이 올라갈지만 보여준다 : 파일명+크기, 갈 폴더,
+        #  쓰일 map_file. (컨트롤러 판정 R6 -- dry-run 은 어떤 플래그
+        #  조합에서도 네트워크/자격증명을 절대 건드리지 않는다.)
+        pngs = sorted(glob.glob(os.path.join(p["webroot"], "*.png")))
+        for f in pngs:
+            print(f"  (dry) drive create {os.path.basename(f)} "
+                  f"({os.path.getsize(f)} bytes) -> folder {p['drive_folder_id']}")
+        print(f"[DRY] {p['map_file']} 에 {len(pngs)}줄을 쓸 예정 (폴더 {p['drive_folder_id']})")
+        return
     if a.dry_run and not a.init:
         for r in rows[-3:]: print("  (dry) sheet row:", r)
         pngs = sorted(glob.glob(os.path.join(p["webroot"], "*.png")))

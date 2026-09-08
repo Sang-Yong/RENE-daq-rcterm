@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # monitor-publish.test.sh -- publish_google.py 의 --dry-run 경로만 시험한다
 # (task-8-brief.md Step 2). 실 시트/드라이브 API 호출은 Task 10 통합에서
-# 사용자 승인 후에 한다. 여기서 보는 것 네 가지:
+# 사용자 승인 후에 한다. 여기서 보는 것 다섯 가지:
 #   ① --dry-run 이 네트워크를 전혀 건드리지 않고 rc=0 로 끝나는가
 #      -- "이 환경에 네트워크가 없어서 우연히 통과"가 아니라, socket 의
 #      연결·이름풀이 원시함수를 그 자리에서 예외로 바꿔친 채 실제로 돌려
@@ -10,6 +10,10 @@
 #   ③ (dry) drive update 줄 수 == map_file 의 항목 수
 #   ④ params 에 sheet_id 가 비면 --dry-run 이라도 명확한 [FATAL] 로 죽는가
 #      (그 검사는 build_rows 보다 먼저라 dry-run 여부와 무관하다)
+#   ⑤ --dry-run --init 도 ①과 같은 소켓 차단 하네스로 네트워크를 전혀
+#      건드리지 않고 rc=0 로 끝나며, webroot 의 픽스처 png 들을 이름+크기로
+#      찍는가 (컨트롤러 판정 R6 -- dry-run 은 --init 과 같이 있어도
+#      find_creds/urllib/gspread 를 절대 건드리면 안 된다)
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -177,8 +181,35 @@ CHK missing_sheet_id_fatal=0"
    echo "진단(④) : rc=$RC4"
 fi
 
+# ⑤ --dry-run --init -- find_creds/urllib/gspread 를 전혀 건드리지 않고
+#    (①과 같은 소켓 차단 하네스로 돈다) webroot 의 픽스처 png 4개를
+#    이름+크기로 나열하고, 갈 폴더·쓰일 map_file 을 찍고 rc=0 로 끝난다.
+#    map_file 은 이미 존재하는 픽스처(위 ③에서도 쓴 파일)인데, dry-run
+#    이므로 내용이 바뀌면 안 된다 -- 실행 전후 내용을 대조해 그것도 본다.
+MAP_BEFORE=$(cat "$T/websummary.map")
+OUT5=$(run_offline "$T/websummary.params" --dry-run --init 2>"$T/err5.txt")
+RC5=$?
+MAP_AFTER=$(cat "$T/websummary.map")
+NCREATE=$(printf '%s\n' "$OUT5" | grep -c '^  (dry) drive create ')
+ALL4=1
+for n in rate_trend_candidates rate_trend_rll rate_trend_cumulative orphan; do
+   printf '%s\n' "$OUT5" | grep -qF "drive create ${n}.png (" || ALL4=0
+done
+if [ "$RC5" -eq 0 ] && ! grep -q "NETWORK ACCESS ATTEMPTED" "$T/err5.txt" && \
+   [ "$NCREATE" -eq 4 ] && [ "$ALL4" -eq 1 ] && \
+   [ "$MAP_BEFORE" = "$MAP_AFTER" ] && \
+   printf '%s\n' "$OUT5" | grep -qF "폴더 FAKE_FOLDER_ID" && \
+   printf '%s\n' "$OUT5" | grep -qF "$T/websummary.map 에 4줄을 쓸 예정"; then
+   R="$R
+CHK dry_run_init=1"
+else
+   R="$R
+CHK dry_run_init=0"
+   echo "진단(⑤) : rc=$RC5 ncreate=$NCREATE all4=$ALL4 map_changed=$([ "$MAP_BEFORE" = "$MAP_AFTER" ] && echo no || echo YES)"
+fi
+
 FAILED=0
-for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal; do
+for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -191,6 +222,8 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run1 stderr --"; cat "$T/err1.txt"
    echo "-- run4(sheet_id 빈 params) stdout --"; echo "$OUT4"
    echo "-- run4 stderr --"; cat "$T/err4.txt"
+   echo "-- run5(--dry-run --init) stdout --"; echo "$OUT5"
+   echo "-- run5 stderr --"; cat "$T/err5.txt"
    exit 1
 fi
-echo "PASS monitor-publish (4/4)"
+echo "PASS monitor-publish (5/5)"
