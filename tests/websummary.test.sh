@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# websummary.test.sh -- websummary.sh 오케스트레이터 6항목.
+# websummary.test.sh -- websummary.sh 오케스트레이터 8항목.
 #
 # bash/awk/flock 만 있으면 되므로 언제나 돈다 -- ROOT 도, 실 RAW 데이터도
-# 필요 없다. WEBSUMMARY_STAGES_DISABLED=1 로 다섯 단계 스크립트(run-summary/
-# dst-build/metrics/ibd-summary/rate-trend) + gen-summary-html + webroot
-# rsync 복사 + publish_google.py 를 건너뛰고, 게이트/상태/잠금/마운트/
-# dry-run 로직만 시험한다(실 스테이지는 ROOT·구글 자격증명이 필요해 여기서
-# 시험하지 않는다 -- task-9-brief 의 결정).
+# 필요 없다. 검사 ①~⑥은 WEBSUMMARY_STAGES_DISABLED=1 로 다섯 단계
+# 스크립트(run-summary/dst-build/metrics/ibd-summary/rate-trend) + html
+# 생성 + webroot 복사 + 발행을 통째로 건너뛰고 게이트/상태/잠금/마운트/
+# dry-run 로직만 본다. 검사 ⑦·⑧은 반대로 그 다섯 + gen-summary-html.sh +
+# publish_google.py 를 WEBSUMMARY_MON_DIR 로 전부 가짜(호출만 기록하고
+# 즉시 종료)로 갈아끼워 publish=1 경로(성공/실패, R2 복사와의 순서)를
+# 실제로 실행해서 본다 -- 둘 다 ROOT·구글 자격증명이 필요 없다
+# (task-9-brief 의 결정 + 리뷰 Finding 2).
 #
 # 실데이터·실디스크·운영 잠금/상태 파일은 절대 건드리지 않는다 --
-# WEBSUMMARY_ROOTS/LOCK/STATE/LOG 를 검사마다 새 mktemp -d 픽스처로
-# 갈아끼운다(dataflow.sh 의 DATAFLOW_LOCK 과 같은 이유, CLAUDE.md §11.150).
+# WEBSUMMARY_ROOTS/LOCK/STATE/LOG/MON_DIR 를 검사마다 새 mktemp -d
+# 픽스처로 갈아끼운다(dataflow.sh 의 DATAFLOW_LOCK 과 같은 이유,
+# CLAUDE.md §11.150). ⑦·⑧의 가짜 mountpoint 는 실 /scratch 마운트
+# 여부에 기대지 않으려는 것이다 -- 검사 ⑥은 실 마운트에 기댄 채로
+# 남겨 두었다(범위 밖: 이번 라운드는 Finding 1·2 만).
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 SUT="$DIR/tools/monitor/websummary.sh"
@@ -30,16 +36,73 @@ mkrun() {
    for i in $(seq 1 "$np"); do : > "$root/$rr/PRD/PRD_${rr}.$(printf '%05d' $((i-1))).root"; done
    : > "$root/$rr/badrun/FADC_${rr}.root.09999"
 }
-#  mkparams <파일> <tsv_dir> <start_run>
+#  mkparams <파일> <tsv_dir> <start_run> [publish=0]
 mkparams() {
+   local pub=${4:-0}
    cat > "$1" <<EOF
 tsv_dir        = $2
 webroot        = $2/web
-publish        = 0
+publish        = $pub
 start_run      = $3
 metrics_source = legacy
 refresh_s      = 600
 EOF
+}
+
+#  mk_fake_mon <몬디렉터리>
+#  다섯 단계 스크립트 + gen-summary-html.sh + publish_google.py 를 전부
+#  '호출을 기록하고 즉시 성공(또는 지정된 코드로) 종료'하는 가짜로 채운다.
+#  파일은 한 번만 만들어 검사 ⑦·⑧이 공유한다 -- 동작은 매 실행마다 환경
+#  변수로만 바뀐다 :
+#    WS_TEST_CALLS      호출 기록을 남길 파일 (필수. 없으면 /dev/null)
+#    WS_TEST_WEBROOT    publish_google.py 가짜가 summary.html 이 이미
+#                        있는지 스스로 확인해 남길 webroot 경로
+#                        (R2 rsync 복사가 발행보다 먼저 끝났는지를
+#                        가짜 자신이 목격하게 하는 것 -- 시각차보다
+#                        확실한 인과 증거다)
+#    WS_TEST_PUBLISH_RC publish_google.py 가짜의 종료코드 (기본 0)
+mk_fake_mon() {
+   local mon=$1 s
+   mkdir -p "$mon"
+   for s in run-summary.sh dst-build.sh metrics.sh ibd-summary.sh rate-trend.sh; do
+      cat > "$mon/$s" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s %s %s\n' "$(date '+%s.%N')" "$(basename "$0")" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+exit 0
+FAKE
+      chmod +x "$mon/$s"
+   done
+   #  gen-summary-html.sh <tsvdir> <out.html> <src> <refresh> -- out.html 을 실제로 만든다.
+   #  뒤의 R2 rsync 는 가짜로 바꾸지 않는다 -- 진짜 rsync 가 이 파일과
+   #  seed_pngs() 가 심은 png 를 옮기는 것까지 실측한다.
+   cat > "$mon/gen-summary-html.sh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s %s %s\n' "$(date '+%s.%N')" "gen-summary-html.sh" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+echo '<html></html>' > "$2"
+exit 0
+FAKE
+   chmod +x "$mon/gen-summary-html.sh"
+   cat > "$mon/publish_google.py" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s %s %s\n' "$(date '+%s.%N')" "publish_google.py" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+if [ -n "${WS_TEST_WEBROOT:-}" ] && [ -r "$WS_TEST_WEBROOT/summary.html" ]; then
+   echo "webroot-ready" >> "${WS_TEST_CALLS:-/dev/null}"
+else
+   echo "webroot-NOT-ready" >> "${WS_TEST_CALLS:-/dev/null}"
+fi
+exit "${WS_TEST_PUBLISH_RC:-0}"
+FAKE
+   chmod +x "$mon/publish_google.py"
+}
+
+#  seed_pngs <tsv_dir> -- R2 rsync 가 옮길 실 파일을 몇 개 심는다.
+#  전부 mktemp 트리 안이라 /scratch 에는 닿지 않는다.
+seed_pngs() {
+   local d=$1 n
+   mkdir -p "$d"
+   for n in candidates rate_raw rate_corrected; do
+      : > "$d/rate_trend_${n}.png"
+   done
 }
 
 # ==== [1] 완결 게이트 -- FADC==PRD 만 통과, 첫 미완결에서 연속을 멈춘다 ===
@@ -185,9 +248,80 @@ CHK cron_env=0"
    echo "[6] 진단 : rc=$RC6 last_run=[$SLR6]"; echo "$OUT6"
 fi
 
+# ==== [7] publish=1 + 발행 실패 -- exit 1, 상태 전진 안 함, 발행이 불렸다 ==
+#     WEBSUMMARY_MON_DIR 로 다섯 단계 + html + 발행을 전부 가짜로 갈아끼워
+#     publish=1 경로를 ROOT·구글 자격증명 없이 실제로 실행해서 본다
+#     (리뷰 Finding 2). 가짜 mountpoint 도 같이 써서 이 두 검사가 실
+#     /scratch 마운트 여부에 기대지 않게 한다.
+mkdir -p "$T/mon" "$T/78bin"
+mk_fake_mon "$T/mon"
+cat > "$T/78bin/mountpoint" <<'FAKE'
+#!/bin/bash
+exit 0
+FAKE
+chmod +x "$T/78bin/mountpoint"
+
+mkdir -p "$T/7/tsv"
+mkrun "$T/7/RAW" 004300 2 2
+seed_pngs "$T/7/tsv"
+mkparams "$T/7/params" "$T/7/tsv" 4300 1
+
+OUT7=$(PATH="$T/78bin:$PATH" \
+       WEBSUMMARY_ROOTS="$T/7/RAW" WEBSUMMARY_LOCK="$T/7/.lock" \
+       WEBSUMMARY_STATE="$T/7/state" WEBSUMMARY_LOG="$T/7/log" \
+       WEBSUMMARY_MON_DIR="$T/mon" \
+       WS_TEST_CALLS="$T/7/calls" WS_TEST_WEBROOT="$T/7/tsv/web" WS_TEST_PUBLISH_RC=1 \
+       "$SUT" --params "$T/7/params" 2>&1)
+RC7=$?
+if [ "$RC7" -eq 1 ] && [ ! -e "$T/7/state" ] \
+   && grep -q 'publish_google.py'    "$T/7/calls" 2>/dev/null \
+   && grep -q 'run-summary.sh'       "$T/7/calls" 2>/dev/null \
+   && grep -q 'gen-summary-html.sh'  "$T/7/calls" 2>/dev/null; then
+   R="$R
+CHK publish_fail=1"
+else
+   R="$R
+CHK publish_fail=0"
+   echo "[7] 진단 : rc=$RC7"; echo "$OUT7"
+   echo "-- calls --"; cat "$T/7/calls" 2>&1
+   echo "-- log --";   cat "$T/7/log" 2>&1
+fi
+
+# ==== [8] publish=1 + 발행 성공 -- exit 0, 상태 전진, R2 복사가 발행보다 먼저 ====
+#     같은 가짜 MON(공유)·가짜 mountpoint 를 다시 쓴다. WS_TEST_PUBLISH_RC=0
+#     이라 이번엔 성공. publish_google.py 가짜가 자기가 불릴 때 이미
+#     webroot/summary.html 이 있는지 스스로 확인해 남기므로, R2 rsync 복사가
+#     정말로 발행보다 먼저 끝났는지를 실제 인과로 본다(타임스탬프 비교가
+#     아니라 발행 가짜 자신의 목격 -- 시계 해상도 경합이 없다).
+mkdir -p "$T/8/tsv"
+mkrun "$T/8/RAW" 004301 2 2
+seed_pngs "$T/8/tsv"
+mkparams "$T/8/params" "$T/8/tsv" 4301 1
+
+OUT8=$(PATH="$T/78bin:$PATH" \
+       WEBSUMMARY_ROOTS="$T/8/RAW" WEBSUMMARY_LOCK="$T/8/.lock" \
+       WEBSUMMARY_STATE="$T/8/state" WEBSUMMARY_LOG="$T/8/log" \
+       WEBSUMMARY_MON_DIR="$T/mon" \
+       WS_TEST_CALLS="$T/8/calls" WS_TEST_WEBROOT="$T/8/tsv/web" WS_TEST_PUBLISH_RC=0 \
+       "$SUT" --params "$T/8/params" 2>&1)
+RC8=$?
+SLR8=$(awk -F= '$1=="last_run"{print $2}' "$T/8/state" 2>/dev/null)
+if [ "$RC8" -eq 0 ] && [ "$SLR8" = "4301" ] \
+   && grep -q 'webroot-ready' "$T/8/calls" 2>/dev/null \
+   && ! grep -q 'webroot-NOT-ready' "$T/8/calls" 2>/dev/null; then
+   R="$R
+CHK publish_order=1"
+else
+   R="$R
+CHK publish_order=0"
+   echo "[8] 진단 : rc=$RC8 last_run=[$SLR8]"; echo "$OUT8"
+   echo "-- calls --"; cat "$T/8/calls" 2>&1
+fi
+
 # ---- 판정 -----------------------------------------------------------------
 FAILED=0
-for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env; do
+for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
+         publish_fail publish_order; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -196,4 +330,4 @@ for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env; do
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (6/6)"
+echo "PASS websummary (8/8)"

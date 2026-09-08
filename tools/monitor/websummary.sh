@@ -43,6 +43,14 @@
 #                          시험은 반드시 갈아끼울 것.
 #      WEBSUMMARY_STATE    상태 파일. 기본 /Data_ssd/LOG/websummary.state
 #      WEBSUMMARY_LOG      로그 파일. 기본 /Data_ssd/LOG/websummary.log
+#      WEBSUMMARY_MON_DIR  다섯 단계 스크립트 + gen-summary-html.sh +
+#                          publish_google.py 를 부를 디렉터리. 기본은 이
+#                          스크립트 자신이 있는 tools/monitor.
+#                          ★ 시험 전용. 가짜 스테이지로 publish=1 성공/실패
+#                          경로를 시험할 때만 갈아끼운다. 기본과 다르면
+#                          실행마다 [TEST] 로 크게 알린다(운영에서 켜져
+#                          있으면 바로 눈에 띄어야 한다). 운영에서는
+#                          절대 쓰지 말 것.
 #      WEBSUMMARY_STAGES_DISABLED=1
 #                          ★ 시험 전용. 다섯 단계 스크립트 + html 생성 +
 #                          webroot 복사 + 발행을 전부 건너뛰고 게이트/
@@ -51,9 +59,20 @@
 # ---------------------------------------------------------------------
 set -u
 
-DIR=$(cd "$(dirname "$0")/.." && pwd)
-MON=$DIR/tools/monitor
-PARAMS=$DIR/config/websummary.params
+#  ★ 자기발견 결함(리뷰 범위 밖, Finding 1·2 를 고치다 발견) -- websummary.sh
+#  는 이 저장소의 다른 tools/monitor/*.sh 와 같은 깊이(tools/monitor/)에
+#  있다. 그 형제들의 관용구(metrics.sh 의 DIR/REPO)와 다르게 애초
+#  '..' 를 한 번만 올려 저장소 루트가 아니라 'tools' 를 가리켰다 --
+#  MON_DEFAULT 가 tools/tools/monitor 로, PARAMS 가 tools/config/... 로
+#  잘못 잡혀 있었다(실측: WEBSUMMARY_MON_DIR 을 넣어 보는 시험을 만들며
+#  로그의 [TEST] 줄에서 드러났다). --params 도 WEBSUMMARY_MON_DIR 도
+#  안 주는 것이 실제 cron 호출 그대로라, 고치지 않았으면 첫 배포마다
+#  모든 단계가 '파일이 없다'로 즉시 실패했을 것이다.
+DIR=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$DIR/../.." && pwd)
+MON_DEFAULT=$DIR
+MON=${WEBSUMMARY_MON_DIR:-$MON_DEFAULT}
+PARAMS=$REPO/config/websummary.params
 DRY=0; FORCE=0; STATUS=0
 
 while [ $# -gt 0 ]; do
@@ -63,7 +82,7 @@ while [ $# -gt 0 ]; do
       --dry-run) DRY=1; shift ;;
       --status)  STATUS=1; shift ;;
       --force)   FORCE=1; shift ;;
-      -h|--help) sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+      -h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) echo "모르는 옵션 : $1" >&2; exit 2 ;;
    esac
 done
@@ -75,6 +94,12 @@ STAGES_DISABLED=${WEBSUMMARY_STAGES_DISABLED:-0}
 mkdir -p "$(dirname "$LOG")" "$(dirname "$STATE")" 2>/dev/null
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG"; }
+
+#  ★ 리뷰 지적 (Finding 2) -- WEBSUMMARY_MON_DIR 은 시험 전용이다. 운영에서
+#  실수로 켜진 채 남으면 실제 단계 대신 아무것도 안 하는 스크립트를 부르게
+#  되므로, 기본값과 다르면 회차마다 크게 알린다.
+[ "$MON" = "$MON_DEFAULT" ] || \
+   log "[TEST] WEBSUMMARY_MON_DIR=$MON (기본값 $MON_DEFAULT 아님) -- 시험 전용, 운영에서는 절대 쓰지 말 것"
 
 #  'key = value' 한 줄을 읽는다 (metrics.sh 의 getp 와 같은 관용구 --
 #  '#' 뒤는 주석, 앞뒤 공백은 버리고, 같은 키가 여러 번이면 나중 것이 이긴다).
@@ -278,7 +303,15 @@ else
 fi
 
 # ---- 성공 -- 상태 전진 (임시파일 + rename 로 원자적으로) ----------------
+#  ★ 리뷰 지적 (Finding 1) -- 이 대입 자체가 이 스크립트가 존재하는 이유다.
+#  쓰기가 실패했는데도 [DONE]/exit 0 을 내면 다음 회차가 '이미 했다'고
+#  믿고 건너뛴다. && 체인의 성공 여부로 반드시 분기할 것.
 LAST_NEW=${NEWLIST_ARR[$((${#NEWLIST_ARR[@]}-1))]}
-printf 'last_run=%s\n' "$LAST_NEW" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"
-log "[DONE] run $NEWLIST 처리 완료. last_run=$LAST_NEW (publish=$PUBLISH)$( [ -n "$BLOCKED" ] && echo "  다음은 run $BLOCKED 에서 막힘")"
-exit 0
+if printf 'last_run=%s\n' "$LAST_NEW" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; then
+   log "[DONE] run $NEWLIST 처리 완료. last_run=$LAST_NEW (publish=$PUBLISH)$( [ -n "$BLOCKED" ] && echo "  다음은 run $BLOCKED 에서 막힘")"
+   exit 0
+else
+   log "[FAIL] 상태 파일을 쓰지 못했다 : $STATE -- run $NEWLIST 처리는 실제로 끝났으나 기록되지 않았다. 다음 회차가 같은 런부터 다시 시도한다"
+   rm -f "$STATE.tmp.$$" 2>/dev/null
+   exit 1
+fi
