@@ -34,7 +34,7 @@ CLAUDE.md §11.12 — 스토리지 링크는 §11.115 이후 10G 라 지금은 �
 | (과도기) | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | PRD | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` — 교차검증용 + 4단계 입력, 유지 |
 | 4 (개편) | `rate-trend.sh` | `BuildRateTrend.C` | pair_summary | 효율 보정 + 시간축 추이 그림 11종 → `rate_trend.{pdf,tsv}`, `*.png` |
 | 5 (신설) | `websummary.sh` | `gen-summary-html.sh` + `publish_google.py` | 위 전부 | 런당 1줄 표 + 그림 + 구글사이트 발행. cron 매시 27분 |
-| legacy 자동화 | `monitor-all.sh` | — | — | 1·(과도기)·4 만 순서대로 수동/구식 자동화. 운영 cron 은 5단계(`websummary.sh`)가 갖는다 |
+| legacy 자동화 | `monitor-all.sh` | — | — | 1·(과도기)·4 만 순서대로 수동/구식 자동화. 운영 cron 은 5단계(`websummary.sh`)가 갖는다(★ 아직 미설치 — 배포 대기, CLAUDE.md §11.142 참조) |
 
 ```bash
 tools/monitor/monitor-all.sh              # legacy 한 번 (1→과도기→4)
@@ -615,8 +615,9 @@ R_LL 이 지금까지 잰 런에서 88~95 Hz 로 안정적이라 ε_iso 도 0.94
 # 5단계 : websummary — 표 생성 + 발행
 
 `websummary.sh` 가 완결(FADC==PRD) 런 게이트부터 구글사이트 발행까지 전부
-오케스트레이션한다. **cron 이 이것을 갖는다** — `monitor-all.sh` 는 legacy
-3단계(1·과도기·4)만 도는 수동/구식 자동화로 남는다(§9 참조).
+오케스트레이션한다. **cron 이 이것을 갖는다**(★ 아직 미설치 — 배포 대기,
+CLAUDE.md §11.142 참조) — `monitor-all.sh` 는 legacy 3단계(1·과도기·4)만
+도는 수동/구식 자동화로 남는다(§9 참조).
 
 ## 순서
 
@@ -732,7 +733,8 @@ sheet-backup-<시각>.tsv` 로 백업하고, 쓴 뒤 다시 읽어 **되대조**
 
 ## 9. 자동화 (legacy) — `monitor-all.sh`
 
-**cron 은 이제 5단계(`websummary.sh`, 매시 27분)가 갖는다.**
+**cron 은 이제 5단계(`websummary.sh`, 매시 27분)가 갖는다**(★ 아직
+미설치 — 배포 대기, CLAUDE.md §11.142 참조).
 아래 `monitor-all.sh` 는 legacy 3단계(1·과도기·4)만 순서대로 돌리는
 수동/구식 자동화로 남아 있다 — DST·metrics·발행 없이 `pair_summary.tsv` 와
 그림만 다시 만들고 싶을 때, 또는 `websummary.sh` 없이 그림만 점검할 때
