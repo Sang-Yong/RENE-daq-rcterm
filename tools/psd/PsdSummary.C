@@ -26,27 +26,31 @@ static bool FitPeak(TH1D *h, double lo, double hi, double &mu, double &sig, doub
    if (!h || h->Integral() < 50) return false;
    h->GetXaxis()->SetRangeUser(lo, hi);
    double x0 = h->GetBinCenter(h->GetMaximumBin());
-   TF1 f("fp", "gaus", x0 - 0.35, x0 + 0.35);
-   f.SetParameters(h->GetMaximum(), x0, 0.15);
+   double hw = (hi - lo > 2.0) ? 0.9 : 0.35;      // n-Gd 봉우리는 넓다
+   TF1 f("fp", "gaus", x0 - hw, x0 + hw);
+   f.SetParameters(h->GetMaximum(), x0, hw / 2.5);
    if (h->Fit(&f, "QRN0") != 0) return false;
    mu = f.GetParameter(1); sig = f.GetParameter(2); emu = f.GetParError(1);
    h->GetXaxis()->SetRange(0, 0);
-   return sig > 0.02 && sig < 1.0;
+   return sig > 0.02 && sig < 1.5;
 }
 
-void PsdSummary(const char *dir = "/scratch/RunSummary/psd/") {
+//  mode "nH" : runpos.tsv + psdana_<run>.root, 포획 봉우리 2.2 MeV 를 [1.5,3.2] 에서 적합
+//  mode "nGd": runpos_gd.tsv + psdana_<run>_nGd.root, 포획 봉우리(n-Gd ~8 MeV) 를 [6,10] 에서 적합
+void PsdSummary(const char *dir = "/scratch/RunSummary/psd/", const char *mode = "nH") {
+   const bool gd = (TString(mode) == "nGd");
    gStyle->SetOptStat(0);
    TString d = dir; if (!d.EndsWith("/")) d += "/";
-   std::ifstream in((d + "runpos.tsv").Data());
+   std::ifstream in((d + (gd ? "runpos_gd.tsv" : "runpos.tsv")).Data());
    std::string line;
-   std::ofstream out((d + "psd_summary.tsv").Data());
+   std::ofstream out((d + (gd ? "psd_summary_gd.tsv" : "psd_summary.tsv")).Data());
    out << "#run\tpos_mm\tsource\tcapture_mev\tcapture_sig\tcapture_err\tambe_mev\tambe_sig\tmt_gam\tmt_gam_rms\n";
    TGraphErrors gCapA, gCapC, gAmbe; TGraph gMtA, gMtC;
    while (std::getline(in, line)) {
       if (line.empty() || line[0] == '#') continue;
       std::stringstream ss(line); int run, pos; std::string src;
       if (!(ss >> run >> pos >> src)) continue;
-      TFile f(d + TString::Format("psdana_%06d.root", run));
+      TFile f(d + TString::Format("psdana_%06d%s.root", run, gd ? "_nGd" : ""));
       if (f.IsZombie()) continue;
       TH1D *cap = (TH1D *)f.Get("e_cap"), *capOff = (TH1D *)f.Get("e_capoff");
       TH1D *eOn = (TH1D *)f.Get("e_on"), *eOff = (TH1D *)f.Get("e_off");
@@ -73,7 +77,7 @@ void PsdSummary(const char *dir = "/scratch/RunSummary/psd/") {
       int col[] = {kBlue+1, kRed+1, kGreen+2}; int k = 0;
       for (auto &pg : gs) { if (pg.first->GetN() == 0) { k++; continue; } pg.first->Sort(); pg.first->SetMarkerStyle(20 + k); pg.first->SetMarkerColor(col[k]); pg.first->SetLineColor(col[k]); mg->Add(pg.first, "LP"); leg->AddEntry(pg.first, pg.second, "lp"); k++; }
       mg->SetTitle(Form("%s;source height from chimney top [mm];%s", title, yt)); mg->Draw("A"); leg->Draw();
-      c.Print(d + name + ".png");
+      c.Print(d + name + (gd ? "_gd" : "") + ".png");
    };
    draw("psd_capture_vs_pos", "n-H capture peak (2.2 MeV) reconstructed energy vs source height", "E_{rec} [MeV]", {{&gCapA, "AmBe"}, {&gCapC, "Cf252"}}, 0);
    draw("psd_ambe_vs_pos", "AmBe 4.44 MeV prompt peak vs source height", "E_{rec} [MeV]", {{&gAmbe, "AmBe"}}, 0);

@@ -49,7 +49,16 @@ struct WStat { double n=0, sx=0, sxx=0; void add(double x, double w){ n+=w; sx+=
    double mean() const { return n>0 ? sx/n : 0; } double rms() const { double m=mean(); double v=n>0? sxx/n-m*m:0; return v>0?std::sqrt(v):0; } };
 
 void PsdAnalyze(const char *scanFile, const char *outDir = "/scratch/RunSummary/psd/",
-                double onLo = 5, double onHi = 400, double offLo = 1000, double offHi = 1395) {
+                const char *capMode = "nH",
+                double onLo = -1, double onHi = -1, double offLo = -1, double offHi = -1) {
+   //  capMode : "nH"  포획창 1.87-2.59 MeV, on [5,400] µs, off [1000,1395]  (Gd 없는 2025-11 선원 런)
+   //            "nGd" 포획창 6-10 MeV,     on [1,100] µs,  off [1000,1099]  (Gd-LS, 2026-04~08 선원 런)
+   //  창을 직접 주면(>=0) 그것이 이긴다.
+   const bool gd = (TString(capMode) == "nGd");
+   if (onLo  < 0) onLo  = gd ? 1.0    : 5.0;
+   if (onHi  < 0) onHi  = gd ? 100.0  : 400.0;
+   if (offLo < 0) offLo = 1000.0;
+   if (offHi < 0) offHi = gd ? 1099.0 : 1395.0;
    TFile fin(scanFile);
    TTree *t = (TTree *)fin.Get("psd");
    if (!t) { printf("[SKIP] %s : psd 트리 없음\n", scanFile); return; }
@@ -73,12 +82,18 @@ void PsdAnalyze(const char *scanFile, const char *outDir = "/scratch/RunSummary/
               (float)((c0.tail50*c0.q + c1.tail50*c1.q)/q), (float)((c0.pkfrac*c0.q + c1.pkfrac*c1.q)/q),
               (float)(0.5*(c0.fwhm + c1.fwhm)), (float)(0.5*(c0.rise + c1.rise))};
    }
-   const double hLo = MeVToNpe(1.87), hHi = MeVToNpe(2.59);
+   //  prompt 태그(뒤에 포획이 따르나)는 모드의 창으로, γ 참조(포획 γ 자신)는 **언제나 n-H 2.2 MeV**
+   //  로 잡는다 -- prompt 밴드(0.6-4.5 MeV)와 에너지가 맞는 순수 γ 표본이기 때문이다.
+   //  Gd-LS 에서도 포획의 10-15 % 는 H 에서 일어나 n-H 봉우리가 있다.
+   const double hLo = gd ? MeVToNpe(6.0) : MeVToNpe(1.87), hHi = gd ? MeVToNpe(10.0) : MeVToNpe(2.59);
    auto inCap = [&](Long64_t j) { return E[j] >= hLo && E[j] <= hHi; };
+   const double gLo = MeVToNpe(1.87), gHi = MeVToNpe(2.59);
+   const double gOnLo = 5.0, gOnHi = 400.0, gOffLo = 1000.0, gOffHi = 1395.0;
+   auto inGamCap = [&](Long64_t j) { return E[j] >= gLo && E[j] <= gHi; };
 
    //  히스토그램 : [band][var][on/off], 그리고 γ 참조 [var][on/off], 에너지 스펙트럼
    TString out = outDir; if (!out.EndsWith("/")) out += "/";
-   TFile fo(out + TString::Format("psdana_%06d.root", theRun), "RECREATE");
+   TFile fo(out + TString::Format("psdana_%06d%s.root", theRun, gd ? "_nGd" : ""), "RECREATE");
    std::vector<std::vector<TH1D*>> hOn(kNBand, std::vector<TH1D*>(kNVar)), hOff = hOn;
    std::vector<TH1D*> gOn(kNVar), gOff(kNVar);
    for (int b = 0; b < kNBand; ++b) for (int v = 0; v < kNVar; ++v) {
@@ -115,13 +130,13 @@ void PsdAnalyze(const char *scanFile, const char *outDir = "/scratch/RunSummary/
          if (fon)  cOn[b].add(V[i], 1);
          if (foff) cOff[b].add(V[i], 1);
       }
-      //  ---- 포획 γ 로서 : 앞에 prompt 가 있나 ----
-      if (inCap(i)) {
+      //  ---- 포획 γ 로서 (n-H 2.2 MeV) : 앞에 prompt 가 있나 ----
+      if (inGamCap(i)) {
          bool pon = false, poff = false;
-         for (Long64_t j = i - 1; j >= 0; --j) { if (S[j] != S[i]) break; double dt = T[i] - T[j]; if (dt > offHi) break;
+         for (Long64_t j = i - 1; j >= 0; --j) { if (S[j] != S[i]) break; double dt = T[i] - T[j]; if (dt > gOffHi) break;
             if (NpeToMeV(E[j]) < 0.6) continue;
-            if (!pon  && dt >= onLo  && dt < onHi)  pon  = true;
-            if (!poff && dt >= offLo && dt < offHi) poff = true; }
+            if (!pon  && dt >= gOnLo  && dt < gOnHi)  pon  = true;
+            if (!poff && dt >= gOffLo && dt < gOffHi) poff = true; }
          if (pon)  { eCap->Fill(mev);    capOn[i] = 1; }
          if (poff) { eCapOff->Fill(mev); capOff[i] = 1; }
          if (ok[i]) for (int v = 0; v < kNVar; ++v) {
@@ -133,7 +148,7 @@ void PsdAnalyze(const char *scanFile, const char *outDir = "/scratch/RunSummary/
       }
    }
    //  ---- 표 : 상관(on−off) 대 γ 참조(on−off) ----
-   printf("# run %d pos %d mm : pairs on %ld off %ld (excess %ld)\n", theRun, thePos, nPairOn, nPairOff, nPairOn - nPairOff);
+   printf("# run %d pos %d mm [%s] : pairs on %ld off %ld (excess %ld)\n", theRun, thePos, gd ? "nGd" : "nH", nPairOn, nPairOff, nPairOn - nPairOff);
    printf("#run\tpos\tband\tvar\tn_corr\tm_corr\ts_corr\tn_gam\tm_gam\ts_gam\tn_unc\tm_unc\ts_unc\tfom_gam\tfom_unc\n");
    for (int b = 0; b < kNBand; ++b) for (int v = 0; v < kNVar; ++v) {
       WStat corr; corr.n = sOn[b][v].n - sOff[b][v].n; corr.sx = sOn[b][v].sx - sOff[b][v].sx; corr.sxx = sOn[b][v].sxx - sOff[b][v].sxx;
@@ -177,6 +192,33 @@ void PsdAnalyze(const char *scanFile, const char *outDir = "/scratch/RunSummary/
       printf("%d\t%d\t[%.1f,%.1f)\tfisher\t%.0f\t%.4f\t%.4f\t%.0f\t%.4f\t%.4f\t0\t0\t0\t%.2f\t-1\t# w(mt,tail30,pkfrac,fwhm,rise)= %.4g %.4g %.4g %.4g %.4g\n",
              theRun, thePos, kBands[b][0], kBands[b][1], corr.n, sgn*(mc-mg)/sg, std::sqrt(vc)/sg, gam.n, 0.0, 1.0, fom,
              w[0], w[1], w[2], w[3], w[4]);
+
+      //  ---- fisherU : 참조를 같은 밴드의 off-window(에너지 일치, γ 우세) 로 ----
+      //  8 MeV 포획 γ 를 참조로 쓰면 fwhm·pkfrac 의 에너지 의존이 분리력으로 둔갑한다.
+      {
+         const WCov &unc = cOff[b];
+         if (unc.n < 50) continue;
+         TMatrixD S2 = corr.cov(); S2 += unc.cov();
+         TVectorD d2 = corr.mean(); d2 -= unc.mean();
+         TMatrixD Si2(TMatrixD::kInverted, S2);
+         TVectorD w2 = Si2 * d2;
+         double mc2 = w2 * corr.mean(), mu2 = w2 * unc.mean();
+         double vc2 = (w2 * (corr.cov() * w2)), vu2 = (w2 * (unc.cov() * w2));
+         double fom2 = (vc2 > 0 && vu2 > 0) ? std::fabs(mc2 - mu2) / std::sqrt(vc2 + vu2) : -1;
+         double sgn2 = (mc2 > mu2) ? 1.0 : -1.0, su2 = std::sqrt(vu2 > 0 ? vu2 : 1);
+         auto proj2 = [&](const std::array<float,10> &v) { double x = 0; for (int a = 0; a < 5; ++a) x += w2[a] * v[idx[a]]; return sgn2 * (x - mu2) / su2; };
+         TH1D *uOn = new TH1D(Form("on_b%d_fisherU", b), "", 60, -6, 12), *uOff = new TH1D(Form("off_b%d_fisherU", b), "", 60, -6, 12);
+         for (Long64_t i = 0; i < n; ++i) {
+            if (!ok[i]) continue;
+            double mev = NpeToMeV(E[i]);
+            if (!(mev >= kBands[b][0] && mev < kBands[b][1])) continue;
+            if (tagOn[i])  uOn->Fill(proj2(V[i]));
+            if (tagOff[i]) uOff->Fill(proj2(V[i]));
+         }
+         printf("%d\t%d\t[%.1f,%.1f)\tfisherU\t%.0f\t%.4f\t%.4f\t%.0f\t%.4f\t%.4f\t0\t0\t0\t%.2f\t-1\t# w(mt,tail30,pkfrac,fwhm,rise)= %.4g %.4g %.4g %.4g %.4g\n",
+                theRun, thePos, kBands[b][0], kBands[b][1], corr.n, sgn2*(mc2-mu2)/su2, std::sqrt(vc2)/su2, unc.n, 0.0, 1.0, fom2,
+                w2[0], w2[1], w2[2], w2[3], w2[4]);
+      }
    }
    fo.Write(); fo.Close();
 }
