@@ -19,7 +19,9 @@
 #  순서 : 게이트(완결 런 목록, start_run 부터 연속으로 완결된 것까지만)
 #      -> run-summary.sh -> dst-build.sh -> metrics.sh(빌드)
 #      -> metrics.sh --verify (legacy 인 동안은 불일치해도 경고만)
-#      -> ibd-summary.sh -> rate-trend.sh -> gen-summary-html.sh
+#      -> ibd-summary.sh -> rate-trend.sh
+#      -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9. 실패해도 WARN 뿐 --
+#         type='-' 로 계속) -> gen-summary-html.sh
 #      -> rate_trend_*.png 11개 + summary.html 을 webroot 로 rsync 복사
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
 #      -> publish_google.py (publish=1 일 때만)
@@ -240,6 +242,7 @@ if [ "$DRY" -eq 1 ]; then
       log "[DRY]   metrics.sh     --list $NEWLIST  (+ --verify, legacy 면 불일치해도 경고만)"
       log "[DRY]   ibd-summary.sh --list $NEWLIST"
       log "[DRY]   rate-trend.sh"
+      log "[DRY]   gen-runclass.sh $TSVDIR $TSVDIR/runclass.tsv  (실패해도 WARN 뿐, type='-' 로 계속)"
       log "[DRY]   gen-summary-html.sh $TSVDIR $TSVDIR/summary.html $METRICS_SOURCE $REFRESH_S"
       log "[DRY]   rsync rate_trend_*.png + summary.html -> $WEBROOT"
       if [ "$PUBLISH" = 1 ]; then log "[DRY]   publish_google.py --params $PARAMS"
@@ -279,6 +282,21 @@ else
 
    run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
+
+   #  type(physics/calibration/test) 열의 유일한 생산자(컨트롤러 판정 R9).
+   #  실패해도 발행을 막지 않는다 -- WARN 만 남기고 지나가면 gen-summary-html.sh
+   #  가 runclass.tsv 를 못 찾아 type 열을 전부 '-' 로 낸다(그 스크립트의
+   #  키 조회 fallback). metrics-verify 와 같은 이유로 run_stage 를 안 쓴다 --
+   #  실패를 곧장 exit 1 로 넘기지 않아야 해서다.
+   log "[RUN ] gen-runclass"
+   nice -n 15 ionice -c2 -n7 "$MON/gen-runclass.sh" "$TSVDIR" "$TSVDIR/runclass.tsv" >>"$LOG" 2>&1
+   rcrc=$?
+   if [ $rcrc -ne 0 ]; then
+      log "[WARN] gen-runclass 실패 (exit=$rcrc) -- type 열은 이번 회차에 '-' 로 뜬다"
+   else
+      log "[OK  ] gen-runclass"
+   fi
+
    run_stage "gen-summary-html" "$MON/gen-summary-html.sh" \
       "$TSVDIR" "$TSVDIR/summary.html" "$METRICS_SOURCE" "$REFRESH_S" || exit 1
 

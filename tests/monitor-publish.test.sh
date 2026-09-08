@@ -21,6 +21,11 @@
 #      발견 2 -- lihe_stat=ok 인데 n_fn_side_scaled<0 인 픽스처로, Li/He
 #      는 값이 나오고 fast-n 은 em dash 로 남는지 본다. 옛 결합 gate 였으면
 #      lihe_stat=ok 하나로 fast-n 도 같이 새 나왔을 것이다)
+#   ⑧ type 이 정확히 2번째 자리(Run 다음)에 실리는가 -- runclass.tsv 에
+#      있는 두 런(physics/calibration)과 없는 런('-') 을 함께 본다
+#      (컨트롤러 판정 R9 -- 소비 쪽만 본다. 분류 규칙 자체는
+#      tests/monitor-runclass.test.sh 의 몫이다)
+#   ⑨ HEADER 상수에 "Type" 이 인덱스 1(Run 다음)에 있고 전체 16열인가
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -57,6 +62,17 @@ cat > "$T/tsv/pair_summary.tsv" <<'EOF'
 4280	_nH	none	82800.000	900	90	620	60	0.0	800.0	3200.0	1.5	5.5	0.0	3200.0	654321	45.6700	1440
 4281	_nGd	AmBe	86000.000	520	45	90	7	0.0	100.0	400.0	5.0	12.0	0.0	400.0	130000	13.1000	1440
 4281	_nH	AmBe	86000.000	950	88	640	55	0.0	800.0	3200.0	1.5	5.5	0.0	3200.0	660000	46.2000	1440
+EOF
+
+#  runclass.tsv (컨트롤러 판정 R9) -- 4280=physics, 4281=calibration.
+#  4282 는 일부러 안 넣는다 -- '파일에 이 런이 없다' -> '-' 경로를 그
+#  이미 있는 짝없는 런(위 ④의 4282, IBD 도 '-' 로 내려가는 그 런)으로
+#  같이 시험한다.
+cat > "$T/tsv/runclass.tsv" <<'EOF'
+# schema 1
+#run	type
+4280	physics
+4281	calibration
 EOF
 
 #  드라이브 매핑 -- 가짜 fileId 3개. dry-run 은 실제로 파일을 열어보지
@@ -248,7 +264,7 @@ OUT6=$(env -i PATH="$PATH" HOME="$T/fake-home" TZ=Asia/Seoul \
    python3 "$T/offline_run.py" "$SUT" --params "$T/websummary.params" --dry-run 2>"$T/err6.txt")
 RC6=$?
 if [ "$RC6" -eq 0 ] && ! grep -q "NETWORK ACCESS ATTEMPTED" "$T/err6.txt" && \
-   printf '%s\n' "$OUT6" | grep -qF "(dry) sheet row: [4280, '2024-08-31 19:26'," && \
+   printf '%s\n' "$OUT6" | grep -qF "(dry) sheet row: [4280, 'physics', '2024-08-31 19:26'," && \
    ! printf '%s\n' "$OUT6" | grep -qF "2024-08-31 10:26"; then
    R="$R
 CHK local_time_start=1"
@@ -275,9 +291,43 @@ CHK independent_gates=0"
    echo "진단(⑦) : rc=$RC7"
 fi
 
+# ⑧ type 이 정확히 2번째 자리에 실린다 -- OUT1(정상 params, 위 ①/②)을
+#    재사용한다. runclass.tsv 에 있는 두 런(4280 physics, 4281 calibration)
+#    과 없는 런(4282 -> '-') 을 함께 본다.
+if printf '%s\n' "$OUT1" | grep -qF "(dry) sheet row: [4280, 'physics', " && \
+   printf '%s\n' "$OUT1" | grep -qF "(dry) sheet row: [4281, 'calibration', " && \
+   printf '%s\n' "$OUT1" | grep -qF "(dry) sheet row: [4282, '-', "; then
+   R="$R
+CHK type_position=1"
+else
+   R="$R
+CHK type_position=0"
+   echo "진단(⑧) : $(printf '%s\n' "$OUT1" | grep '(dry) sheet row:')"
+fi
+
+# ⑨ HEADER 상수 -- "Type" 이 인덱스 1(Run 다음)이고 전체 16열. main() 을
+#    부르지 않으므로(모듈 import 뿐) 네트워크 차단 하네스가 필요 없다.
+OUT9=$(env -i PATH="$PATH" HOME="$T/fake-home" python3 -c "
+import sys; sys.path.insert(0, '$DIR/tools/monitor')
+import publish_google as m
+print(m.HEADER[1])
+print(len(m.HEADER))
+" 2>"$T/err9.txt")
+RC9=$?
+HDR1=$(printf '%s\n' "$OUT9" | sed -n 1p)
+HDRLEN=$(printf '%s\n' "$OUT9" | sed -n 2p)
+if [ "$RC9" -eq 0 ] && [ "$HDR1" = "Type" ] && [ "$HDRLEN" = "16" ]; then
+   R="$R
+CHK header_has_type=1"
+else
+   R="$R
+CHK header_has_type=0"
+   echo "진단(⑨) : rc=$RC9 header[1]=$HDR1 len=$HDRLEN"
+fi
+
 FAILED=0
 for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
-         local_time_start independent_gates; do
+         local_time_start independent_gates type_position header_has_type; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -298,4 +348,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run7 stderr --"; cat "$T/err7.txt"
    exit 1
 fi
-echo "PASS monitor-publish (7/7)"
+echo "PASS monitor-publish (9/9)"

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# websummary.test.sh -- websummary.sh 오케스트레이터 8항목.
+# websummary.test.sh -- websummary.sh 오케스트레이터 9항목.
 #
 # bash/awk/flock 만 있으면 되므로 언제나 돈다 -- ROOT 도, 실 RAW 데이터도
 # 필요 없다. 검사 ①~⑥은 WEBSUMMARY_STAGES_DISABLED=1 로 다섯 단계
 # 스크립트(run-summary/dst-build/metrics/ibd-summary/rate-trend) + html
 # 생성 + webroot 복사 + 발행을 통째로 건너뛰고 게이트/상태/잠금/마운트/
-# dry-run 로직만 본다. 검사 ⑦·⑧은 반대로 그 다섯 + gen-summary-html.sh +
-# publish_google.py 를 WEBSUMMARY_MON_DIR 로 전부 가짜(호출만 기록하고
-# 즉시 종료)로 갈아끼워 publish=1 경로(성공/실패, R2 복사와의 순서)를
-# 실제로 실행해서 본다 -- 둘 다 ROOT·구글 자격증명이 필요 없다
-# (task-9-brief 의 결정 + 리뷰 Finding 2).
+# dry-run 로직만 본다. 검사 ⑦·⑧은 반대로 그 다섯 + gen-runclass.sh +
+# gen-summary-html.sh + publish_google.py 를 WEBSUMMARY_MON_DIR 로 전부
+# 가짜(호출만 기록하고 즉시 종료)로 갈아끼워 publish=1 경로(성공/실패, R2
+# 복사와의 순서)를 실제로 실행해서 본다 -- 둘 다 ROOT·구글 자격증명이
+# 필요 없다 (task-9-brief 의 결정 + 리뷰 Finding 2). 검사 ⑨는 [8]이 만든
+# calls 파일을 재사용해 gen-runclass.sh 가 gen-summary-html.sh 보다 먼저
+# 불렸는지만 본다(type 열의 생산자가 소비자보다 먼저다, 컨트롤러 판정 R9).
 #
 # 실데이터·실디스크·운영 잠금/상태 파일은 절대 건드리지 않는다 --
 # WEBSUMMARY_ROOTS/LOCK/STATE/LOG/MON_DIR 를 검사마다 새 mktemp -d
@@ -72,6 +74,16 @@ exit 0
 FAKE
       chmod +x "$mon/$s"
    done
+   #  gen-runclass.sh <tsvdir> <out.tsv> -- out.tsv 를 실제로 만든다(비어 있어도
+   #  된다. gen-summary-html.sh 가짜는 그 파일 내용을 안 읽는다). 호출 순서가
+   #  gen-summary-html.sh 보다 먼저인지를 검사 [9]가 이 calls 파일로 본다.
+   cat > "$mon/gen-runclass.sh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s %s %s\n' "$(date '+%s.%N')" "gen-runclass.sh" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+: > "$2"
+exit 0
+FAKE
+   chmod +x "$mon/gen-runclass.sh"
    #  gen-summary-html.sh <tsvdir> <out.html> <src> <refresh> -- out.html 을 실제로 만든다.
    #  뒤의 R2 rsync 는 가짜로 바꾸지 않는다 -- 진짜 rsync 가 이 파일과
    #  seed_pngs() 가 심은 png 를 옮기는 것까지 실측한다.
@@ -318,10 +330,26 @@ CHK publish_order=0"
    echo "-- calls --"; cat "$T/8/calls" 2>&1
 fi
 
+# ==== [9] gen-runclass.sh 가 gen-summary-html.sh 보다 먼저 불린다 ==========
+#     [8]에서 이미 만든 calls 파일(성공한 전체 회차)을 재사용한다 -- calls
+#     파일은 각 가짜 스크립트가 자기 차례에 한 줄씩 순서대로 append 하므로
+#     (동기 실행이라 겹칠 수 없다) 줄 번호가 곧 호출 순서다.
+RC_LINE=$(grep -n '^[0-9.]* gen-runclass.sh ' "$T/8/calls" 2>/dev/null | head -1 | cut -d: -f1)
+HTML_LINE=$(grep -n '^[0-9.]* gen-summary-html.sh ' "$T/8/calls" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -n "$RC_LINE" ] && [ -n "$HTML_LINE" ] && [ "$RC_LINE" -lt "$HTML_LINE" ]; then
+   R="$R
+CHK runclass_before_html=1"
+else
+   R="$R
+CHK runclass_before_html=0"
+   echo "[9] 진단 : gen-runclass 줄=$RC_LINE gen-summary-html 줄=$HTML_LINE"
+   echo "-- calls --"; cat "$T/8/calls" 2>&1
+fi
+
 # ---- 판정 -----------------------------------------------------------------
 FAILED=0
 for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
-         publish_fail publish_order; do
+         publish_fail publish_order runclass_before_html; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -330,4 +358,4 @@ for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (8/8)"
+echo "PASS websummary (9/9)"

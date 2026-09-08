@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# monitor-html.test.sh -- gen-summary-html.sh 가 스펙 §5 의 15열 표를
-# 정확히 만드는지. bash/awk 만 있으면 되므로 ROOT 없이도 언제나 돈다.
+# monitor-html.test.sh -- gen-summary-html.sh 가 스펙 §5 의 16열 표(Run 다음
+# type)를 정확히 만드는지. bash/awk 만 있으면 되므로 ROOT 없이도 언제나 돈다.
 # 실데이터·실디스크는 건드리지 않는다 -- 픽스처는 mktemp -d 안에 만든다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,12 +17,28 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 #         -> legacy·dst 모두 fast-n·Li/He 는 '—'
 #   4308  run_summary 행만 있고 pair_summary/metrics_summary 행이 아예 없다
 #         -> IBD/acci/R_LL/선원 이 '-' 로 내려가야 한다(열이 밀리면 안 된다)
+#         또한 runclass.tsv 에도 이 런을 일부러 안 넣는다 -- '그 파일에
+#         이 런이 없다' 갈래를 시험한다 -> type 도 '-' 로 내려가야 한다
+#   4306  run_summary 행만 있다(4308 과 같은 모양). runclass.tsv 에 'test'
+#         로 명시 -- physics/calibration/test 세 값 중 나머지 하나
 cat > "$T/run_summary.tsv" <<'EOF'
 # schema 2
 #run	n_subrun	n_bad	epoch_start	epoch_end	wall_s	span_s	live_s	dead_s	n_type1	n_type2	n_type3	source
 4310	1440	1	1725100000	1725186400	86400.000	86400.000	82800.000	3600.000	900000	15000	450000	prd
 4308	100	0	1725000000	1725003600	3600.000	3600.000	3550.000	50.000	100000	2000	50000	prd
 4312	1440	0	1725300000	1725386400	86400.000	86400.000	86000.000	400.000	950000	16000	470000	prd
+4306	20	0	1724900000	1724901200	1200.000	1200.000	1100.000	100.000	5000	100	2000	prd
+EOF
+
+#  run 클래스 : 컨트롤러 판정 R9. gen-summary-html.sh 는 이 파일을 run 을
+#  키로만 읽는다(분류 규칙을 재판단하지 않는다) -- 여기서는 그 소비 쪽만
+#  본다(생성 쪽 규칙 자체는 tests/monitor-runclass.test.sh 의 몫이다).
+cat > "$T/runclass.tsv" <<'EOF'
+# schema 1
+#run	type
+4310	calibration
+4312	physics
+4306	test
 EOF
 
 cat > "$T/pair_summary.tsv" <<'EOF'
@@ -57,17 +73,18 @@ row_of() { grep -o "<tr><td>$2</td>.*</tr>" "$1"; }   # $1=html파일 $2=run
 
 R=""
 
-# ① 행 수 == 런 수(3)+1(헤더), 데이터 행은 모두 15열, 미기록 런(4308)은
-#    IBD/acci/R_LL/선원 다섯 칸이 '-' 로 내려간다(열이 밀리지 않는다)
+# ① 행 수 == 런 수(4)+1(헤더), 데이터 행은 모두 16열, 미기록 런(4308)은
+#    type/IBD/acci/R_LL/선원 여섯 칸이 '-' 로 내려간다(열이 밀리지 않는다.
+#    type 이 늘어 5->6)
 n_tr=$(grep -c '<tr>' "$LEGACY")
 bad_td=0
 while IFS= read -r line; do
    n=$(printf '%s' "$line" | grep -o '<td>' | wc -l)
-   [ "$n" -eq 15 ] || bad_td=$((bad_td + 1))
+   [ "$n" -eq 16 ] || bad_td=$((bad_td + 1))
 done < <(grep -o '<tr>.*</tr>' "$LEGACY")
 r4308=$(row_of "$LEGACY" 4308)
 ndash4308=$(printf '%s' "$r4308" | grep -o '<td>-</td>' | wc -l)
-if [ "$n_tr" -eq 4 ] && [ "$bad_td" -eq 0 ] && [ "$ndash4308" -eq 6 ]; then
+if [ "$n_tr" -eq 5 ] && [ "$bad_td" -eq 0 ] && [ "$ndash4308" -eq 7 ]; then
    R="$R
 CHK rows_and_dash=1"
 else
@@ -134,7 +151,9 @@ fi
 #    브리프 원안의 ${MS:+"$MS"} 식(변수가 항상 비어있지 않은 경로 문자열이라
 #    실제로는 아무것도 걸러내지 못한다)으로 되돌아가면 awk 가 없는 파일을
 #    열려다 그 자리에서 죽는다 -- 이 회귀를 잡는 것이 이 시험의 목적이다.
-#    run_summary.tsv/pair_summary.tsv 만 있는 별도 디렉터리로 돈다.
+#    run_summary.tsv/pair_summary.tsv 만 있는 별도 디렉터리로 돈다(runclass.tsv
+#    도 없다 -- 그래서 이 검사는 곁다리로 '파일 자체가 없다' 갈래도 덮는다.
+#    '파일에 이 런만 없다' 갈래는 위 픽스처의 4308 이 이미 덮는다).
 NM_DIR="$T/nometrics"; mkdir -p "$NM_DIR"
 cp "$T/run_summary.tsv" "$T/pair_summary.tsv" "$NM_DIR/"
 NOMETRICS="$T/legacy_nometrics.html"
@@ -144,10 +163,10 @@ if [ -r "$NOMETRICS" ]; then
    nm_tr=$(grep -c '<tr>' "$NOMETRICS")
    while IFS= read -r line; do
       n=$(printf '%s' "$line" | grep -o '<td>' | wc -l)
-      [ "$n" -eq 15 ] || nm_bad_td=$((nm_bad_td + 1))
+      [ "$n" -eq 16 ] || nm_bad_td=$((nm_bad_td + 1))
    done < <(grep -o '<tr>.*</tr>' "$NOMETRICS")
 fi
-if [ "$NMRC" -eq 0 ] && [ "$nm_tr" -eq 4 ] && [ "$nm_bad_td" -eq 0 ]; then
+if [ "$NMRC" -eq 0 ] && [ "$nm_tr" -eq 5 ] && [ "$nm_bad_td" -eq 0 ]; then
    R="$R
 CHK legacy_no_metrics=1"
 else
@@ -157,8 +176,23 @@ CHK legacy_no_metrics=0"
    echo "$NMOUT"
 fi
 
+# ⑧ type 이 정확히 2번째 열(Run 다음)에 실린다 -- 값 자체도 대조한다
+#    (있는 셋은 각자의 값, runclass.tsv 에 없는 4308 은 '-')
+type_cell() {   # $1=html파일 $2=run
+   row_of "$1" "$2" | sed -E 's#^<tr><td>[0-9]+</td><td>([^<]*)</td>.*#\1#'
+}
+ok8=1
+[ "$(type_cell "$LEGACY" 4310)" = "calibration" ] || ok8=0
+[ "$(type_cell "$LEGACY" 4312)" = "physics"     ] || ok8=0
+[ "$(type_cell "$LEGACY" 4306)" = "test"        ] || ok8=0
+[ "$(type_cell "$LEGACY" 4308)" = "-"           ] || ok8=0
+[ "$(type_cell "$DST"    4312)" = "physics"     ] || ok8=0
+[ "$ok8" -eq 1 ] && R="$R
+CHK type_position=1" || R="$R
+CHK type_position=0"
+
 FAILED=0
-for k in rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics; do
+for k in rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics type_position; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -171,4 +205,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- dst.html --"; cat "$DST"
    exit 1
 fi
-echo "PASS monitor-html (7/7)"
+echo "PASS monitor-html (8/8)"

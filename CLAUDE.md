@@ -998,6 +998,18 @@ websummary        8/8    (게이트, 잠금, publish=1 가짜 스테이지, cron
 `--init`, cron 27분 등록, `metrics_source=dst` 최종 승인(전환 게이트가 더
 반복 통과한 뒤).
 
+#### 11.160 ★ 마무리 리뷰가 잡은 것 — 스펙의 type 열 (컨트롤러 판정 R9)
+
+최종 리뷰가 §5 표의 미커밋 사용자 편집(Run 다음에 `type(physics,
+calibration, test)` 열)을 발견해 그대로 구현했다 — 사용자 자신이 스펙을
+고친 것이므로 요구사항으로 본다. **분류는 신설 `gen-runclass.sh` 하나뿐**
+(R9) : calibration = 진짜 선원 src, test = `runcatalog.db` onlbit=0,
+physics = 나머지 onlbit=1, `-` = 둘 다 모름 — calibration 이 test 를 이긴다.
+DB 가 없어도 조용히 src 만으로 분류하고 죽지 않는다(chainwatch 원칙).
+표·시트 15→16열. 실측(`/scratch/RunSummary` 35개 런) physics 28·test 4·
+`-` 3 을 DB 직접 대조로 확인. 시험 monitor-html 8/8·monitor-publish 9/9·
+websummary 9/9 + 신설 monitor-runclass 6/6, 전부 PASS.
+
 ### 2026-09-03 — 백업 하드를 두 개 순서대로 쓰게 하고, 결과를 메일로 보낸다
 
 #### 11.143 ★★ `scripts/storage-backup.sh` — 하드가 차면 다음 하드로 이어간다

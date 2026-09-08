@@ -33,7 +33,7 @@ CLAUDE.md §11.12 — 스토리지 링크는 §11.115 이후 10G 라 지금은 �
 | 3 (신설) | `metrics.sh` | `BuildMetrics.C` | DST | IBD·acci·Li/He·fast-n(★예비) → `metrics_summary.tsv` |
 | (과도기) | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | PRD | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` — 교차검증용 + 4단계 입력, 유지 |
 | 4 (개편) | `rate-trend.sh` | `BuildRateTrend.C` | pair_summary | 효율 보정 + 시간축 추이 그림 11종 → `rate_trend.{pdf,tsv}`, `*.png` |
-| 5 (신설) | `websummary.sh` | `gen-summary-html.sh` + `publish_google.py` | 위 전부 | 런당 1줄 표 + 그림 + 구글사이트 발행. cron 매시 27분 |
+| 5 (신설) | `websummary.sh` | `gen-runclass.sh` + `gen-summary-html.sh` + `publish_google.py` | 위 전부 + `runcatalog.db` | 런당 1줄 표(Type 열 포함) + 그림 + 구글사이트 발행. cron 매시 27분 |
 | legacy 자동화 | `monitor-all.sh` | — | — | 1·(과도기)·4 만 순서대로 수동/구식 자동화. 운영 cron 은 5단계(`websummary.sh`)가 갖는다(★ 아직 미설치 — 배포 대기, CLAUDE.md §11.142 참조) |
 
 ```bash
@@ -625,7 +625,9 @@ CLAUDE.md §11.142 참조) — `monitor-all.sh` 는 legacy 3단계(1·과도기�
 게이트(완결 런, start_run 부터 연속으로 완결된 접두만)
   -> run-summary.sh -> dst-build.sh -> metrics.sh(빌드) -> metrics.sh --verify
      (legacy 인 동안은 불일치해도 경고만 — 전환 전이라 게이트로 막지 않는다)
-  -> ibd-summary.sh -> rate-trend.sh -> gen-summary-html.sh
+  -> ibd-summary.sh -> rate-trend.sh
+  -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9 — 실패해도 WARN 뿐,
+     type='-' 로 계속) -> gen-summary-html.sh
   -> rate_trend_*.png 11개 + summary.html 을 webroot 로 rsync 복사
   -> publish_google.py (publish=1 일 때만)
 ```
@@ -684,19 +686,61 @@ cron (매시 27분 — sheetlog 07분과 겹치지 않게):
 | `WEBSUMMARY_STATE` | `/Data_ssd/LOG/websummary.state` | 상태 파일 경로 재배치 |
 | `WEBSUMMARY_LOG` | `/Data_ssd/LOG/websummary.log` | 로그 파일 경로 재배치 |
 
-## `gen-summary-html.sh` — 15열 표
+## `gen-runclass.sh` — type(physics/calibration/test) 분류
+
+```
+gen-runclass.sh <TSV디렉터리> <출력 runclass.tsv>
+```
+
+런마다 `physics`/`calibration`/`test`/`-` 를 매기는 **유일한 생산자**다
+(컨트롤러 판정 R9). `gen-summary-html.sh`·`publish_google.py` 는 이 파일을
+run 을 키로만 읽는다 — 분류 규칙을 각자 다시 판단하지 않는다.
+
+**분류 규칙 (우선순위 : calibration > test > physics > `-`)**
+
+| type | 조건 |
+|---|---|
+| `calibration` | 그 런의 src(`metrics_summary.tsv` 가 있으면 그것, 없으면 `pair_summary.tsv`, 3열)가 `none`/`?`/`-`/빈값이 아니다 — 즉 AmBe 등 진짜 선원 이름이다. 태그(`_nGd`/`_nH`) 행이 둘이면 어느 한쪽이라도 진짜 선원이면 calibration 이다 |
+| `test` | 위에 안 걸리고, `runcatalog.db` 가 그 런을 `onlbit=0` 이라 한다 |
+| `physics` | 위 둘 다 안 걸리고, `onlbit=1` 로 안다 |
+| `-` | src 도 DB 도 그 런을 모른다 |
+
+선원을 넣고 받다가 aborted 된 런(onlbit=0 인데 src 가 AmBe 등)도 표를 읽을
+때는 여전히 `calibration` 이다 — calibration 이 test 를 이긴다.
+
+**DB 의존은 조용히 강등된다.** `runcatalog.db`(기본 `/Data_ssd/runcatalog.db`,
+`RUNCLASS_DB` 로 재배치, `sqlite3` CLI 는 이 프로젝트의 기존 런타임
+의존이다 — §0.0)가 없거나 못 읽거나 `sqlite3` 자체가 없으면, **경고 한 줄
+없이** src 만으로 분류하고 `exit 0` 이다. 이 스크립트가 죽어서(또는
+시끄러워져서) 웹 발행 전체를 막으면 안 된다는 chainwatch 원칙(CLAUDE.md
+§11.138)을 그대로 따른다 — `websummary.sh` 도 이 단계의 실패를 **WARN
+으로만** 다루고 다음 단계로 넘어간다(그러면 `gen-summary-html.sh` 가
+`runclass.tsv` 를 못 찾아 type 열이 전부 `-` 로 뜬다).
+
+**대상 런은 `run_summary.tsv` 에 있는 런 전부다** — `pair_summary.tsv`나
+`metrics_summary.tsv`에만 있는 런은 안 싣는다(그 반대 방향으로 표에 없는
+런을 만들지 않기 위해서다).
+
+출력은 `run<TAB>type` 줄 + `#` 헤더 두 줄. 실측(2026-09-08, `/scratch/RunSummary`
+35개 런) : physics 28 · test 4 · `-` 3 · calibration 0(이 구간엔 선원 런이
+없었다) — `test` 4개·`-` 3개 전부 `runcatalog.db` 의 `onlbit=0`/`NULL` 과
+정확히 일치함을 직접 대조로 확인했다.
+
+## `gen-summary-html.sh` — 16열 표
 
 ```
 gen-summary-html.sh <TSV디렉터리> <출력.html> <legacy|dst> <refresh_s>
 ```
 
 `run_summary.tsv` + (legacy 면 `pair_summary.tsv`, dst 면 `metrics_summary.tsv`)
-를 조인해 런당 1줄, 15열(Run/시작/live·wall/전체/Target only/VETO only/V+T/
-IBD nGd/acci nGd/IBD nH/acci nH/R_LL/fast-n/Li/He/선원) 표를 만든다. 순수
-소비자다 — 어느 런을 실을지는 앞 단계가 TSV 를 쓸 때 이미 걸러 두었으므로
-여기서 다시 거르지 않는다. `metrics_source=dst` 일 때만 fast-n·Li/He 값을
-채우고(그것도 `lihe_stat=="ok"`/`n_fn_side_scaled>=0` 일 때만), 값 옆에
-'(예비)' 를 붙인다. legacy 모드거나 값이 없으면 '—'.
++ `runclass.tsv`(있으면)를 조인해 런당 1줄, 16열(Run/**Type**/시작/live·wall/
+전체/Target only/VETO only/V+T/IBD nGd/acci nGd/IBD nH/acci nH/R_LL/fast-n/
+Li/He/선원) 표를 만든다. 순수 소비자다 — 어느 런을 실을지는 앞 단계가 TSV 를
+쓸 때 이미 걸러 두었으므로 여기서 다시 거르지 않는다. `metrics_source=dst`
+일 때만 fast-n·Li/He 값을 채우고(그것도 `lihe_stat=="ok"`/
+`n_fn_side_scaled>=0` 일 때만), 값 옆에 '(예비)' 를 붙인다. legacy 모드거나
+값이 없으면 '—'. **Type 열**은 `runclass.tsv` 가 없거나 그 안에 이 런이
+없으면 `-` — 열이 밀리는 일은 절대 없다(다른 열과 같은 fallback 관례).
 
 ## `publish_google.py` — 시트 + 드라이브
 

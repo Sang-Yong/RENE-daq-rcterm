@@ -35,9 +35,12 @@ def read_tsv(path):
     return rows
 
 def build_rows(p):
-    """TSV 셋을 합쳐 시트 열(= HTML 표와 같은 15열) 리스트를 만든다.
-       gen-summary-html.sh 와 같은 조인 규칙. run 오름차순 (시트는 아래로
-       자라는 것이 자연스럽다 -- HTML 만 최신을 위로 뒤집는다)."""
+    """TSV 셋을 합쳐 시트 열(= HTML 표와 같은 16열, Run 다음이 Type) 리스트를
+       만든다. gen-summary-html.sh 와 같은 조인 규칙. run 오름차순 (시트는
+       아래로 자라는 것이 자연스럽다 -- HTML 만 최신을 위로 뒤집는다).
+       type 은 gen-runclass.sh 가 낸 runclass.tsv 를 run 을 키로만 읽는다
+       (컨트롤러 판정 R9 -- 분류 규칙은 그 스크립트 하나뿐이다). 파일이
+       없거나 그 안에 이 run 이 없으면 '-'."""
     d = p["tsv_dir"]; src = p.get("metrics_source", "legacy")
     start = int(p.get("start_run", "0"))
     rs = {int(r[0]): r for r in read_tsv(os.path.join(d, "run_summary.tsv"))}
@@ -45,6 +48,7 @@ def build_rows(p):
     ibd = {}   # (run, tag) -> row
     for r in read_tsv(os.path.join(d, pair_f)):
         ibd[(int(r[0]), r[1])] = r
+    runclass = {int(r[0]): r[1] for r in read_tsv(os.path.join(d, "runclass.tsv"))}
     out = []
     for run in sorted(rs):
         if run < start: continue
@@ -68,7 +72,8 @@ def build_rows(p):
         #  gen-summary-html.sh 의 awk strftime() 은 utc 인자를 안 주면 로컬
         #  시간이다 -- 여기도 맞춰야 한다(발견 1). gmtime 이면 한국 사이트
         #  기준 약 9시간이 어긋난다.
-        out.append([run, time.strftime("%Y-%m-%d %H:%M", time.localtime(es)),
+        out.append([run, runclass.get(run, "-"),
+                    time.strftime("%Y-%m-%d %H:%M", time.localtime(es)),
                     f"{live/3600:.1f}/{wall/3600:.1f}", t1 + t2 + t3, t1, t2, t3,
                     col(gd, 6), col(gd, 7), col(nh, 6), col(nh, 7),
                     rll, fn, lihe, srcflag])
@@ -101,9 +106,9 @@ def drive_create(token, folder_id, name, path):
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.load(r)["id"]
 
-HEADER = ["Run", "Start", "live/wall [h]", "Total", "Target only", "VETO only",
-          "V+T", "IBD nGd", "acci nGd", "IBD nH", "acci nH", "R_LL [Hz]",
-          "fast-n", "Li/He", "Source"]
+HEADER = ["Run", "Type", "Start", "live/wall [h]", "Total", "Target only",
+          "VETO only", "V+T", "IBD nGd", "acci nGd", "IBD nH", "acci nH",
+          "R_LL [Hz]", "fast-n", "Li/He", "Source"]
 
 def main():
     ap = argparse.ArgumentParser()
