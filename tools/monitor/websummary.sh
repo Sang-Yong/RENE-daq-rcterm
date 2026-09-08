@@ -137,6 +137,11 @@ run_complete() {
       f=$(ls -U "$d/$rr"     2>/dev/null | grep -c "^FADC_$rr\.root\.")
       p=$(ls -U "$d/$rr/PRD" 2>/dev/null | grep -c '\.root$')
       [ "$f" -gt 0 ] && [ "$p" -eq "$f" ] && return 0
+      #  ★ 원시 파일이 **전부** badrun/ 으로 격리된 런(CLAUDE.md §5.9)은 FADC 가
+      #    0 이라 위 판정으로는 영원히 '미완결' 이고, 연속 규칙이라 그 뒤 런까지
+      #    통째로 막는다 (실측 : run 4324 가 4325~ 를 막았다). 더 기다릴 것이
+      #    없는 런이므로 완결로 친다 -- 뒤 단계는 PRD 가 0~몇 개여도 죽지 않는다.
+      [ "$f" -eq 0 ] && [ -d "$d/$rr/badrun" ] && return 0
    done
    return 1
 }

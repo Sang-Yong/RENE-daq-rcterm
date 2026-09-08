@@ -161,21 +161,42 @@ PRD 재독 없이 DST 에서 초 단위로 다시 계산된다.** IBD·acci 도 
 캐시로 판정한 것(CLAUDE.md §11.149)과 같은 이유 — 파생 자료는 원본이 있는 한
 장기보관할 값어치가 없다.
 
-## 스키마 — `DST_<런>.root`, 트리 3개 (`BuildMonitorDst.C`)
+## 스키마 2 — `DST_<런>.root`, 트리 4개 (`BuildMonitorDst.C`, 2026-09-08~)
 
 ```
 T_Singles   clean single 전체, 시간순      evt_id(Int_t)  sub_id(Int_t)
                                            t_us(Double_t)  pe(Float_t)
+                                           psd(Float_t) ★ 꼬리비율 = Σch tail(피크+40 ns 이후)
+                                                          / Σch total. -1 = 없음
+T_Sat ★     muon·after-muon 은 통과했으나   sub_id(Int_t)  t_us(Double_t)
+            **포화라 single 에서 버린** 사건  pe(Float_t, 잘린 적분값 = 하한)
 T_Muons     뮤온 전체, 시간순              sub_id(Int_t)  t_us(Double_t)
                                            pe(Float_t, -1 = 순수 veto, target
                                            파형 없음)  sat(Char_t, 포화 여부)
 T_Info      메타데이터 (엔트리 1개)        run  thr_npe  veto_us  n_subrun
-                                           n_bad  live_s  built  schema
+                                           n_bad  live_s  built  schema(=2)  psd_tail_ns(=40)
 ```
+
+**single 의 개수·순서·pe 는 스키마 1 과 같다** — legacy 패리티 게이트가 그것에
+걸려 있다. 더한 것은 열 하나(`psd`)와 트리 하나(`T_Sat`)뿐이다.
+
+**왜 더했나** (배경 레시피 v2 스펙 `docs/superpowers/specs/2026-09-08-background-recipes-v2-design.md`)
+
+- `T_Sat` — fast-n 사이드밴드(prompt 12 MeV 이상)는 **실측 93 % 가 포화**라
+  (run 4332 : NPE 7265–15000 구간 15개 중 14개), clean single 만으로는 표본의
+  7 % 로 만든 값이었다. 포화 사건을 따로 담아 사이드밴드 페어링 때 합친다.
+- `psd` — NEOS 는 fast-n 을 PSD 로 잡는다(고영주 §4.3.2, 김진유 §5.1.5). 이
+  사이트에서는 분리력이 약해(AmBe run 4221 : n-Gd 포획이 뒤따르는 prompt
+  0.316±0.029 대 그렇지 않은 single 0.289±0.043, **FoM 0.53**, NEOS 는 2.8)
+  사건별 컷은 못 하지만, 런 단위 γ-band 평균·RMS 는 **파형 안정성 지표**가
+  된다 — 같은 꼬리비율이 run 4221 에서 0.29, run 4332 에서 0.40 이다.
 
 싱글에는 '직전 샤워링 뮤온까지 dt' 열을 **저장하지 않는다.** 샤워링 문턱이
 파라미터라 뮤온 트리에서 그때그때 계산해야 맞고, 싱글에 박아 두면 문턱이
-바뀔 때 낡은 값이 남는다 — 스펙 §3 대비 의도된 정련이다.
+바뀔 때 낡은 값이 남는다.
+
+**스키마 1 DST 는 자동으로 다시 만든다** — `DstUpToDate` 가 `schema==2` 를
+함께 보고, 서브런 캐시도 `psd` 열·`T_Sat` 이 없으면 파형에서 다시 만든다.
 
 ## 캐시 — legacy 와 반드시 분리한다 ★
 
@@ -224,36 +245,44 @@ tools/monitor/dst-build.sh --list 4237 --max-subrun 100 # 앞 100개만 (시험�
 (★예비) Li/He·fast-n 을 계산한다. 컷은 `AnalysisCondition.h` 값이 기본이고,
 `config/monitorcuts.params` 로 오버라이드할 수 있다.
 
-## `metrics_summary.tsv` — 32열 (`# schema 1`)
+## `metrics_summary.tsv` — 42열 (`# schema 2`, 2026-09-08~)
 
 ```
 run  tag  src  live_s  n_paired  n_paired_acci  n_ibd  n_ibd_acci  n_single
 r_ll  n_subrun  n_mu  n_mu_shower  n_lihe  e_lihe  lihe_stat
-n_fn_side  n_fn_side_scaled  n_fn_mutag
+n_fn_side  n_fn_side_scaled                                      <- 여기까지 18열은 schema 1 과 같은 자리
+n_fn_side_lin  fn_sat_frac  n_lihe_rev  e_lihe_rev  r_mu_shower
+n_acci_rp  n_mult_rej  psd_mean  psd_rms  n_ibd_psd_nlike
 dt_min  dt_max  dt_acci  s2_lo  s2_hi  iso_pre  iso_post
-mu_shower_npe  fn_e_lo  fn_e_hi  fn_tag_s  lihe_fit_lo  lihe_fit_hi
+mu_shower_npe  fn_e_lo  fn_e_hi  lihe_fit_lo  lihe_fit_hi  lihe_li_frac  psd_nsig
 ```
 
 | 열 | 뜻 |
 |---|---|
 | `run` / `tag` / `src` | 런 번호 / `_nGd`·`_nH` / 선원(§6.3 과 같은 규칙, `runtype.tsv`) |
 | `live_s` | livetime [s] (DST `T_Info.live_s`) |
-| `n_paired` / `n_paired_acci` | on-time / off-time 페어 수 |
+| `n_paired` / `n_paired_acci` | on-time / off-time 페어 수 (multiplicity 전) |
 | `n_ibd` / `n_ibd_acci` | on-time / off-time IBD 후보 수 (§6.1 의 우발 빼기 **전** 원값) |
-| `n_single` | DST 의 clean single 전체 개수 (태그 무관, 런 전체) |
-| `r_ll` | 1.2 MeV 이상 clean single rate [Hz] (§8.2 와 같은 정의) |
-| `n_subrun` | DST 를 만들 때 읽은 서브런 수 |
-| `n_mu` / `n_mu_shower` | 전체 뮤온 / 샤워링 뮤온(`pe > mu_shower_npe`) 개수 |
-| `n_lihe` / `e_lihe` / `lihe_stat` | ★예비 Li/He 적합 수 · 오차 · 상태(`ok`\|`lowstat`\|`nofit`\|`off`) |
-| `n_fn_side` / `n_fn_side_scaled` / `n_fn_mutag` | ★예비 fast-n 사이드밴드 원값 · 환산값 · 뮤온태그 수 |
-| `dt_min` ~ `iso_post` | IBD 페어링에 **실제 적용된** 창값(오버라이드 여부와 무관하게 실효값) |
-| `mu_shower_npe` ~ `lihe_fit_hi` | Li/He·fast-n 컷에 **실제 적용된** 값 |
+| `n_single` / `r_ll` | DST 의 clean single 전체 개수 / 1.2 MeV 이상 clean single rate [Hz] |
+| `n_subrun` / `n_mu` | DST 를 만들 때 읽은 서브런 수 / 전체 뮤온 |
+| `n_mu_shower` / `r_mu_shower` | 샤워링 뮤온(`pe > mu_shower_npe`) 개수 / rate [Hz]. **1/R 이 τ(⁹Li)=0.257 s 에서 얼마나 떨어져 있나**를 표가 스스로 말한다 |
+| `n_lihe` / `e_lihe` / `lihe_stat` | ★예비 Li/He 적합 수·오차·상태 (`ok`\|`degen`\|`lowstat`\|`nofit`\|`noshower`\|`off`) |
+| `n_lihe_rev` / `e_lihe_rev` | 같은 적합을 **다음** 샤워링 뮤온까지의 시간에 (시간 역방향 대조). 물리 상관이 없으니 **0 과 맞아야 한다** |
+| `n_fn_side` | prompt 창을 [fn_e_lo, fn_e_hi] MeV 로 올린 페어링의 on-time 수. **T_Sat(포화 사건)을 합쳐** 센다 |
+| `n_fn_side_scaled` / `n_fn_side_lin` | 신호창 [1.2,12] MeV 로 외삽한 fast-n 수. `scaled` = 0차(평평)·1차(선형) 외삽의 평균(Daya Bay §4.3), `lin` = 1차 단독. 둘의 차이가 계통오차 |
+| `fn_sat_frac` | 사이드밴드 에너지 구간 사건 중 포화 사건의 비율. 1 에 가까우면 에너지 축이 눌려 있다는 뜻 (schema 1 DST 면 -1) |
+| `n_acci_rp` | accidental 교차검증 : R_S1·R_S2·(dt_max−dt_min)·live (RENE PTEP 2025 §2, Daya Bay Eq.1). `n_paired_acci × acciScale` 과 같은 양(multiplicity 전)이라 나란히 읽는다 |
+| `n_mult_rej` | multiplicity 가 걸러낸 on-time 쌍에서 우발 몫(off-time 의 같은 값 × acciScale)을 뺀 것 = **뮤온 유발 다중 중성자**(NEOS 'correlated background') 지표 |
+| `psd_mean` / `psd_rms` | 1–3 MeV clean single 의 꼬리비율 γ-band 평균·RMS (**파형 안정성 지표**. -1 = psd 없음) |
+| `n_ibd_psd_nlike` | IBD 후보 prompt 중 psd > mean + psd_nsig·rms 인 수. NEOS 의 p_psd 정의(§4.3.2.2)를 런 단위로. 분리력이 약해(FoM 0.5) **비율의 추이**로만 본다 |
+| `dt_min` ~ `iso_post` | IBD 페어링에 **실제 적용된** 창값 |
+| `mu_shower_npe` ~ `psd_nsig` | 배경 컷에 **실제 적용된** 값 |
 
-`lihe_stat` 넷 — `ok`(적합 성공) · `lowstat`(창 안 표본이 `lihe_min_cand`
-미만) · `nofit`(적합 실패) · `off`(기본값, 이 태그를 아직 계산 안 함).
-**`lowstat`/`nofit`/`off` 이면 `n_lihe`=`e_lihe`=`-1`** 이다 — 표로 그대로
-그리면 -1 이 찍히므로, 소비자(`gen-summary-html.sh`)는 반드시 `lihe_stat` 을
-먼저 본다.
+`lihe_stat` — `ok`(적합 성공) · `degen`(R_μ 가 1/τ_Li 의 2 배 안이라 우발항과
+축퇴. 값은 적혀 있지만 웹에는 안 나간다 — `mu_shower_npe` 를 올릴 것) ·
+`lowstat`(창 안 표본이 `lihe_min_cand` 미만) · `nofit` · `noshower`(샤워링 뮤온
+0) · `off`. **`ok` 가 아니면 `n_lihe`=`e_lihe`=`-1`** 이다 — 소비자
+(`gen-summary-html.sh`)는 반드시 `lihe_stat` 을 먼저 본다.
 
 ## `config/monitorcuts.params` — 컷 손잡이
 
@@ -320,31 +349,43 @@ _nH   live 763,275.1s  n_ibd=607,486  n_ibd_acci=555,257  lihe=332,054.4±576.8(
 4305 에서 게이트가 이미 한 번 통과했으므로 같은 코드 경로다(전환 승인의
 근거는 반복 통과이지, 4237 한 런의 단독 대조가 아니다).
 
-## Li/He·fast-n — ★예비. 분석팀 검증 전까지 물리로 읽지 말 것
+## 배경 레시피 v2 — ★예비. 분석팀 검증 전까지 물리로 읽지 말 것 (2026-09-08)
 
-이 사이트의 샤워링 뮤온 간격(**약 0.75~0.79s**, run 4305·4237 둘 다)이 Li/He
-의 τ(⁹Li 257ms, ⁸He 172ms)와 **거의 축퇴**돼 있다. 상관없는 우발 후보의 dt
-분포 자체가 뮤온 rate 로 정해지는 지수꼴이라, 적합이 그것을 통째로 Li/He
-성분으로 흡수한다.
+논문(NEOS 박사논문 2편 · PRL 118 121802 · Daya Bay 1402.6876 · RENE PTEP 2025
+093C03)의 정의를 읽고 RENE 트리에서 잴 수 있는 형태로 다시 세운 것이다. 설계와
+근거는 `docs/superpowers/specs/2026-09-08-background-recipes-v2-design.md`.
+**v1(2026-09-08 오전)이 왜 틀렸는지**가 곧 v2 의 정의다.
+
+| 배경 | 논문의 정의 | v1 의 문제 | v2 |
+|---|---|---|---|
+| accidental | off-window(time-delayed coincidence) · R₁·R₂·T | — | off-window 그대로 + **`n_acci_rp` 로 rate-곱을 나란히** |
+| fast-n | NEOS : PSD 로 prompt 의 proton recoil 을 잡는다. Daya Bay : prompt 12–100 MeV 사이드밴드를 0차·1차 외삽 | 사이드밴드 표본이 clean single 뿐 → **포화(93 %)를 다 버린 채** 7 % 로 셌다 | `T_Sat` 을 합쳐 센다. 0차·1차 외삽 평균 + 1차 단독 + 포화 비율 |
+| ⁹Li/⁸He | Daya Bay Eq.2 : `N_LiHe[R λ_Li e^{−λ_Li t}+(1−R) λ_He e^{−λ_He t}] + N_unc R_μ e^{−R_μ t}` | 우발항을 **상수**로 두었고 R_μ=1.33 Hz(문턱 3000)가 1/τ 와 축퇴 → 후보의 56 % 를 흡수 | 우발항 = R_μ e^{−R_μ t} (R_μ 는 데이터에서 고정), 문턱 20000 (R_μ 0.63 Hz, 1/R 1.6 s) · **시간 역방향 대조 `n_lihe_rev`** (0 이어야 한다) · 축퇴면 `degen` |
+| 상관 다중중성자 | NEOS : multiplicity 로 제거 | 없었다 | `n_mult_rej` = multiplicity 가 걸러낸 쌍의 우발 초과분 |
+| PSD | NEOS p_psd = (r − m_γ(E,t))/σ_γ, 3.5 σ 기각 | 없었다 | `psd_mean`/`psd_rms`(γ-band) + `n_ibd_psd_nlike`(mean+3σ 밖) — 분리력이 약해 추이용 |
+
+**★ 실측으로 확정한 이 사이트의 제약** (읽기 전용, 2026-09-08)
 
 ```
-4305 _nH   n_ibd=62,601   n_lihe=35,277 (62,601의 56%가 적합에 흡수)   n_ibd_acci=58,894 (94%는 우발)
+PSD    AmBe run 4221 : 포획이 뒤따르는 prompt 0.316±0.029 / 아닌 single 0.289±0.043 -> FoM 0.53 (NEOS 2.8)
+       같은 꼬리비율이 run 4332 에서는 0.40 (4221 은 0.29) -> 파형이 런에 따라 변한다 = 런 품질 지표
+포화   run 4332 : NPE 1500-3000 의 2.8 %, 3000-5000 의 12 %, 7265 이상의 93 % 가 포화
+뮤온   run 4305 : target 뮤온 3.05 Hz, pe>3000 1.33 Hz, pe>20000 0.63 Hz, pe>50000 은 0 (적분창 1 µs)
 ```
 
-물리적으로 말이 안 되는 비율이다 — **`n_lihe` 는 상한으로만 읽을 것.** 제대로
-하려면 시간 역방향(off-time) 대조 표본이 필요하고, 그것은 레시피 변경이라
-지금 범위 밖이다.
+**합성 DST 검증** (`tests/monitor-bg.test.sh`, 12/12) — Poisson 뮤온(0.2 Hz) 위에
+Li/He 참값 500 을 심으면 **507.5 ± 26.2** 로 되찾고, 시간 역방향은 **0.0 ± 3.9**.
+포화 사이드밴드 40쌍을 T_Sat 에 두면 `n_fn_side=40`, `fn_sat_frac=1.00`.
+n-like psd 60개를 심으면 63 을 센다(3 은 3σ 꼬리의 기대치).
 
-**fast-n 사이드밴드**에는 별도의 함정이 있다 — clean single 을 만들 때 이미
-포화(saturation) 사건을 버렸으므로(`RenePrdSingles.h` 의 Step2 순서), 고에너지
-사이드밴드에는 **'포화 미만'인 것만 남는다.** 진짜 fast-n prompt 의 상당
-부분이 애초에 표본에 들어오지 못한다. 외삽 배수(`n_fn_side_scaled`)도
-스펙트럼이 평평하다는 가정의 단순 폭 비율이다.
+**여전히 못 하는 것** — fast-n 은 이 사이트에서 가장 큰 배경일 가능성이 높다
+(NEOS 20 mwe 에서 off 배경의 73 % 가 PSD 로 제거된 fast-n → 톤당 60/일 → RENE
+0.27 t 면 ~16/일, n-Gd 후보 ~90/일의 20 %). 사이드밴드 외삽은 **크기**를 주지
+사건별 제거를 못 한다. 사건별 제거는 PSD 개선(분석팀 몫)이 필요하다. ⁹Li/⁸He 는
+이 크기·깊이에서 ~0.5/일로 작을 것이라 적합값은 대부분 **상한**으로 읽는다.
 
 **둘 다 웹 표에는 '(예비)' 로 나간다**(`lihe_stat=="ok"` 이고
-`n_fn_side_scaled>=0` 일 때만 값을 채우고, 그렇지 않으면 '—'). 레시피가
-분석팀 검증을 통과하기 전까지는 크기 정도로만 참고할 것 — 이 caveat 은
-`config/monitorcuts.params.example` 과 `BuildMetrics.C` 주석에도 남겨 두었다.
+`n_fn_side_scaled>=0` 일 때만 값을 채우고, 그렇지 않으면 '—').
 
 ---
 
