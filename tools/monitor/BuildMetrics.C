@@ -417,22 +417,45 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                 "         우발항과 축퇴한다. lihe_stat=degen 으로 낸다. mu_shower_npe 를 올릴 것\n",
                 run, rMu, 1 / kTauLiS);
 
-      //  ---- PSD γ-band : 1-3 MeV single 의 꼬리비율 평균·RMS (태그 무관) ----
+      //  ---- PSD γ-band : 에너지 밴드별 single 의 꼬리비율 평균·RMS (태그 무관) ----
+      //  NEOS §4.3.2.2 의 p_psd = (r − m_γ(E)) / σ_γ(E) 를 그대로 -- 꼬리비율은
+      //  에너지에 따라 움직이므로(실측) 밴드마다 따로 규격화한다. single 은 γ 가
+      //  압도적이라 그 자체가 γ-band 참조다. 표에 적는 psd_mean/psd_rms 는
+      //  1-3 MeV 값(런 품질 지표).
+      static const double kPsdBand[] = {0.6, 1.2, 2.0, 3.0, 4.5, 6.0, 12.0};
+      static const int kNPsdBand = 6;
       double psdMean = -1, psdRms = -1;
+      double bm[kNPsdBand], bs[kNPsdBand]; long long bn[kNPsdBand];
       {
          double s = 0, s2 = 0; long long n = 0;
+         double S1[kNPsdBand] = {0}, S2[kNPsdBand] = {0}; long long N[kNPsdBand] = {0};
          for (size_t k = 0; k < sing.size(); ++k) {
             if (psd[k] < 0) continue;
             double mev = NpeToMeV(sing[k]._pe_sum);
-            if (mev < 1.0 || mev > 3.0) continue;
-            s += psd[k]; s2 += (double)psd[k] * psd[k]; n++;
+            if (mev >= 1.0 && mev <= 3.0) { s += psd[k]; s2 += (double)psd[k] * psd[k]; n++; }
+            for (int b = 0; b < kNPsdBand; ++b)
+               if (mev >= kPsdBand[b] && mev < kPsdBand[b+1]) { S1[b] += psd[k]; S2[b] += (double)psd[k]*psd[k]; N[b]++; break; }
          }
          if (n >= 100) {
             psdMean = s / n;
             double var = s2 / n - psdMean * psdMean;
             psdRms = var > 0 ? std::sqrt(var) : 0;
          }
+         for (int b = 0; b < kNPsdBand; ++b) {
+            bn[b] = N[b]; bm[b] = N[b] > 0 ? S1[b] / N[b] : 0;
+            double var = N[b] > 0 ? S2[b] / N[b] - bm[b] * bm[b] : 0;
+            bs[b] = var > 0 ? std::sqrt(var) : 0;
+         }
       }
+      //  prompt 하나의 규격화된 PSD 값. 밴드 표본이 100 미만이면 판정하지 않는다(-99).
+      auto pPsd = [&](size_t k) -> double {
+         if (psd[k] < 0) return -99;
+         double mev = NpeToMeV(sing[k]._pe_sum);
+         for (int b = 0; b < kNPsdBand; ++b)
+            if (mev >= kPsdBand[b] && mev < kPsdBand[b+1])
+               return (bn[b] >= 100 && bs[b] > 0) ? (psd[k] - bm[b]) / bs[b] : -99;
+         return -99;
+      };
 
       //  ---- fast-n 용 합집합 : single + 포화 사건. 시간 순 ----
       //  multiplicity 판정이 '모든 원소가 LOWER 위' 를 전제하므로(RenePairing.h)
@@ -557,7 +580,10 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                       run, tag.c_str(), wf.s1lo, w2.s1hi);
          }
 
-         //  ---- PSD n-like : IBD 후보 prompt 중 γ-band 에서 psd_nsig σ 이상 벗어난 수 ----
+         //  ---- PSD n-like : IBD 후보 prompt 중 p_psd = (psd − m_γ(E))/σ_γ(E) > psd_nsig 인 수 ----
+         //  AmBe 선원 실측(tools/psd, 2026-09-09) : 이 변수로 γ 99 % 수용에서 recoil 을
+         //  1.2-2 MeV 36 % · 2-3 MeV 18 % · 3-4.5 MeV 5 % 기각한다. 크지 않아 컷이 아니라
+         //  **추이 지표**로 쓴다.
          if (psdMean >= 0 && psdRms > 0) {
             long long nl = 0;
             for (double t : promptT) {
@@ -566,7 +592,8 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                auto it = std::lower_bound(sing.begin(), sing.end(), key);
                if (it == sing.end() || it->_t_us != t) continue;
                size_t k = (size_t)(it - sing.begin());
-               if (psd[k] >= 0 && psd[k] > psdMean + psdNsig * psdRms) nl++;
+               double p = pPsd(k);
+               if (p > -90 && p > psdNsig) nl++;
             }
             r.nIbdPsdNlike = nl;
          }

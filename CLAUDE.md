@@ -914,6 +914,34 @@ FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까�
 `websummary.sh` 의 `run_complete` 에 "FADC 0 이고 badrun/ 이 있으면 완결" 을
 더했다(badrun 이 없는 FADC 0 런 = 수집 전 자리는 여전히 막는다). 시험 [1b].
 
+#### 11.165 ★★ PSD 기준 — 중성자 선원 런으로 세웠다 (2026-09-09, `tools/psd/`)
+
+사용자 지시 : AmBe(2790~2852) · Cf252(2856~2915) 선원을 굴뚝 위 0 mm 부터 5 cm 씩
+800 mm 까지 내리며 받은 데이터로 중성자 파형 레퍼런스를 만들어 PSD 기준을 세울 것.
+상세와 표는 `tools/psd/README.md`. 요점만 :
+
+```
+★ 그 선원 런에는 Gd 가 없었다   n-Gd 창 상관 쌍 ~30 / n-H 창(2.2 MeV, τ≈200 µs) 수천~수만
+★ Cf252 는 참조가 못 된다         분열 γ 가 prompt 를 지배. corr 대 γ FoM 0.00-0.04
+★ AmBe 는 된다                     4.44 γ 없는 가지의 순수 recoil prompt 가 corr 의 50-80 %
+분리력                              순수 recoil 템플릿 대 γ  FoM ≈ 0.9 (NEOS 2.8)
+                                    γ 99 % 수용에서 recoil 기각 : 1.2-2 MeV 36 % · 2-3 MeV 18 % · 3-4.5 MeV 5 %
+위치 의존                           2.2 MeV 봉우리 ±1.3 % (0→800 mm) · 4.44 MeV 5.16→5.5 · 파형 mt 는 무관
+```
+
+**세운 기준** : `p_psd(E) = (psd − m_γ(E)) / σ_γ(E)`, m_γ·σ_γ 는 그 런의 clean single 을
+에너지 밴드로 나눠 잰 값(NEOS §4.3.2.2). `BuildMetrics.C` 의 `n_ibd_psd_nlike` 를 이
+정의로 바꿨다. **사건별 컷이 아니라 추이 지표다** — 이 분리력으로는 그 이상이 안 된다.
+꼬리 시작 40 ns(DST `psd`)와 60 ns(NEOS 최적)는 오차 안에서 같아 DST 정의는 두었다.
+Fisher 5 변수 결합은 혼합 표본에서 가중치가 런마다 요동해 단일 변수보다 낫지 않았다.
+
+**IBD 중성자(20 keV)는 파형이 γ 다** — recoil 빛이 문턱 아래라 delayed 는 포획 γ 뿐.
+PSD 가 가르는 것은 fast-n 배경의 prompt(MeV 중성자의 recoil, 열화 산란이 수십 ns 에
+걸쳐 빛을 낸다)이고, 선원 중성자의 prompt recoil 이 그 레퍼런스다. 사용자의 직관과 맞는다.
+
+**도구** `tools/psd/{PsdScan.C, PsdAnalyze.C, PsdSummary.C, psd-scan.sh, psd-source-scan.sh,
+source-runs.tsv}`. 산출물 `/scratch/RunSummary/psd/` (재생 가능, 약 20 분).
+
 #### 11.164 ★ 실데이터 — run 4305 를 스키마 2 로 다시 만들고 v2 로 계산했다
 
 ```
@@ -2257,7 +2285,9 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
                 수동 실행/확인은 지금도 된다
 DST 일괄   /Data_ssd/LOG/dstbuild-batch.sh  완결 런 40개를 스키마 2 로 (§11.164)
-                로그 /Data_ssd/LOG/dstbuild-batch.log. 끝나면 metrics.sh --list ... --verify
+                로그 /Data_ssd/LOG/dstbuild-batch.log. 끝나면 /Data_ssd/LOG/after-dstbatch.sh 가
+                websummary.sh(발행 없음, config/websummary.params publish=0)를 스스로 돌려
+                지표·웹 표를 만든다 -> /scratch/RunSummary/web/summary.html
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -2275,6 +2305,9 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 여섯** (자세한 것은 각 절)
 
 ```
+§11.165         ★ PSD 기준을 중성자 선원 런으로 세웠다 (tools/psd). 그 런은 Gd 없는 LS 였고,
+                Cf252 는 참조가 못 되며 AmBe 순수 recoil 가지가 레퍼런스. 분리력 FoM≈0.9 —
+                γ 99 % 수용에서 recoil 기각 36/18/5 % (1.2-2 / 2-3 / 3-4.5 MeV). 추이 지표로만
 §11.161~11.164  ★ 배경 레시피 v2 — 논문 정의(NEOS 박사논문 2편 · PRL · Daya Bay · RENE PTEP)로
                 다시 세우고 실측으로 걸렀다. DST 스키마 2(psd 열 + T_Sat), Li/He 는 Daya Bay
                 Eq.2(우발항 R_μ e^{-R_μ t}) + 시간 역방향 대조, fast-n 은 포화 사건을 합친

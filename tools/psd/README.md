@@ -1,0 +1,129 @@
+# PSD 기준 세우기 — 중성자 선원 데이터로 (2026-09-09)
+
+**목적.** fast-neutron 배경의 prompt(proton recoil)를 IBD prompt(양전자, γ-like)와 파형
+모양으로 가르는 기준을 **이 검출기의 실측**으로 세운다. NEOS 는 이것으로 반응로-off
+배경의 73 % 를 걷어냈다(PRL 118 121802). RENE 는 20-inch PMT 두 개와 큰 부피라 펄스가
+넓어(반치폭 50–60 ns) 분리력이 약할 것으로 예상됐고, 실측이 그것을 수치로 확정했다.
+
+사용자 지시(2026-09-09) : 중성자 선원 데이터 — AmBe (run 2790~2852), Cf252
+(run 2856~2915), 선원을 검출기 가운데 굴뚝 위 0 mm 에서 5 cm 씩 800 mm(타겟 아크릴
+바닥 약 1 cm 위)까지 — 로 중성자 파형 레퍼런스를 만들 것. IBD 중성자(평균 20 keV)와
+선원 중성자(수 MeV)의 차이는 thermalization 산란 과정이 파형에 남는 데 있다.
+
+## 0. 먼저 알아야 할 사실 — 그 선원 런에는 Gd 가 없었다
+
+```
+n-Gd 창(6-10 MeV) 으로 태그       상관 쌍 ~30 / 6 서브런        <- 없다
+n-H  창(1.87-2.59 MeV) 으로 태그  상관 쌍 6,000~15,000 (AmBe) · 3만~10만 (Cf)   <- 있다
+```
+
+2025-11 선원 런은 **Gd 없는 LS** 상태였다. 포획 = n-H 2.2 MeV, τ≈200 µs. 그래서
+이 문서의 모든 태그는 n-H 창, on-window [5,400] µs, off-window [1000,1395] µs 다.
+(Gd-LS 를 채운 뒤의 AmBe 는 run 4221, 그때는 τ≈28 µs — `AnalysisCondition.h` 주석.)
+
+## 1. 방법 (`PsdScan.C` → `PsdAnalyze.C` → `PsdSummary.C`)
+
+```
+PsdScan     PRD 파형에서 사건마다 : q · 피크 · CFD · rise · fwhm · pkfrac(피크/적분) ·
+            tail20/30/40/50(피크+N샘플 이후 적분/전체) · late · mt(전하가중 평균시각) · asym
+            + 태그 : tagN(뒤 n-Gd), tagG(포획창 사건) -- 이 트리에서는 n-H 로 다시 정한다
+PsdAnalyze  에너지 밴드(0.6-1.2 / 1.2-2 / 2-3 / 3-4.5 / 4.5-6 MeV)마다
+              corr = on − off   : 선원 중성자와 상관된 prompt (γ + recoil 혼합)
+              gam  = 포획 γ (앞에 prompt 가 있는 n-H 창 사건, on − off) = 2.2 MeV γ 참조
+              unc  = off 짝 = 무상관 사건
+            변수마다 평균·RMS·FoM, Fisher 판별(5 변수), 투영 히스토그램
+decomp      corr = f·N + (1−f)·G 분해 : (1−f) = min_x corr(x)/G(x) (γ 봉우리 빈),
+            N = corr − (1−f)G  -> 순수 recoil 템플릿. FoM(N,G), γ 99/95 % 수용 컷에서 N 기각률
+PsdSummary  위치별 응답 : n-H 2.2 MeV 봉우리 재구성 에너지 · AmBe 4.44 MeV 봉우리 · γ 평균시각
+```
+
+FoM = |m_N − m_G| / sqrt(σ_N² + σ_G²). NEOS 는 2.8 (60 ns 꼬리).
+
+## 2. 결과
+
+### 2.1 Cf252 는 참조가 못 된다, AmBe 는 된다
+
+```
+Cf252  100-800 mm  corr 대 γ  FoM 0.00-0.04  (2-3 MeV, 5-13만 쌍)   f_N ≈ 0.05
+AmBe   100-800 mm  corr 대 γ  FoM 0.4-0.9                            f_N ≈ 0.5-0.8
+```
+
+Cf252 의 prompt 는 분열 γ(평균 8 개, ~7 MeV)가 지배해 recoil 빛이 묻힌다. AmBe 는
+4.44 MeV γ 가 없는 가지(α+⁹Be → ¹²C 바닥상태)의 **순수 recoil prompt** 가 섞여 있고,
+그것이 corr 분포에 두 번째 성분으로 보인다(pkfrac 낮은 쪽 33 % 대 γ 2.7 %, run 2821).
+**Cf252 의 다중 중성자는 파형이 아니라 포획 수(multiplicity)로만 드러난다.**
+
+### 2.2 순수 recoil 템플릿 대 γ — AmBe 100~800 mm 16 런 평균
+
+| prompt 밴드 | 변수 | FoM | γ 99 % 수용 컷에서 recoil 기각 | γ 95 % 에서 |
+|---|---|---|---|---|
+| 1.2–2 MeV | tail30 (60 ns) | 0.88 ± 0.08 | **36 %** | 50 % |
+| | tail20 (40 ns, DST `psd`) | 0.89 ± 0.08 | 29 % | 54 % |
+| | mt | 0.70 ± 0.03 | 25 % | 46 % |
+| 2–3 MeV | tail30 | 0.88 ± 0.07 | **18 %** | 32 % |
+| | tail20 | 0.82 ± 0.10 | 12 % | 34 % |
+| | mt | 0.89 ± 0.07 | 11 % | 32 % |
+| 3–4.5 MeV | pkfrac | 0.96 ± 0.09 | 8 % | 38 % |
+| | tail30 | 0.66 ± 0.04 | 5 % | 13 % |
+
+- **분리력은 ~1σ 다.** 사건별로 중성자를 걷어내는 컷은 되지 않는다(NEOS 2.8σ 와 비교).
+  γ 99 % 를 지키면서 recoil 을 1.2–2 MeV 에서 3 분의 1, 2–3 MeV 에서 5 분의 1 기각하는
+  정도다. 그 위 에너지에서는 AmBe 의 recoil prompt 가 4.44 γ 와 겹쳐 템플릿 자체가
+  γ-like 가 된다.
+- Fisher 5 변수 결합은 **혼합 표본에서 가중치를 구하면 런마다 크게 흔들려**(pkfrac 계수가
+  10³ 단위로 요동) 단일 변수보다 낫지 않다. 순수 N 템플릿으로 가중치를 구하려면 분해를
+  다변수로 해야 하는데 이번 범위 밖이다.
+- 꼬리 시작 40 ns(지금 DST 의 `psd`)와 60 ns(NEOS 최적)는 오차 안에서 같다. **DST 정의를
+  바꾸지 않았다** — 스키마 2 로 만드는 일괄 작업과 일관성을 지키기 위해서다.
+
+### 2.3 위치 의존 (검출기 응답 교정 재료) — `psd_summary.tsv`, `psd_*_vs_pos.png`
+
+```
+n-H 2.2 MeV 봉우리 (현재 보정 기준 재구성 에너지)
+   AmBe  0 mm 2.413 → 500-650 mm 2.472 → 800 mm 2.447   (±1.3 %)
+   Cf252 0 mm 2.374 → 550 mm 2.440   → 800 mm 2.416     (±1.5 %)
+   ★ 절대값이 2.223 보다 8-11 % 높다 = 그 시점의 광량이 지금 보정보다 컸다는 뜻
+   ★ AmBe 와 Cf 가 같은 위치에서 1.5 % 다르다 -- Cf 의 pile-up 이 의심된다. 미해결
+AmBe 4.44 MeV 봉우리   0 mm 5.16 → 300-650 mm 5.4-5.5   (γ-catcher 밖→안 으로 들어가며 오른다)
+포획 γ 평균시각 mt      23.4 (0 mm) → 23.05 (800 mm) 샘플  : 파형은 높이에 거의 무관
+```
+
+### 2.4 IBD 중성자와의 관계 — 사용자 가설에 대한 답
+
+IBD 중성자(~20 keV)는 proton recoil 빛이 문턱 아래라 **delayed 신호는 포획 γ 뿐**이다 —
+파형은 γ 다. PSD 가 가르는 것은 IBD 의 중성자가 아니라 **fast-n 배경의 prompt**
+(MeV 중성자의 recoil, 열화 산란이 수십 ns 에 걸쳐 빛을 낸다)다. 선원 중성자(수 MeV)의
+prompt recoil 이 바로 그 레퍼런스이고, 그래서 AmBe 의 순수 recoil 가지가 쓸모 있다.
+사용자의 직관 — thermalization 산란 과정이 파형을 넓힌다 — 이 실측과 맞는다 :
+recoil 템플릿은 fwhm·mt 가 크고 pkfrac 이 작다.
+
+## 3. 그래서 세운 기준 (모니터링에 넣은 것)
+
+```
+p_psd(E) = (psd − m_γ(E)) / σ_γ(E)      psd = DST 의 꼬리비율(피크+40 ns 이후/전체)
+m_γ, σ_γ  = 그 런의 clean single 을 에너지 밴드(0.6/1.2/2/3/4.5/6/12 MeV)로 나눠 잰 평균·RMS
+             (single 은 γ 가 압도적 = 그 자체가 γ-band 참조. NEOS §4.3.2.2 의 정의)
+n-like    = IBD 후보 prompt 중 p_psd > psd_nsig (기본 3)
+```
+
+`BuildMetrics.C` 의 `n_ibd_psd_nlike` 가 이것이다(2026-09-09 에 에너지 밴드별 규격화로
+바꿨다). **컷이 아니라 추이 지표다** — 이 분리력으로는 nlike 분율이 오르는 것이 fast-n
+이 늘었다는 신호일 뿐, 사건별 제거는 못 한다.
+
+## 4. 재현
+
+```bash
+tools/psd/psd-source-scan.sh                 # 선원 런 전부 스캔 + 분석 + 요약 (약 20 분, 2 병렬)
+tools/psd/psd-source-scan.sh --analyze-only  # 스캔은 두고 분석만
+# 출력 /scratch/RunSummary/psd/ : psdscan_<run>.root · psdana_<run>.root · psdana_all.tsv ·
+#      psd_summary.tsv · psd_capture_vs_pos.png · psd_ambe_vs_pos.png · psd_mt_vs_pos.png
+```
+
+선원 위치 지도는 `source-runs.tsv` (런 카탈로그 `rundesc` 의 "NN mm" 에서 뽑았다).
+
+## 5. 더 할 수 있는 것
+
+- 다변수 분해(N 템플릿의 공분산까지)로 Fisher 를 제대로 세우면 1σ 를 조금 넘길 수 있다.
+- 평균 파형 템플릿(recoil 대 γ)을 만들어 샘플별 우도비로 판별 — 20-inch PMT 의
+  late pulse(100 ns, 1 %)가 섞이므로 그것도 템플릿에 들어간다.
+- Gd-LS 를 채운 뒤의 AmBe(run 4221)로 같은 분석을 하면 n-Gd 창 태그로 순도가 오른다.
