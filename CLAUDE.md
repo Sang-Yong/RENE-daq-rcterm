@@ -914,7 +914,7 @@ FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까�
 `websummary.sh` 의 `run_complete` 에 "FADC 0 이고 badrun/ 이 있으면 완결" 을
 더했다(badrun 이 없는 FADC 0 런 = 수집 전 자리는 여전히 막는다). 시험 [1b].
 
-#### 11.168 ★ SADC 문턱을 MIP/2 로 바꿨다 (사용자 지시, 2026-09-09 05:14) — run 4334 부터
+#### 11.168 ★ SADC 문턱을 MIP/2 로 바꿨다 (사용자 지시, 2026-09-09 05:14) — run 4335 부터 (4334 는 05:14 편집 전인 04:46 에 떴다)
 
 `/home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026.config` 의 SADCT `THR` 줄을 바꿨다.
 옛 줄은 주석으로 남겼고 백업은 같은 자리 `.bak-20260909`.
@@ -933,8 +933,8 @@ FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까�
 1 kHz 넘게 오를 수 있고 그만큼 after-muon 데드타임(150 µs × rate)이 11 → 15 % 대로 는다.
 패널 9·10(ch18~21)은 문턱과 무관하게 무반응이라 케이블·PMT 확인 대상.
 
-**확인** : `/Data_ssd/LOG/veto-check-4334.sh` 가 run 4334 의 PRD 12 개가 생기면
-`veto-history.sh 4334 4334` 를 돌려 `/Data_ssd/LOG/veto-check-4334.log` 에 S_THR 과 패널
+**확인** : `/Data_ssd/LOG/veto-check-4335.sh` 가 run 4335 의 PRD 12 개가 생기면
+`veto-history.sh 4335 4335` 를 돌려 `/Data_ssd/LOG/veto-check-4335.log` 에 S_THR 과 패널
 반응을 남긴다. 적용은 rcterm 이 런 시작 때 파일을 복사하므로 **다음 로테이션(09-10 04:46)**.
 
 #### 11.167 ★★ 문턱값 이력과 VETO 패널 추이 — "08-26 에 문턱을 낮췄는데 뮤온이 줄었다"
@@ -2379,7 +2379,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 여섯** (자세한 것은 각 절)
 
 ```
-§11.168         ★ SADC 문턱을 MIP/2 로 바꿨다 (run 4334 부터). 확인은 /Data_ssd/LOG/veto-check-4334.log
+§11.168         ★ SADC 문턱을 MIP/2 로 바꿨다 (run 4335 부터). 확인은 /Data_ssd/LOG/veto-check-4335.log
 §11.167         ★ 문턱값 이력 — SADC 문턱은 06-14(run 4237) 이후 불변, 08-26 의 변경은 설정 파일에
                 덮어써졌다. 패널 1 은 09-01 HV 사고 뒤 -10 % 하강 중. 패널 6/15 만 반응
 §11.166         ★ 지표 40 런 채움 — 08-26 재기동 뒤 fast-n 지표 4배, veto 패널 1 반응 -12 %,
