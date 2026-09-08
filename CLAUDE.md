@@ -80,7 +80,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `.claude/skills/recovering-aborted-daq-runs/SKILL.md` | **런이 비정상 종료했을 때 무엇부터 하나.** Claude Code 가 증상을 보면 스스로 읽는다 |
-| `tools/monitor/README.md` | 모니터링 3단계 — PRD 에서 livetime·이벤트 수 -> IBD 후보 -> 효율 보정 rate 추이 |
+| `tools/monitor/README.md` | 모니터링 5단계(2026-09-08~) — PRD/DST 에서 livetime·이벤트 수 -> DST(2차 프로덕션) -> IBD·Li/He·fast-n(예비) -> 효율 보정 rate 추이 -> 웹 표+발행 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가. `claude-transcript` 도 여기 |
 | `docs/*.pptx` | 발표 자료 — 종합(한/영) · 운용자용(한). **저장소에 없다** — `.gitignore` 대상이라 `tools/slides/make_*.py` 로 만들어 쓴다 |
 | `tools/slides/README.md` | 발표자료를 코드로 만드는 이유와 방법. `audit.py` 로 배치를 점검한다 |
@@ -845,6 +845,158 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > **옛 기록은 `docs/HISTORY-2026-08.md` 에 있다.** 2026-08-13 ~ 08-25 분을
 > 그리로 옮겼다 (절 번호 §11.x 는 그대로다). `CLAUDE.md` 는 매 세션 통째로
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
+
+### 2026-09-08 — 런 서머리 웹 모니터링 5단계 구축 (Task 1~10, 구글사이트 발행까지)
+
+`RENE-daq-rcterm/tools/monitor` 의 옛 3단계(run-summary → ibd-summary →
+rate-trend, PRD 직독) 위에 **DST(2차 프로덕션) 기반 5단계**를 새로 지었다.
+JSNS2 SCM 스타일 런당 1줄 표 + 항목별 추이 그림 + 구글사이트 자동 발행이
+목표다(설계 `docs/superpowers/specs/2026-09-08-run-summary-web-design.md`,
+계획 `docs/superpowers/plans/2026-09-08-run-summary-web.md` — 둘 다 이
+저장소 안, `work-web` 클론). **별도 클론(`~/DAQ/work-web`)에서 SDD 로 10개
+태스크를 디스패치·리뷰·수정해 만들었다(§8 대로 — 운영 디렉터리는
+Task 10 의 두 실측 실행 전까지 무접촉이었고, 그 둘도 산출물이
+`/scratch/RunSummary`·`/scratch/RAW/004281` 뿐이라 수집을 건드리지 않았다).**
+
+#### 11.154 ★★ 파이프라인 — DST 를 끼워 PRD 재독 없이 레시피를 바꾼다
+
+```
+1단계(기존) run-summary.sh  PRD  -> run_summary.tsv        livetime·종류별 이벤트
+2단계(신설) dst-build.sh    PRD  -> dst/DST_<런>.root       뮤온+클린싱글, ★재생 가능 캐시
+3단계(신설) metrics.sh      DST  -> metrics_summary.tsv     IBD·acci·Li/He·fast-n(예비)
+(과도기)    ibd-summary.sh  PRD  -> pair_summary.tsv        legacy, 교차검증 + 4단계 입력
+4단계(개편) rate-trend.sh   pair_summary -> PNG 11종         효율보정 + 시간축 추이
+5단계(신설) websummary.sh   전부 -> HTML+시트+드라이브       게이트 + 발행 오케스트레이션
+```
+
+**DST 를 만든 이유** — fast-n·Li/He 는 "직전 샤워링 뮤온까지 dt" 가 필요해
+PRD 전체를 훑어야 한다. 레시피(문턱값)가 바뀔 때마다 그걸 다시 하면 12,722
+서브런짜리 런 하나에 5시간이 든다. 뮤온 시각 + 클린싱글만 DST 에 뽑아 두면
+그 뒤로는 초 단위다. **★ DST 는 Merged 와 같은 성격의 재생 가능 캐시다
+(§11.149 의 결론과 동일) — 백업·dataflow 청소 대상이 아니다.** PRD 만 있으면
+`dst-build.sh --force` 로 언제든 다시 만든다.
+
+실측 비용 (첫 빌드, 캐시 미스) :
+
+| 런 | DST 크기 | 서브런 | 소요 | 서브런당 | singles | muons |
+|---|---|---|---|---|---|---|
+| 4305 | 406 MB | 1,440 | 1,930.2 s | 1.34 s | 7,601,557 | 68,654,229 |
+| 4237 | 3.5 GB | 12,722 | 18,170 s (5.05h) | 1.43 s | 69,360,981 | 610,833,552 |
+
+캐시 자리는 legacy(`cache/singles/`)와 **분리**했다(`cache/`) — 합치면 legacy
+캐시에 뮤온이 없어 dst-build 가 그걸 그대로 읽을 때 carry 가 이중 적용되는
+함정이 있다(리뷰가 도달 가능성까지 확인 — 지금 코드 경로에서는 안 열리지만,
+합치는 순간 다시 열린다).
+
+#### 11.155 ★★ 전환 게이트 실측 — `metrics.sh --verify`, 기준 런 4305 + 4237
+
+`metrics_summary.tsv`(DST 경로) 와 `pair_summary.tsv`(legacy) 의 공통
+(run,tag) 행에서 `n_ibd`·`n_ibd_acci` 를 대조한다. `websummary.params` 의
+`metrics_source` 를 `dst` 로 바꾸는 것은 **이 게이트가 반복 통과한 뒤 사람이
+승인**해야 한다(지금은 `legacy` 로 잠겨 있다).
+
+```
+run 4305   [VERIFY] 공통 2 행, 불일치 0
+           _nGd  n_ibd=82      n_ibd_acci=17       (DST·legacy 일치)
+           _nH   n_ibd=62,601  n_ibd_acci=58,894   (DST·legacy 일치)
+
+run 4237   metrics_summary.tsv 에는 있음(DST 경로, 아래) — pair_summary.tsv
+           (legacy) 에는 없음. legacy 51시간짜리 페어링(ibd-summary.sh)이
+           4237 을 아직 안 돌았기 때문 — README 가 이미 "급하지 않다"고
+           못박아 둔 그 작업이다. ★ 그래서 --verify 의 공통 행은 지금도
+           2행(4305)뿐이고, 그 2행의 불일치는 0.
+
+           4237 자체 값 (DST 경로, metrics.sh --list 4237, DST 로드 83.5s) :
+           _nGd  live 763,275.1s  n_ibd=854      n_ibd_acci=250
+           _nH   live 763,275.1s  n_ibd=607,486  n_ibd_acci=555,257
+```
+
+**결론 — 대조된 행의 물리 불일치는 0 이지만, 4237 의 legacy 교차검증은 아직
+못 했다(별개의 미완료 작업이지 이번에 생긴 결함이 아니다).** DST 값 자체
+(4237)는 확보돼 있고, 같은 코드 경로가 4305 에서 이미 통과했다.
+`metrics_source=dst` 전환은 여전히 사용자 승인 대기.
+
+#### 11.156 ★예비 — Li/He·fast-n 은 이 사이트에서 레시피 한계가 실측으로 드러났다
+
+샤워링 뮤온 평균 간격이 **0.75~0.79 s**(run 4305·4237 둘 다)로 Li/He 의
+τ(⁹Li 257ms, ⁸He 172ms)와 축퇴돼 있다. 우발 후보의 dt 분포 자체가 뮤온
+rate 로 정해지는 지수꼴이라, 적합이 그것을 통째로 Li/He 로 흡수한다.
+
+```
+run 4305 _nH   n_ibd=62,601   n_lihe=35,277(적합에 56% 흡수)   n_ibd_acci=58,894(94%가 우발)
+```
+
+**`n_lihe` 는 상한으로만 읽을 것** — 제대로 하려면 시간 역방향(off-time)
+대조 표본이 필요하고, 그건 레시피 변경이라 이번 범위 밖이다. fast-n
+사이드밴드도 clean single 을 만들 때 이미 포화 사건을 버려(`RenePrdSingles.h`
+Step2 순서) 고에너지 쪽에 '포화 미만'만 남는 구조적 결손이 있다. 웹 표에는
+`lihe_stat=="ok"`·`n_fn_side_scaled>=0` 일 때만 값이 채워지고 **'(예비)'**
+가 붙는다. 분석팀 검증 전까지 물리로 읽지 말 것.
+
+#### 11.157 발행 모듈 — 구글 시트/드라이브, dry-run 은 절대 네트워크에 안 닿는다
+
+`publish_google.py` 가 시트(런당 1행 append-only) + 드라이브(PNG 11종을
+같은 파일 ID 로 교체)를 맡는다.
+
+**컨트롤러 판정 R6** — `--dry-run` 은 `--init` 과 결합돼도 자격증명을
+찾지도 네트워크를 건드리지도 않는다(이 저장소의 dry-run 불변 약속, §11.148
+이 메일 발송에서 고친 것과 같은 원칙 — dry-run 이 조합에 따라 예외적으로
+바깥에 닿으면 그 약속이 깨진다).
+
+**컨트롤러 판정 R7** — 시트는 append-only 유지. 시트의 현재 최댓값보다
+낮은 런이 나중에(되메움) 와도 삽입하지 않고 그대로 끝에 붙이며 `[WARN]`
+만 낸다 — GoodRuns 시트에서 실제로 겪은 되메움(§11.5 의 4208~4211)과 같은
+성격이라, 단일 기록자 보장은 `websummary.sh` 의 `flock` 몫으로 남기고
+삽입 로직은 단순하게 뒀다. 쓰기 전 백업 + 쓴 뒤 되대조, 다르면 `[FATAL]`.
+
+**웹 표의 물리량 변환 — 컨트롤러 판정 R5.** MeV→NPE 컷 오버라이드는 계획이
+처음 정한 선형 환산이 아니라 **분석 헤더 자신의 `MeVToNpe()`** 를 쓴다 —
+창 상수를 만든 바로 그 함수라서(`S2_MIN_NPE = MeVToNpe(6)`), `s2_lo_mev = 6`
+이 기본 창을 정확히 되살린다. 선형 변환을 그대로 썼으면 같은 12 MeV 가 창
+정의(7,265 NPE)와 변환(6,106 NPE)에서 다른 값이 되어 fast-n 사이드밴드가
+신호창을 침범했다(실측으로 겹침을 확인하고 나서 정정).
+
+#### 11.158 run 4281 재처리 — 열리는 파일은 격리가 아니라 다시 돌린다 (§5.9, 컨트롤러 판정 R8)
+
+`websummary.sh` 의 완결 게이트가 run 4281(FADC 5 / PRD 0, 08-15 시험 런)
+에서 막혀 있었다. 원본 FADC·SADC 는 멀쩡히 열리므로(§5.9 의 `bad_raw` 가
+아니라 그냥 '한 번도 안 돌린 것') **격리 대상이 아니라 재처리 대상**이다.
+
+```bash
+scripts/postrun.sh 4281 --from 0 --rawroot /scratch/RAW
+```
+
+`find_tcblog()`(§11.139)가 `/scratch/DAQ_LOG/RAW_log.old001/TCB_004281.log`
+를 찾아 `Run004281_DLY_THR.log` 를 만들었고, merge 36초 + production 5개
+병렬로 **총 41초**에 끝났다(§5.9 견적 "약 4분"보다 빠르다 — 지금은 10G
+링크, §11.137). FADC 5 = PRD 5 로 완결.
+
+**게이트 실측 (재처리 직후)** — `start_run=4280` 기준 **32개 런**(4280 부터
+4323 까지, 그 사이 boot-fail 로 RAW 디렉터리 자체가 없는 자리들 — 예:
+4308~4312, §11.119 의 TCB 장애 — 은 게이트에 걸리지 않고 그냥 넘어간다)이
+연속 완결로 잡히고, 다음은 **run 4324** 에서 막힌다(그 시점에 FADC=0, 아직
+수집 전인 자리 — 뒤쪽 4325·4326 은 이미 완결이지만 연속 규칙이라 건너뛰지
+않는다). 정상적인 진행 경계이지 결함이 아니다.
+
+#### 11.159 검증 — 시험 9벌, 전부 PASS (2026-09-08 최종 스윕)
+
+```
+monitor-bg        7/7    (Li/He 적합 6씨앗 재현, IBD 오버라이드, verify 거부/판별)
+monitor-dst       6/6    (dst-build 스키마·캐시·carry 되돌리기)
+monitor-html      7/7    (gen-summary-html 15열, '(예비)' 표기, legacy/dst 갈림)
+monitor-metrics   PASS (run 4305)   [VERIFY] 공통 2 행, 불일치 0
+monitor-muons     6/6    (샤워링 판정, 뮤온 스키마)
+monitor-pairing   4/4
+monitor-publish   7/7    (시트 append-only, 되대조, dry-run 이 네트워크에 안 닿음)
+monitor-typetrend 7 기존 + 4 신규 PNG, PDF 11쪽, 퇴화(빈 typeRate) 경로에서도 마감 확인
+websummary        8/8    (게이트, 잠금, publish=1 가짜 스테이지, cron 환경)
+```
+
+전부 mktemp 샌드박스 — 실 `/scratch`·`/Data_ssd`·구글 API 무접촉.
+
+**남은 것 (사용자 1회성 + 배포, §11.142 참조)** — 구글 시트/드라이브
+`--init`, cron 27분 등록, `metrics_source=dst` 최종 승인(전환 게이트가 더
+반복 통과한 뒤).
 
 ### 2026-09-03 — 백업 하드를 두 개 순서대로 쓰게 하고, 결과를 메일로 보낸다
 
@@ -1983,6 +2135,9 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       저장소 서버 data_backup_simple_code9.sh          하드2 를 채우는 중
 감시       chainwatch cron 5분 · sheetlog 매시 07분 · mailq-send 5분
+발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
+                미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
+                수동 실행/확인은 지금도 된다
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -1994,9 +2149,10 @@ scripts/mailq-send.sh --status          # 저장소 서버가 보낸 메일 큐
 tail -2 /Data_ssd/LOG/reprocess-old42-{A,B}.log
 ssh store 'ps -eo pid,lstart,args | grep -E "data_backup|storage-backup" | grep -v grep'
 ssh store 'tail -c 400 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -3'
+tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cron 미설치라도 읽힌다)
 ```
 
-**최근에 크게 바뀐 것 넷** (자세한 것은 각 절)
+**최근에 크게 바뀐 것 다섯** (자세한 것은 각 절)
 
 ```
 §11.143~11.147  외장하드 백업을 하드 2개 순차로 + 결과를 메일로
@@ -2007,6 +2163,12 @@ ssh store 'tail -c 400 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -3'
                 Merged 를 백업에서 빼고(A) · 이미 있는 파일은 안 세고(B) ·
                 자리가 남으면 다시 계획하고(C) · rc=24 는 생존자만 살린다(D)
 §11.153         옛 런 42개 조사 -> 재처리 21 · 격리 2 · merge 불가 4 · 할 것 없음 16
+§11.154~159     런 서머리 웹 모니터링 5단계 구축 완료 — DST(2차 프로덕션) ·
+                전환 게이트(4305+4237 실측) · Li/He·fast-n 예비 · 구글 발행
+                모듈 · run 4281 재처리로 게이트 32런까지 진행. 설계
+                docs/superpowers/specs/2026-09-08-run-summary-web-design.md
+                · 계획 docs/superpowers/plans/2026-09-08-run-summary-web.md
+                (둘 다 work-web 클론 안). ★ cron·구글 --init 은 아직 미배포
 ```
 
 **용량 (2026-09-07)**
