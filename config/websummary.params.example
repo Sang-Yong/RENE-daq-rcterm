@@ -1,0 +1,11 @@
+# 웹 서머리 발행 설정. 실파일(websummary.params)은 gitignore 대상.
+sheet_id      =            # 런 서머리 전용 새 스프레드시트 (GoodRuns 아님!)
+sheet_gid     = 0
+drive_folder_id =          # 서비스 계정과 공유한 드라이브 폴더
+map_file      = config/websummary.map   # --init 이 쓴다 (이름<TAB>fileId)
+metrics_source = legacy    # 패리티 게이트 + 사용자 승인 후에만 dst
+refresh_s     = 600
+webroot       = /scratch/RunSummary/web
+tsv_dir       = /scratch/RunSummary
+publish       = 1          # 0 이면 로컬 생성까지만
+start_run     = 4280       # 이 번호부터 싣는다

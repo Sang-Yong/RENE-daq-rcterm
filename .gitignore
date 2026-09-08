@@ -12,6 +12,8 @@ rcsupervisor
 config/*.params
 !config/*.params.example
 config/rundesc.txt
+# --init 이 쓰는 드라이브 이름->fileId 매핑 (사이트마다 다른 fileId)
+config/*.map
 
 # 발표 자료는 저장소 밖에 둔다. tools/slides 의 스크립트로 생성한다
 *.pptx
