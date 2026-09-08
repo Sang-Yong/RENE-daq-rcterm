@@ -130,8 +130,35 @@ else
 CHK refresh_meta=0"
 fi
 
+# ⑦ legacy 모드는 metrics_summary.tsv 가 디렉터리에 아예 없어도 죽지 않는다.
+#    브리프 원안의 ${MS:+"$MS"} 식(변수가 항상 비어있지 않은 경로 문자열이라
+#    실제로는 아무것도 걸러내지 못한다)으로 되돌아가면 awk 가 없는 파일을
+#    열려다 그 자리에서 죽는다 -- 이 회귀를 잡는 것이 이 시험의 목적이다.
+#    run_summary.tsv/pair_summary.tsv 만 있는 별도 디렉터리로 돈다.
+NM_DIR="$T/nometrics"; mkdir -p "$NM_DIR"
+cp "$T/run_summary.tsv" "$T/pair_summary.tsv" "$NM_DIR/"
+NOMETRICS="$T/legacy_nometrics.html"
+NMOUT=$(bash "$SUT" "$NM_DIR" "$NOMETRICS" legacy 111 2>&1); NMRC=$?
+nm_tr=0; nm_bad_td=0
+if [ -r "$NOMETRICS" ]; then
+   nm_tr=$(grep -c '<tr>' "$NOMETRICS")
+   while IFS= read -r line; do
+      n=$(printf '%s' "$line" | grep -o '<td>' | wc -l)
+      [ "$n" -eq 15 ] || nm_bad_td=$((nm_bad_td + 1))
+   done < <(grep -o '<tr>.*</tr>' "$NOMETRICS")
+fi
+if [ "$NMRC" -eq 0 ] && [ "$nm_tr" -eq 4 ] && [ "$nm_bad_td" -eq 0 ]; then
+   R="$R
+CHK legacy_no_metrics=1"
+else
+   R="$R
+CHK legacy_no_metrics=0"
+   echo "legacy_no_metrics 진단 : rc=$NMRC tr=$nm_tr bad_td=$nm_bad_td"
+   echo "$NMOUT"
+fi
+
 FAILED=0
-for k in rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta; do
+for k in rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -144,4 +171,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- dst.html --"; cat "$DST"
    exit 1
 fi
-echo "PASS monitor-html (6/6)"
+echo "PASS monitor-html (7/7)"

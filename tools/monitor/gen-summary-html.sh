@@ -62,6 +62,23 @@ mkdir -p "$(dirname "$OUTF")" 2>/dev/null
 TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
 
 awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v SRC="$SRC" '
+   #  TSV 에서 온 문자열을 HTML 에 넣기 전에 반드시 거친다. 지금 이 표에서
+   #  그런 열은 선원(src) 하나뿐이다 -- 나머지 14열은 이 스크립트가 직접
+   #  만든 숫자/고정 문자열(strftime·sprintf·"-"·"—")이라 &·<·> 를 담을 수
+   #  없다. src 도 지금은 ibd-summary.sh 의 정규식이 AmBe/Cs137/Co60/Na22/
+   #  Zn65/Cf252/none/? 로만 좁혀 두어(닫힌 집합) 위험이 없지만, 그 규칙이
+   #  나중에 느슨해지거나 다른 열이 문자열을 그대로 옮기게 바뀔 수 있으므로
+   #  여기서 한 번 더 막아 둔다. ".src"/".pre" 로 감싸는 신뢰된 마크업 자체는
+   #  이스케이프하지 않는다 -- TSV 값을 감싸기 *전에* 이 함수를 거치기
+   #  때문이다. 순서 중요 : &(먼저) -> < -> > . 나중에 하면 방금 만든
+   #  &lt;/&gt; 의 & 까지 다시 이스케이프되어 "&amp;lt;" 처럼 이중으로
+   #  깨진다(실측 확인).
+   function html_escape(s) {
+      gsub(/&/, "\\&amp;", s)
+      gsub(/</, "\\&lt;", s)
+      gsub(/>/, "\\&gt;", s)
+      return s
+   }
    /^#/ { next }
    NF < 2 { next }
 
@@ -123,7 +140,7 @@ awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v SRC="$SRC" '
          #  BuildPairSummary.C:92 의 주석 "AmBe | Cs137 | ... | none | ?"
          #  이 정본이다) 이면 강조하지 않는다. AmBe 등 진짜 선원 런만
          #  .src 로 눈에 띄게 한다 -- 강조를 다 걸면 안전장치가 무뎌진다.
-         srcv = (r in src) ? src[r] : "-"
+         srcv = (r in src) ? html_escape(src[r]) : "-"
          if (srcv != "-" && srcv != "?" && srcv != "none")
             srcv = "<span class=\"src\">" srcv "</span>"
 
