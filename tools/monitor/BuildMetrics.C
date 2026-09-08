@@ -164,6 +164,13 @@ static void LiHeWalk(const std::vector<double> &promptT,
 //  통계로 τ 까지 띄우면 두 성분이 서로를 흡수해 아무 값이나 나온다.
 //  [3] = 빈 폭. 파라미터로 두고 고정하는 것은 적합 함수가 '밀도 × 빈 폭 =
 //  그 빈의 기대 계수' 여야 [0]/[1] 이 곧 개수로 읽히기 때문이다.
+//
+//  ★ lo(= lihe_fit_lo_s)는 이 binning 에서 **빈 폭보다 작으면 아무 일도 하지
+//    않는다.** ROOT 는 적합에 쓸 빈을 빈 **중심**으로 고르므로, 첫 빈의 중심
+//    (빈 폭/2 = lihe_fit_hi_s/400, 기본값이면 0.025 s)보다 작은 lo 는 어떤 빈도
+//    빼지 않는다. 기본값 0.002 s 가 바로 그 경우다 -- 첫 빈을 정말 빼려면
+//    빈 폭(lihe_fit_hi_s/200, 기본 0.05 s) 위로 올려야 한다. TSV 의
+//    lihe_fit_lo 열에는 '요청한 값' 이 그대로 적힌다.
 static bool FitLiHe(TH1D *h, const TString &fname, double lo, double hi,
                     double &n, double &e) {
    TF1 f(fname, "[0]/0.257*exp(-x/0.257)*[3] + [1]/0.172*exp(-x/0.172)*[3] + [2]",
@@ -409,7 +416,12 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          long long nTag = 0;
          LiHeWalk(promptT, showers, fnTagS, &h, &nTag);
          r.nFnMutag = nTag;
-         if (h.GetEntries() < liheMinCand) {
+         //  ★ 게이트도 화면에 찍는 표본 수도 **창 안(1..nbins)** 만 센다.
+         //    GetEntries() 는 overflow(dt > lihe_fit_hi_s)까지 세는데, 그것은
+         //    적합에 한 번도 쓰이지 않는 사건이다. 그것으로 lowstat 을 면하면
+         //    '적합에 쓸 것이 100개 있다' 는 판정이 거짓이 된다.
+         double nInRange = h.Integral(1, h.GetNbinsX());
+         if (nInRange < liheMinCand) {
             r.liheStat = "lowstat";
          } else {
             double nL = -1, eL = -1;
@@ -441,8 +453,18 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          wf.s1hi = MeVToNpe(fnEHiMev);
          PairCounts fc = PairAndCountW(sing, wf);
          r.nFnSide = fc.nCoincMult;
-         double sigW = (w2.s1hi - w2.s1lo), sideW = (wf.s1hi - wf.s1lo);
-         r.nFnSideScaled = (sideW > 0) ? fc.nCoincMult * (sigW / sideW) : -1;
+         //  ★ 외삽 배수는 **MeV 폭의 비**다 (레시피가 그렇게 정의돼 있다).
+         //    NPE 폭으로 재면 답이 달라진다 -- MeVToNpe 가 비선형이라 같은
+         //    MeV 폭이라도 고에너지 쪽 NPE 폭이 더 넓기 때문이다
+         //    (실측 : NPE 비 0.2877 대 MeV 비 0.2842).
+         //    신호 쪽은 **실효 창**을 MeVToNpe 의 역함수로 되돌려 잰다. 그러면
+         //    오버라이드가 없을 때는 헤더의 S1 MeV 상수와 같은 값이 되고
+         //    (10.8 = 12.0 - 1.2), s1_*_npe 오버라이드가 있을 때도 실제로 쓴
+         //    창을 잰다.
+         double sigW  = NpeToMeV(w2.s1hi) - NpeToMeV(w2.s1lo);   // [MeV]
+         double sideW = fnEHiMev - fnELoMev;                     // [MeV]
+         r.nFnSideScaled = (sideW > 0 && sigW > 0)
+                              ? fc.nCoincMult * (sigW / sideW) : -1;
          //  사이드밴드가 신호 창과 겹치면 '사이드밴드' 가 아니다. 조용히
          //  두면 그 수를 fast-n 으로 읽게 되므로 한 번 말해 준다.
          if (wf.s1lo < w2.s1hi)
@@ -459,7 +481,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                 r.nPaired, r.nIbd, r.nIbdAcci, r.nSingle, r.liveS, r.rll);
          printf("         ★예비 : lihe=%.1f±%.1f (%s, dt 표본 %.0f)  "
                 "fn_side=%lld (환산 %.1f)  fn_mutag=%lld\n",
-                r.nLihe, r.eLihe, r.liheStat.c_str(), h.GetEntries(),
+                r.nLihe, r.eLihe, r.liheStat.c_str(), nInRange,
                 r.nFnSide, r.nFnSideScaled, r.nFnMutag);
       }
       //  런 하나가 몇 분 걸릴 수 있다. 중간에 끊겨도 한 것은 남도록 그때그때
