@@ -65,10 +65,13 @@ static void BuildOne(int run, const TString &out, const TString &roots,
       TString cpath = ReneCachePath(cache, run, sub);
       ReneSubrunStat st;
       size_t sBefore = sing.size(), mBefore = muons.size();
+      //  부분 캐시 히트(예: 뮤온 없는 옛 캐시)가 carry 를 전진시킨 채로 남으면 안 된다 -- 실패 시 되돌린다.
+      ReneCarry saved = carry;
       bool ok = ReneLoadCache(cpath, thr, vetoCutUs, sing, carry, st) &&
                 ReneLoadCacheMuons(cpath, muons);
       if (!ok) {
          //  둘 중 하나라도 없으면 파형에서 새로 만든다 (확장 캐시로 덮어씀)
+         carry = saved;
          sing.resize(sBefore); muons.resize(mBefore);
          TString prd = TString::Format("%sPRD/PRD_%s.%05d.root",
                           runDir.Data(), ReneRunStr(run).Data(), sub);
