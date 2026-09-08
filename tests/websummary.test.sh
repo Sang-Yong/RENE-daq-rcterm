@@ -140,6 +140,37 @@ CHK gate=0"
    echo "$OUT1"; cat "$T/1/log" 2>&1
 fi
 
+# ==== [1b] 원시 파일이 전부 badrun/ 으로 격리된 런은 막지 않는다 (CLAUDE.md §5.9) ==
+#     실측 : run 4324 가 FADC 0 / PRD 1 / badrun 있음 으로 4325~ 를 영영 막았다.
+#     같은 모양이지만 badrun/ 이 없는 FADC 0 런(수집 전 자리)은 여전히 막아야 한다.
+mkdir -p "$T/1b/tsv" "$T/1c/tsv"
+mkrun "$T/1b/RAW" 004280 3 3     # 완결
+mkrun "$T/1b/RAW" 004281 0 1     # 격리된 런 : FADC 0, PRD 1, badrun/ 있음 -> 완결로 친다
+mkrun "$T/1b/RAW" 004282 3 3     # 완결 -- 4281 이 막지 않았으면 여기까지 온다
+mkparams "$T/1b/params" "$T/1b/tsv" 4280
+OUT1b=$(WEBSUMMARY_ROOTS="$T/1b/RAW" WEBSUMMARY_LOCK="$T/1b/.lock" \
+        WEBSUMMARY_STATE="$T/1b/state" WEBSUMMARY_LOG="$T/1b/log" \
+        WEBSUMMARY_STAGES_DISABLED=1 \
+        "$SUT" --params "$T/1b/params" 2>&1)
+RC1b=$?
+SLR1b=$(awk -F= '$1=="last_run"{print $2}' "$T/1b/state" 2>/dev/null)
+mkrun "$T/1c/RAW" 004280 3 3
+mkrun "$T/1c/RAW" 004281 0 0; rm -rf "$T/1c/RAW/004281/badrun"
+mkrun "$T/1c/RAW" 004282 3 3
+mkparams "$T/1c/params" "$T/1c/tsv" 4280
+WEBSUMMARY_ROOTS="$T/1c/RAW" WEBSUMMARY_LOCK="$T/1c/.lock" WEBSUMMARY_STATE="$T/1c/state" \
+   WEBSUMMARY_LOG="$T/1c/log" WEBSUMMARY_STAGES_DISABLED=1 "$SUT" --params "$T/1c/params" >/dev/null 2>&1
+SLR1c=$(awk -F= '$1=="last_run"{print $2}' "$T/1c/state" 2>/dev/null)
+if [ "$RC1b" -eq 0 ] && [ "$SLR1b" = "4282" ] && [ "$SLR1c" = "4280" ]; then
+   R="$R
+CHK gate_quarantined=1"
+else
+   R="$R
+CHK gate_quarantined=0"
+   echo "[1b] 진단 : rc=$RC1b last_run=[$SLR1b] (기대 4282)  /  badrun 없는 빈 런 last_run=[$SLR1c] (기대 4280)"
+   echo "$OUT1b"; cat "$T/1b/log" 2>&1
+fi
+
 # ==== [2] 새 완결 런이 없다 -- 조용히 exit 0 (로그 한 줄도 안 남긴다) ====
 mkdir -p "$T/2/RAW" "$T/2/tsv"          # RAW 루트는 있지만 런 디렉터리가 없다
 mkparams "$T/2/params" "$T/2/tsv" 4280
@@ -348,7 +379,7 @@ fi
 
 # ---- 판정 -----------------------------------------------------------------
 FAILED=0
-for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
+for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
          publish_fail publish_order runclass_before_html; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
@@ -358,4 +389,4 @@ for k in gate no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (9/9)"
+echo "PASS websummary (10/10)"
