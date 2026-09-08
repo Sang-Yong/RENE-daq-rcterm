@@ -914,6 +914,32 @@ FADC>0)을 영원히 못 넘고, 연속 규칙이라 그 뒤 런(4325~4333)까�
 `websummary.sh` 의 `run_complete` 에 "FADC 0 이고 badrun/ 이 있으면 완결" 을
 더했다(badrun 이 없는 FADC 0 런 = 수집 전 자리는 여전히 막는다). 시험 [1b].
 
+#### 11.166 ★★ 지표를 40개 런에 채우자 보인 것 — 08-26 재기동 뒤 fast-n 지표가 4배, 그리고 veto 패널
+
+DST 일괄 생성(40 런, 03:59 완료)과 지표 계산이 끝났다. `metrics_summary.tsv` 80 행,
+DST 출처 웹 표 `/scratch/RunSummary/web/summary_dst.html`(53 행) + 배경 추이 6장.
+legacy 페어링(`ibd-summary.sh`, 웹의 정식 출처)은 PRD 를 다시 읽어 아직 도는 중이다.
+
+```
+n-Gd, 24h 런        4292~4306                   4313~4332 (08-26 보드 전원 재투입 뒤)
+fast-n 사이드밴드    19~27 쌍 (6~8 /일)           85~137 쌍 (24~39 /일)     ★ 4 배
+IBD / acci           66~94 / 16~30                70~106 / 19~32            변화 없음
+mult_rej             480~560 /일                  490~570 /일               변화 없음
+Li/He                전부 0 과 일치 (상한 5~10/일)  같음
+veto 뮤온 rate       ~795 Hz                       775 → 745 Hz (-6 %)
+PSD γ-band           0.395                         0.400                     느리게 오름
+```
+
+**단서 — veto 패널.** SADC 30 채널 중 **패널 15개 가운데 6개만 반응한다** (0·1·2·3·8·11,
+서브런당 3.5~31 %). 나머지 9개는 0.5 % 미만이다(그 채널들은 문턱이 900~1000 으로
+높게 잡혀 있다 — 일부러 죽여 둔 것인지 고장인지는 현장 확인이 필요하다). 그리고
+**패널 1 이 08-26 뒤 31 % → 27.5 % 로 떨어졌다**(패널 0 은 12.8 → 14.6 으로 올랐다).
+veto 가 98 % 에서 92 % 로만 떨어져도 새는 뮤온이 4 배가 된다 — 12 MeV 이상 prompt 뒤에
+n-Gd 포획이 따르는 쌍(= 사이드밴드)이 바로 그 '새는 뮤온 + 파쇄 중성자' 모양이다.
+IBD 창(1.2-12 MeV)의 후보 수는 변하지 않았으므로 당장의 물리에 영향은 작지만,
+**보드 전원을 내렸다 올리면 veto 패널의 반응이 바뀔 수 있다**는 것은 기록해야 한다.
+FADC 문턱·SADC 문턱·rundesc 는 4307 과 4313 이 같다(실측).
+
 #### 11.165 ★★ PSD 기준 — 중성자 선원 런으로 세웠다 (2026-09-09, `tools/psd/`)
 
 사용자 지시 : AmBe(2790~2852) · Cf252(2856~2915) 선원을 굴뚝 위 0 mm 부터 5 cm 씩
@@ -2289,10 +2315,10 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
                 수동 실행/확인은 지금도 된다
-DST 일괄   /Data_ssd/LOG/dstbuild-batch.sh  완결 런 40개를 스키마 2 로 (§11.164)
-                로그 /Data_ssd/LOG/dstbuild-batch.log. 끝나면 /Data_ssd/LOG/after-dstbatch.sh 가
-                websummary.sh(발행 없음, config/websummary.params publish=0)를 스스로 돌려
-                지표·웹 표를 만든다 -> /scratch/RunSummary/web/summary.html
+웹 표      ★ DST 출처 표는 만들어졌다 : /scratch/RunSummary/web/summary_dst.html (53 행)
+                + bg_trend_*.png 6장. metrics_summary.tsv 80 행 (40 런 × 2 채널).
+                legacy 출처 표(summary.html)는 websummary.sh 가 ibd-summary 단계(PRD 재독,
+                몇 시간)를 마쳐야 나온다. 로그 /Data_ssd/LOG/websummary.log
 ```
 
 **상태 보는 법 — 전부 읽기 전용**
@@ -2310,6 +2336,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 여섯** (자세한 것은 각 절)
 
 ```
+§11.166         ★ 지표 40 런 채움 — 08-26 재기동 뒤 fast-n 지표 4배, veto 패널 1 반응 -12 %,
+                패널 15개 중 6개만 반응 (현장 확인 필요)
 §11.165         ★ PSD 기준을 중성자 선원 런으로 세웠다 (tools/psd). 정본은 Gd-LS 런(AmBe
                 3956~3961·4221~4224, Cf252 3963~3974·4230~4234). AmBe 순수 recoil 대 2.2 MeV γ :
                 FoM 1.29 (1.2-2 MeV), γ 99 % 수용에서 recoil 기각 62/44/23/4 % (0.6-1.2/1.2-2/
