@@ -55,11 +55,20 @@ def build_rows(p):
         def col(row, i): return row[i] if row else "-"
         rll = col(gd, 9 if src == "dst" else 16)
         srcflag = col(gd, 2)
-        if src == "dst" and gd and len(gd) > 18 and gd[15] == "ok":
-            lihe = f"{float(gd[13]):.1f}(예비)"; fn = f"{float(gd[17]):.1f}(예비)"
-        else:
-            lihe = fn = "—"
-        out.append([run, time.strftime("%Y-%m-%d %H:%M", time.gmtime(es)),
+        #  fast-n 과 Li/He 는 서로 다른 조건으로 독립적으로 gate 한다
+        #  (발견 2 -- gen-summary-html.sh 의 awk 와 정확히 같은 두 문 :
+        #  Li/He 는 lihe_stat=="ok" 만 보고, fast-n 은 n_fn_side_scaled>=0
+        #  만 본다. 한쪽이 실패해도 다른 쪽 표시를 막지 않는다).
+        lihe = fn = "—"
+        if src == "dst" and gd and len(gd) > 18:
+            if gd[15] == "ok":
+                lihe = f"{float(gd[13]):.1f}(예비)"
+            if float(gd[17]) >= 0:
+                fn = f"{float(gd[17]):.1f}(예비)"
+        #  gen-summary-html.sh 의 awk strftime() 은 utc 인자를 안 주면 로컬
+        #  시간이다 -- 여기도 맞춰야 한다(발견 1). gmtime 이면 한국 사이트
+        #  기준 약 9시간이 어긋난다.
+        out.append([run, time.strftime("%Y-%m-%d %H:%M", time.localtime(es)),
                     f"{live/3600:.1f}/{wall/3600:.1f}", t1 + t2 + t3, t1, t2, t3,
                     col(gd, 6), col(gd, 7), col(nh, 6), col(nh, 7),
                     rll, fn, lihe, srcflag])
@@ -164,6 +173,22 @@ def main():
         ws.append_row(HEADER, value_input_option="RAW"); grid = [HEADER]
     have = {r[0] for r in grid[1:] if r and r[0].isdigit()}
     new = [[str(c) for c in r] for r in rows if str(r[0]) not in have]
+    #  append-only 로 남긴다 -- Run 이 시트의 현재 끝보다 낮은 값이라도
+    #  삽입하지 않고 그대로 맨 끝에 붙인다(컨트롤러 판정 R7. 옛 런을
+    #  나중에 되메울 때 이런 일이 생긴다 -- CLAUDE.md §11.5 의 4208~4211
+    #  처럼). 그러면 시트 안 Run 값이 더 이상 오름차순이 아니게 되므로
+    #  사람이 알아채도록 여기서 경고만 낸다.
+    #  ★ 이 스크립트 자체는 동시에 두 벌이 떠도 서로를 막지 않는다 --
+    #  단일 기록자 보장은 여기가 아니라 오케스트레이터(websummary.sh,
+    #  Task 9)의 flock 몫이다.
+    existing_nums = [int(r[0]) for r in grid[1:] if r and r[0].isdigit()]
+    sheet_max_run = max(existing_nums) if existing_nums else None
+    if sheet_max_run is not None:
+        for r in new:
+            rn = int(r[0])
+            if rn < sheet_max_run:
+                print(f"[WARN] run {rn} 이 시트의 현재 최댓값 {sheet_max_run} 보다 "
+                      f"낮다 -- append-only 라 끝에 그대로 붙는다 (삽입하지 않는다)")
     if new:
         ws.append_rows(new, value_input_option="RAW")
         back = ws.get_all_values()[-len(new):]
@@ -174,10 +199,28 @@ def main():
         print("[SHEET] 새 행 없음")
     fmap = read_map(p.get("map_file", ""))
     nup = 0
+    failed = []             # (이름, 사유) -- 부분 실패를 조용히 넘기지 않는다
     for n, fid in fmap.items():
         f = os.path.join(p["webroot"], n + ".png")
-        if os.path.isfile(f) and drive_update(cr.token, fid, f, False): nup += 1
+        if not os.path.isfile(f):
+            failed.append((n, "로컬 png 없음"))
+            continue
+        try:
+            if drive_update(cr.token, fid, f, False):
+                nup += 1
+            else:
+                failed.append((n, "드라이브가 200 이 아닌 응답을 줬다"))
+        except Exception as e:
+            #  파일 하나가 죽어도 나머지는 계속 올린다 -- 여기서 잡는 것은
+            #  이 루프 안의 개별 실패뿐이다. 이 루프 밖(시트 backup/append
+            #  등)에서 나는 예외는 그대로 전파된다(전면 실패까지 삼키지
+            #  않는다).
+            failed.append((n, f"{type(e).__name__}: {e}"))
     print(f"[DRIVE] {nup}/{len(fmap)} 개 교체")
+    if failed:
+        for n, reason in failed:
+            print(f"[WARN] drive update 실패 : {n}.png -- {reason}")
+        sys.exit(1)   # 오케스트레이터(Task 9)가 다음 주기에 다시 시도하도록
 
 def read_map(path):
     m = {}

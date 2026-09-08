@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # monitor-publish.test.sh -- publish_google.py 의 --dry-run 경로만 시험한다
 # (task-8-brief.md Step 2). 실 시트/드라이브 API 호출은 Task 10 통합에서
-# 사용자 승인 후에 한다. 여기서 보는 것 다섯 가지:
+# 사용자 승인 후에 한다. 여기서 보는 것 일곱 가지:
 #   ① --dry-run 이 네트워크를 전혀 건드리지 않고 rc=0 로 끝나는가
 #      -- "이 환경에 네트워크가 없어서 우연히 통과"가 아니라, socket 의
 #      연결·이름풀이 원시함수를 그 자리에서 예외로 바꿔친 채 실제로 돌려
@@ -14,6 +14,13 @@
 #      건드리지 않고 rc=0 로 끝나며, webroot 의 픽스처 png 들을 이름+크기로
 #      찍는가 (컨트롤러 판정 R6 -- dry-run 은 --init 과 같이 있어도
 #      find_creds/urllib/gspread 를 절대 건드리면 안 된다)
+#   ⑥ Start 열이 UTC 가 아니라 로컬 시간인가 (리뷰 발견 1 -- TZ=Asia/Seoul
+#      로 고정해 알려진 정답과 정확히 대조한다. 한국은 DST 가 없어 연중
+#      +9시간 고정이다)
+#   ⑦ fast-n 과 Li/He 가 서로 다른 조건으로 "독립" gate 되는가 (리뷰
+#      발견 2 -- lihe_stat=ok 인데 n_fn_side_scaled<0 인 픽스처로, Li/He
+#      는 값이 나오고 fast-n 은 em dash 로 남는지 본다. 옛 결합 gate 였으면
+#      lihe_stat=ok 하나로 fast-n 도 같이 새 나왔을 것이다)
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -85,6 +92,28 @@ EOF
 
 #  ④용 변형 -- sheet_id 만 비운다.
 sed 's/^sheet_id.*/sheet_id      =/' "$T/websummary.params" > "$T/websummary-nosheet.params"
+
+#  ⑦용 dst 픽스처 -- fast-n 과 Li/He 를 독립 조건으로 gate 하는지 본다
+#  (리뷰 발견 2). run 4290 하나만 : lihe_stat=ok(Li/He 는 나와야 한다)
+#  인데 n_fn_side_scaled=-1(fast-n 은 숨어야 한다) 인 조합을 일부러
+#  만든다. metrics_summary.tsv 32열은 BuildMetrics.C::WriteTsv 실측
+#  그대로(task-7 픽스처와 같은 관례).
+mkdir -p "$T/tsv_dst"
+cat > "$T/tsv_dst/run_summary.tsv" <<'EOF'
+#run	n_subrun	n_bad	epoch_start	epoch_end	wall_s	span_s	live_s	dead_s	n_type1	n_type2	n_type3	source
+4290	1440	0	1725300000	1725386400	86400.000	86400.000	86000.000	400.000	950000	16000	470000	prd
+EOF
+cat > "$T/tsv_dst/metrics_summary.tsv" <<'EOF'
+#run	tag	src	live_s	n_paired	n_paired_acci	n_ibd	n_ibd_acci	n_single	r_ll	n_subrun	n_mu	n_mu_shower	n_lihe	e_lihe	lihe_stat	n_fn_side	n_fn_side_scaled	n_fn_mutag	dt_min	dt_max	dt_acci	s2_lo	s2_hi	iso_pre	iso_post	mu_shower_npe	fn_e_lo	fn_e_hi	fn_tag_s	lihe_fit_lo	lihe_fit_hi
+4290	_nGd	none	86000.000	520	45	90	7	130000	13.1000	1440	52000	95	800.500	40.200	ok	210	-1.000	33	0.0	100.0	400.0	5.0	12.0	0.0	400.0	5000	12.0	20.0	2.0	0.0	5.0
+EOF
+cat > "$T/websummary-dst.params" <<EOF
+sheet_id      = FAKE_SHEET_ID_FOR_TEST
+tsv_dir       = $T/tsv_dst
+webroot       = $T/web
+metrics_source = dst
+start_run     = 0
+EOF
 
 # ----------------------------------------------------------- 네트워크 차단 ----
 #  socket 의 연결·이름풀이 원시함수를 그 자리에서 예외로 바꿔치기한 채로
@@ -208,8 +237,47 @@ CHK dry_run_init=0"
    echo "진단(⑤) : rc=$RC5 ncreate=$NCREATE all4=$ALL4 map_changed=$([ "$MAP_BEFORE" = "$MAP_AFTER" ] && echo no || echo YES)"
 fi
 
+# ⑥ Start 열이 로컬 시간인가(리뷰 발견 1) -- TZ 를 Asia/Seoul 로 고정해
+#    돌리고, run 4280(epoch_start=1725100000) 의 Start 가 그 시간대의
+#    알려진 정답('2024-08-31 19:26', 한국은 DST 없이 연중 UTC+9) 과
+#    정확히 같은지 본다. UTC 로 찍혔다면 대신 '2024-08-31 10:26' 이
+#    나왔을 것이다(9시간 차이) -- 그 값이 없는 것까지 함께 확인한다.
+#    run_offline() 을 안 쓰고 TZ 를 직접 준다 -- 셸 함수 앞에 붙인
+#    임시 대입이 실제로 전달되는지에 기대지 않기 위해서다.
+OUT6=$(env -i PATH="$PATH" HOME="$T/fake-home" TZ=Asia/Seoul \
+   python3 "$T/offline_run.py" "$SUT" --params "$T/websummary.params" --dry-run 2>"$T/err6.txt")
+RC6=$?
+if [ "$RC6" -eq 0 ] && ! grep -q "NETWORK ACCESS ATTEMPTED" "$T/err6.txt" && \
+   printf '%s\n' "$OUT6" | grep -qF "(dry) sheet row: [4280, '2024-08-31 19:26'," && \
+   ! printf '%s\n' "$OUT6" | grep -qF "2024-08-31 10:26"; then
+   R="$R
+CHK local_time_start=1"
+else
+   R="$R
+CHK local_time_start=0"
+   echo "진단(⑥) : rc=$RC6"
+fi
+
+# ⑦ fast-n 과 Li/He 가 독립 조건으로 gate 되는가(리뷰 발견 2) -- 위 dst
+#    픽스처(run 4290, lihe_stat=ok · n_fn_side_scaled=-1) 에서 Li/He 는
+#    '800.5(예비)' 로 나오고 fast-n 은 em dash('—') 로 남아야 한다.
+#    옛 결합 gate 로 되돌려 실측 확인함 : 그때는 fast-n 도 '-1.0(예비)'
+#    로 잘못 새 나왔다(수동 회귀 시험, 커밋 대상 아님).
+OUT7=$(run_offline "$T/websummary-dst.params" --dry-run 2>"$T/err7.txt")
+RC7=$?
+if [ "$RC7" -eq 0 ] && ! grep -q "NETWORK ACCESS ATTEMPTED" "$T/err7.txt" && \
+   printf '%s\n' "$OUT7" | grep -qF "'—', '800.5(예비)', 'none']"; then
+   R="$R
+CHK independent_gates=1"
+else
+   R="$R
+CHK independent_gates=0"
+   echo "진단(⑦) : rc=$RC7"
+fi
+
 FAILED=0
-for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init; do
+for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
+         local_time_start independent_gates; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -224,6 +292,10 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run4 stderr --"; cat "$T/err4.txt"
    echo "-- run5(--dry-run --init) stdout --"; echo "$OUT5"
    echo "-- run5 stderr --"; cat "$T/err5.txt"
+   echo "-- run6(TZ=Asia/Seoul) stdout --"; echo "$OUT6"
+   echo "-- run6 stderr --"; cat "$T/err6.txt"
+   echo "-- run7(dst 독립 gate) stdout --"; echo "$OUT7"
+   echo "-- run7 stderr --"; cat "$T/err7.txt"
    exit 1
 fi
-echo "PASS monitor-publish (5/5)"
+echo "PASS monitor-publish (7/7)"
