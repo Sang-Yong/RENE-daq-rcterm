@@ -93,7 +93,7 @@ dt 창, iso 창, 샤워링 뮤온 NPE 문턱, fast-n 사이드밴드, Li/He 적�
 
 ## 5. 표 (런당 1줄, 최신이 위)
 
-| Run | 시작시각 | 수집시간(live/wall) | 전체 이벤트 | Target only | VETO only | V+T | IBD nGd | acci nGd | IBD nH | acci nH | R_LL | fast-n | Li/He | 선원 |
+| Run | type(physics, calibration, test) | 시작시각 | 수집시간(live/wall) | 전체 이벤트 | Target only | VETO only | V+T | IBD nGd | acci nGd | IBD nH | acci nH | R_LL | fast-n | Li/He | 선원 |
 
 - fast-n·Li/He 는 검증 전까지 '(예비)' 표기, 레시피 확정 전엔 '—'.
 - `선원` 열: AmBe 등 선원 런의 후보 수가 중성미자가 아님을 표에서 바로
