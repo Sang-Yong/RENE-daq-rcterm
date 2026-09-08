@@ -97,6 +97,16 @@ struct ReneSubrunStat {
    bool      ok       = false;
 };
 
+//  DST 용 뮤온 한 건. pe 는 target(ch0+ch1) NPE 합 -- FADC 신호가 없는
+//  순수 veto 뮤온은 -1 이다 (target 을 지나지 않은 뮤온은 Li/He 의
+//  '샤워링' 판정 대상이 아니다). sat 은 포화 여부.
+struct ReneMuon {
+   Int_t    sub  = -1;
+   Double_t t_us = 0;
+   Float_t  pe   = -1;
+   Char_t   sat  = 0;
+};
+
 // ---------------------------------------------------------------------------
 static TString ReneRunStr(int run) { return TString::Format("%06d", run); }
 
@@ -241,9 +251,34 @@ inline bool ReneLoadCache(const TString &path, double thr, double vetoCutUs,
    return true;
 }
 
+//  확장 캐시에서 T_Muons 만 읽는다. 없으면 false -- 확장 전 캐시라는
+//  뜻이고, 그 서브런은 파형에서 다시 만들어야 한다.
+inline bool ReneLoadCacheMuons(const TString &path,
+                               std::vector<ReneMuon> &out) {
+   if (gSystem->AccessPathName(path)) return false;
+   TFile *f = TFile::Open(path, "READ");
+   if (!f || f->IsZombie()) { if (f) f->Close(); return false; }
+   TTree *tM = (TTree *)f->Get("T_Muons");
+   if (!tM) { f->Close(); return false; }
+   Int_t m_sub; Double_t m_t; Float_t m_pe; Char_t m_sat;
+   tM->SetBranchAddress("sub_id", &m_sub);
+   tM->SetBranchAddress("t_us",   &m_t);
+   tM->SetBranchAddress("pe",     &m_pe);
+   tM->SetBranchAddress("sat",    &m_sat);
+   Long64_t n = tM->GetEntries();
+   for (Long64_t i = 0; i < n; ++i) {
+      tM->GetEntry(i);
+      out.push_back({m_sub, m_t, m_pe, m_sat});
+   }
+   f->Close();
+   return true;
+}
+
 inline void ReneSaveCache(const TString &path, double thr, double vetoCutUs,
                           const std::vector<S1S2_Candidate> &sing, size_t first,
-                          const ReneCarry &carry, const ReneSubrunStat &st) {
+                          const ReneCarry &carry, const ReneSubrunStat &st,
+                          const std::vector<ReneMuon> *muons = nullptr,
+                          size_t muFirst = 0) {
    //  임시 이름으로 쓰고 마지막에 옮긴다. 도중에 끊겨도 잘린 파일이 최종
    //  이름을 차지하지 않는다 (postrun.sh 가 rsync 로 하는 것과 같은 이유).
    TString tmp = path + ".tmp";
@@ -288,6 +323,21 @@ inline void ReneSaveCache(const TString &path, double thr, double vetoCutUs,
    tS->Branch("n_single",    &c_single);
    tS->Fill();
 
+   if (muons) {
+      TTree *tM = new TTree("T_Muons", "muon veto events (for DST)");
+      Int_t    m_sub = 0; Double_t m_t = 0; Float_t m_pe = -1; Char_t m_sat = 0;
+      tM->Branch("sub_id", &m_sub);
+      tM->Branch("t_us",   &m_t);
+      tM->Branch("pe",     &m_pe);
+      tM->Branch("sat",    &m_sat);
+      for (size_t i = muFirst; i < muons->size(); ++i) {
+         m_sub = (*muons)[i].sub; m_t = (*muons)[i].t_us;
+         m_pe  = (*muons)[i].pe;  m_sat = (*muons)[i].sat;
+         tM->Fill();
+      }
+      f->cd(); tM->Write();
+   }
+
    f->cd(); tE->Write(); tS->Write(); f->Close();
    gSystem->Rename(tmp, path);
 }
@@ -297,7 +347,8 @@ inline void ReneSaveCache(const TString &path, double thr, double vetoCutUs,
 //  갱신한다. AnalysisStep1.C + AnalysisStep2.C 의 순서를 그대로 따른다.
 inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double thr,
                                         double vetoCutUs, ReneCarry &carry,
-                                        std::vector<S1S2_Candidate> &sing) {
+                                        std::vector<S1S2_Candidate> &sing,
+                                        std::vector<ReneMuon> *muons = nullptr) {
    ReneSubrunStat st;
    st.subrun = sub;
 
@@ -340,7 +391,25 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
       double dt_us = (carry.muonTime > 0) ? (globalTime - carry.muonTime) / 1000.0 : -1.0;
 
       //  --- Step2 컷. 순서를 바꾸면 범주별 수가 달라진다 ---
-      if (isVeto)                            { st.nMuon++;    continue; }
+      if (isVeto) {
+         st.nMuon++;
+         if (muons) {
+            //  target NPE. Fbit==0 이면 ReneChannelNpe 가 -999 를 주므로
+            //  '순수 veto 뮤온' 은 pe=-1 로 남는다. 포화돼도 적분값은
+            //  낸다 -- 과소평가일 뿐이고 sat 플래그로 구분한다.
+            bool msat = false;
+            double m0 = ReneChannelNpe(0, timeWindow, msat);
+            double m1 = ReneChannelNpe(1, timeWindow, msat);
+            ReneMuon mu;
+            mu.sub  = sub;
+            mu.t_us = globalTime * DAQ_NS_TO_US;
+            if (m0 > -900 || m1 > -900)
+               mu.pe = (Float_t)((m0 > -900 ? m0 : 0) + (m1 > -900 ? m1 : 0));
+            mu.sat  = msat ? 1 : 0;
+            muons->push_back(mu);
+         }
+         continue;
+      }
       if (dt_us >= 0 && dt_us < vetoCutUs)   { st.nAfterMu++; continue; }
 
       bool sat = false;
