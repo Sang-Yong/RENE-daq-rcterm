@@ -113,4 +113,86 @@ if [ "$FAIL" -ne 0 ]; then
    exit 1
 fi
 
-echo "PASS monitor-typetrend (7 기존 + 4 신규 PNG, PDF 11쪽)"
+# =====================================================================
+#  2) 퇴화 경로 (리뷰 지적, Critical) -- run_summary.tsv 에 live_s<=0 인
+#     행만 있어도(=typeRate 가 완전히 빈다) rate_trend.pdf 가 유효하게
+#     닫혀서 나오는가.
+#
+#  고치기 전 버그 : 8~11번(타입별 rate) 넷 다 typeRate 에서 자기 계열을
+#  채우므로, typeRate 가 비면 넷 다 DrawPage 의 "any 없으면 그리지 않고
+#  반환한다"(early return, c->Print 호출 전) 로 조용히 빠진다. 마감(")")을
+#  그 중 마지막(k==3) 하나에 맡겨 두었더니, 그 경로에서는 그 Print 자체가
+#  안 불려서 1번(candidates)이 이미 열어 둔 PDF 스트림이 영영 안 닫혔다.
+#  실측 재현(고치기 전 커밋 b29ac3f 로) : pdfinfo 가 이 픽스처의 산출물을
+#  "Couldn't find trailer dictionary / Couldn't read xref table" 로 거부했다.
+#
+#  ★ 이 조건을 고른 이유 -- run_summary.tsv 를 통째로 없애는 대안은 이
+#  버그를 재현하지 못한다. r.epoch 의 유일한 출처가 run_summary.tsv 의
+#  epoch 맵이라(BuildRateTrend.C:263), 파일이 없으면 epoch 맵도 비어 모든
+#  행이 `r.epoch<=0` 로 걸러져 `use` 자체가 비고, 1번(candidates)에
+#  닿기도 전에 "[FATAL] 그릴 점이 없다" 로 함수가 반환한다 -- PDF 를 아예
+#  안 만드는, 이번 변경과 무관한 별개 경로다. epoch_start 는 있지만
+#  live_s 만 없는 행이라야 `use` 는 안 비면서(pair_summary 가 자기
+#  live_s>0 를 따로 갖는다) typeRate 만 비어, 실제로 고친 코드 경로를 지난다.
+mkdir -p "$T/out2"
+RUNSUM2="$T/out2/run_summary.tsv"
+{
+   echo "# RENE DAQ run summary (fixture, degenerate: live_s<=0 rows only)"
+   echo "# schema 2"
+   printf '#run\tn_subrun\tn_bad\tepoch_start\tepoch_end\twall_s\tspan_s\tlive_s\tdead_s\tn_type1\tn_type2\tn_type3\tsource\n'
+} > "$RUNSUM2"
+awk -v base="$BASE" 'BEGIN {
+   for (i = 0; i < 3; i++) {
+      run = 5000 + i
+      es  = base + i * 86400
+      ee  = es + 3600
+      #  epoch_start/end 는 채우고 live_s(8열) 만 0 으로 둔다.
+      printf "%d\t10\t0\t%d\t%d\t3600.000\t3600.000\t0.000\t0.000\t0\t0\t0\tprd\n", run, es, ee
+   }
+}' >> "$RUNSUM2"
+cp "$PAIRSUM" "$T/out2/pair_summary.tsv"      # 유효한 pair_summary 를 그대로 재사용
+
+RUNSUM_OUT="$T/out2" RENE_COND="$COND" "$DIR/tools/monitor/rate-trend.sh" \
+   > "$T/log2" 2>&1
+RC2=$?
+[ "$RC2" -eq 0 ] || { echo "FAIL: 퇴화 경로 rate-trend.sh exit=$RC2"; tail -60 "$T/log2"; exit 1; }
+
+FAIL2=0
+PDF2="$T/out2/rate_trend.pdf"
+if [ ! -s "$PDF2" ]; then
+   echo "FAIL: 퇴화 경로에 rate_trend.pdf 가 없다"; FAIL2=1
+else
+   #  1순위 pdfinfo(이 호스트에 이미 있다 -- 새 의존 아님). 없는 호스트를
+   #  대비해 %%EOF 꼬리 검사도 항상 같이 한다(의존 없음).
+   if command -v pdfinfo >/dev/null 2>&1; then
+      if ! pdfinfo "$PDF2" >"$T/pdfinfo2.log" 2>&1; then
+         echo "FAIL: pdfinfo 가 퇴화 경로 PDF 를 거부함 (닫히지 않은 것으로 보임)"
+         cat "$T/pdfinfo2.log"; FAIL2=1
+      fi
+   else
+      echo "[NOTE] pdfinfo 없음 -- %%EOF 꼬리 검사만으로 판정한다"
+   fi
+   case "$(tail -c 16 "$PDF2" | tr -d '\0')" in
+      *%%EOF*) : ;;
+      *) echo "FAIL: 퇴화 경로 PDF 끝에 %%EOF 가 없다 (마감이 안 됐다)"; FAIL2=1 ;;
+   esac
+fi
+
+#  typeRate 가 정말 비었는지도 확인한다 -- 새 4종 PNG 는 이 경로에서 안
+#  나오는 게 정상이다(기존 페이지들의 "자료 없으면 안 그린다" 관례와 같다).
+#  나왔다면 픽스처가 의도한 조건(typeRate 빈 상태)을 못 만든 것이라 이
+#  시험이 뭘 확인했는지가 불확실해진다.
+for nm in evt_total evt_target evt_veto evt_coinc; do
+   [ ! -e "$T/out2/rate_trend_${nm}.png" ] || {
+      echo "FAIL: 퇴화 경로인데 ${nm}.png 가 나왔다 (픽스처가 typeRate 를 못 비웠다)"
+      FAIL2=1
+   }
+done
+
+if [ "$FAIL2" -ne 0 ]; then
+   echo "----- log2 -----"
+   tail -60 "$T/log2"
+   exit 1
+fi
+
+echo "PASS monitor-typetrend (7 기존 + 4 신규 PNG, PDF 11쪽; 퇴화 경로 마감 확인)"

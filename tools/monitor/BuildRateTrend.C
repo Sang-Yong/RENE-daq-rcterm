@@ -419,9 +419,23 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
             s.x.push_back(ie->second); s.y.push_back(kv.second[k]);
          }
          std::vector<Series> v{s};
-         //  마지막(evt_coinc) 에서만 PDF 를 닫는다 (page 7 의 주석 참조).
-         DrawPage(pdf, png, nm[k], tt[k], "Rate [Hz]", v, (k == 3) ? ")" : "", false, page);
+         //  ★ 여기서는 안 닫는다 -- typeRate 가 비면(run_summary.tsv 가
+         //  없거나 live_s>0 인 행이 하나도 없거나 epoch 와 안 겹치면) 넷 다
+         //  DrawPage 의 "any 없으면 안 그린다" 로 조용히 반환해 버리므로,
+         //  마지막 쪽 하나에 마감을 맡기면 그 경우 PDF 가 영영 안 닫힌다
+         //  (리뷰에서 지적됨). 마감은 아래 블록에서 무조건 한다.
+         DrawPage(pdf, png, nm[k], tt[k], "Rate [Hz]", v, "", false, page);
       }
+   }
+   {  // ★ PDF 마감 -- page 1(candidates) 이 이미 열어 둔 파일을 여기서
+      // 무조건 닫는다. 8~11 번이 전부 비어 아무 쪽도 안 찍혔더라도 이 블록은
+      // 데이터에 기대지 않고 항상 실행되므로 파일이 열린 채로 남지 않는다.
+      // "]" 는 그리지 않고 스트림만 닫는 모드다(실측 확인) -- 정상 경로
+      // (11쪽) 에는 빈 쪽을 보태지 않고, 8~11 번이 하나도 안 찍힌 경로에도
+      // 유효한 PDF 를 남긴다.
+      TCanvas *cClose = new TCanvas("cTrendClose", "close rate_trend.pdf", 1400, 700);
+      cClose->Print(pdf + "]");
+      delete cClose;
    }
 
    printf("[SAVED] %s  (%d 쪽)\n", pdf.Data(), page);
