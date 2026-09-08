@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 //  BuildMetrics.C - DST 에서 런 지표를 계산한다. PRD 는 읽지 않는다.
 //  IBD/acci 는 legacy(BuildPairSummary)와 같은 값이어야 하며 metrics.sh
-//  --verify 가 그것을 대조한다. Li/He·fast-n 은 Task 5 에서 채운다.
+//  --verify 가 그것을 대조한다. Li/He·fast-n 은 ★예비 레시피다.
 //
 //  무엇을 읽나
 //     <OutDir>/dst/DST_<NNNNNN>.root   (BuildMonitorDst.C 산출물)
@@ -26,19 +26,31 @@
 //  읽는다. 두 경로가 같은 값을 내는지는 metrics.sh --verify 가
 //  pair_summary.tsv 와 대조해서 확인한다(전환 게이트).
 //
-//  ---- Li/He·fast-n 은 아직이다 ----
-//  n_lihe/e_lihe/lihe_stat 과 n_fn_side/n_fn_side_scaled/n_fn_mutag, 그리고
-//  그 컷 값을 기록하는 열(mu_shower_npe/fn_e_lo/fn_e_hi/fn_tag_s/
-//  lihe_fit_lo/lihe_fit_hi)까지 전부 MetRow 의 기본값(-1/"off") 그대로
-//  둔다 -- 여기서 다시 대입하지 않는다. 매크로 인자로는 받아 두어 Task 5 가
-//  시그니처를 바꾸지 않고 채울 수 있게 한다.
+//  ---- Li/He·fast-n 은 ★예비 레시피다 (분석팀 검증 전) ----
+//  n_lihe/e_lihe/lihe_stat 과 n_fn_side/n_fn_side_scaled/n_fn_mutag 를 여기서
+//  채운다. 문턱·창·사이드밴드는 하나도 여기 박아 두지 않는다 -- 전부
+//  config/monitorcuts.params 에서 매크로 인자로 들어오고, 그때 쓴 값을 TSV 의
+//  컷 열(mu_shower_npe/fn_e_lo/fn_e_hi/fn_tag_s/lihe_fit_lo/lihe_fit_hi)에
+//  함께 적는다. 표만 보고 '어떤 컷의 결과인가' 를 알 수 있어야 하기 때문이다.
+//  웹은 검증 전까지 이 값을 '(예비)' 로 표시한다.
+//
+//  ---- IBD 컷 오버라이드 ----
+//  마지막 인자 ibdOverrides ("dt_max_us=120,s2_lo_mev=5.5" 꼴) 가 있으면
+//  AnalysisCondition.h 대신 그 값으로 페어링한다. 빈 문자열이 기본이고, 그때만
+//  legacy 와 컷이 같아 metrics.sh --verify 로 대조할 수 있다 -- 오버라이드가
+//  하나라도 있으면 metrics.sh 가 --verify 를 그 자리에서 거부한다.
+//  TSV 의 컷 열에는 언제나 **적용된 실효값**이 들어간다.
 // ---------------------------------------------------------------------------
 #include "RenePrdSingles.h"     // S1S2_Candidate, SetChannel, ChannelTag
 #include "RenePairing.h"
+#include <algorithm>            // std::sort (두 포인터의 전제)
+#include <cmath>                // std::hypot (Li/He 오차 합성)
 #include <cstdlib>              // std::atoi (LoadExisting 의 schema 파싱)
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <TF1.h>
+#include <TH1D.h>
 #include <TStopwatch.h>
 
 //  tsv 스키마가 바뀌면 올린다. 옛 파일을 조용히 잘못 읽는 것보다
@@ -97,6 +109,114 @@ static std::map<int, std::string> LoadRunTypes(const TString &tsv) {
       out[run] = src;
    }
    return out;
+}
+
+// ---------------------------------------------------------------------------
+//  ---- Li/He·fast-n 의 공통 걸음 ----
+//  '샤워링 뮤온' = target 파형이 있고(pe > 0) NPE 가 문턱을 넘은 뮤온.
+//  순수 veto 뮤온은 pe = -1 이라(RenePrdSingles.h) 문턱이 아무리 낮아도
+//  샤워링으로 세어지지 않는다 -- target 을 지나지 않은 뮤온은 target 안에
+//  Li/He 를 만들지 못한다.
+//
+//  런 하나에 뮤온이 수천만 건이라(실측 run 4305 : 6,865만) 태그마다 다시
+//  훑지 않는다. 런에서 한 번만 뽑아 두고 두 태그가 나눠 쓴다.
+static std::vector<double> ShowerTimes(const std::vector<ReneMuon> &mu,
+                                       double muShowerNpe) {
+   std::vector<double> s;
+   for (const auto &m : mu)
+      if (m.pe > muShowerNpe) s.push_back(m.t_us);
+   //  DST 는 이미 시간 순이지만, 아래 두 포인터의 전제라 못박는다
+   //  (샤워링 뮤온은 전체의 일부라 정렬 자체는 싸다).
+   std::sort(s.begin(), s.end());
+   return s;
+}
+
+//  후보 prompt 마다 **직전 샤워링 뮤온**까지의 dt 를 재서 히스토그램에 담고,
+//  같은 걸음에서 fast-n 의 뮤온 태그 수(dt < fnTagS)도 센다. 둘 다 '직전
+//  뮤온까지의 시간' 이라 한 번만 걸으면 된다.
+//
+//  ★ 앞에 샤워링 뮤온이 없는 후보(런 첫머리)는 뺀다. 런 시작을 뮤온으로
+//    치면 첫 빈이 부풀어 적합이 그리로 끌려간다.
+static void LiHeWalk(const std::vector<double> &promptT,
+                     const std::vector<double> &showers,
+                     double fnTagS, TH1D *h, long long *nTag) {
+   if (nTag) *nTag = 0;
+   //  promptT 는 delayed 순서로 쌓인다. S2 는 시간 순이지만 dt 가 제각각이라
+   //  prompt 시각은 국소적으로 어긋날 수 있다(dt=2us 짜리 뒤에 dt=100us 짜리).
+   //  두 포인터는 양쪽이 시간 순이어야 하므로 사본을 정렬해 쓴다.
+   std::vector<double> pt = promptT;
+   std::sort(pt.begin(), pt.end());
+   size_t j = 0;
+   bool   have = false;
+   double lastShower = 0;
+   for (double t : pt) {
+      while (j < showers.size() && showers[j] < t) {
+         lastShower = showers[j]; ++j; have = true;
+      }
+      if (!have) continue;
+      double dtS = (t - lastShower) * 1e-6;      // us -> s
+      if (h) h->Fill(dtS);
+      if (nTag && dtS < fnTagS) (*nTag)++;
+   }
+}
+
+//  ⁹Li(τ=257 ms) + ⁸He(τ=172 ms) + 상수(우발). τ 는 **고정**이다 -- 이
+//  통계로 τ 까지 띄우면 두 성분이 서로를 흡수해 아무 값이나 나온다.
+//  [3] = 빈 폭. 파라미터로 두고 고정하는 것은 적합 함수가 '밀도 × 빈 폭 =
+//  그 빈의 기대 계수' 여야 [0]/[1] 이 곧 개수로 읽히기 때문이다.
+static bool FitLiHe(TH1D *h, const TString &fname, double lo, double hi,
+                    double &n, double &e) {
+   TF1 f(fname, "[0]/0.257*exp(-x/0.257)*[3] + [1]/0.172*exp(-x/0.172)*[3] + [2]",
+         lo, hi);
+   f.SetParameters(10, 10, 1, h->GetBinWidth(1));
+   f.FixParameter(3, h->GetBinWidth(1));
+   f.SetParLimits(0, 0, 1e9); f.SetParLimits(1, 0, 1e9); f.SetParLimits(2, 0, 1e9);
+   int rc = h->Fit(&f, "QRN0");
+   if (rc != 0) return false;
+   n = f.GetParameter(0) + f.GetParameter(1);
+   e = std::hypot(f.GetParError(0), f.GetParError(1));
+   return true;
+}
+
+// ---------------------------------------------------------------------------
+//  "k=v,k=v" 를 PairWindows 에 얹는다. 빈 문자열이면 아무것도 하지 않는다
+//  (= AnalysisCondition.h 값 그대로. 그때만 legacy 대조가 성립한다).
+//  키 10종은 PairWindows 의 멤버와 1:1 이다.
+//
+//  ★ *_mev 는 **_NPE_MEV 를 곱해** NPE 로 바꾼다 (스펙·브리프가 정한 규약).
+//    분석 쪽 기본값은 비선형 MeVToNpe() 로 만들어지므로, 같은 MeV
+//    숫자를 적어도 기본값과 **똑같은 창이 되지 않는다**(6 MeV : 기본 3632 NPE
+//    대 오버라이드 3053 NPE). 오버라이드는 '기본값을 다시 적는 것' 이 아니라
+//    '다른 창으로 갈아 끼우는 것' 이며, --verify 를 거부하는 이유가 이것이기도
+//    하다. 실효값은 TSV 의 컷 열에 적히므로 표가 스스로 증언한다.
+//
+//  s2LoMev/s2HiMev 는 TSV 의 s2_lo/s2_hi 열에 적을 실효값[MeV]이다. NPE 에서
+//  되돌려 나눌 수 없어(정변환이 비선형) 따로 받는다.
+static void ApplyOverrides(PairWindows &w, double &s2LoMev, double &s2HiMev,
+                           const TString &ovr) {
+   if (ovr.IsNull()) return;
+   TObjArray *kv = TString(ovr).Tokenize(",");
+   for (int i = 0; i < kv->GetEntries(); ++i) {
+      TString t = ((TObjString *)kv->At(i))->GetString();
+      t = t.Strip(TString::kBoth);
+      Ssiz_t eq = t.First('=');
+      if (eq < 1) continue;
+      TString k = t(0, eq);
+      double  v = TString(t(eq + 1, t.Length())).Atof();
+      k = k.Strip(TString::kBoth);
+      if      (k == "s1_lo_npe")   w.s1lo = v;
+      else if (k == "s1_hi_npe")   w.s1hi = v;
+      else if (k == "s2_lo_mev")  { w.s2lo = v * _NPE_MEV; s2LoMev = v; }
+      else if (k == "s2_hi_mev")  { w.s2hi = v * _NPE_MEV; s2HiMev = v; }
+      else if (k == "dt_min_us")   w.dtMin = v;
+      else if (k == "dt_max_us")   w.dtMax = v;
+      else if (k == "dt_acci_us")  w.dtAcci = v;
+      else if (k == "iso_pre_us")  w.isoPre = v;
+      else if (k == "iso_post_us") w.isoPost = v;
+      else if (k == "lower_npe")   w.lower = v;
+      else printf("  [WARN] 모르는 오버라이드 키 : %s\n", k.Data());
+   }
+   delete kv;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +291,7 @@ static void WriteTsv(const TString &path, const std::map<std::string, MetRow> &r
 static void Impl(const std::vector<int> &runs, const TString &out,
                  double muShowerNpe, double liheFitLoS, double liheFitHiS,
                  int liheMinCand, double fnELoMev, double fnEHiMev,
-                 double fnTagS, bool force) {
+                 double fnTagS, bool force, const TString &ibdOvr) {
    TString tsvPath = out + "metrics_summary.tsv";
 
    bool schemaOld = false;
@@ -188,11 +308,14 @@ static void Impl(const std::vector<int> &runs, const TString &out,
       printf("[WARN] runtype.tsv 가 없다. 선원 런을 구분할 수 없어 src 가 "
              "'?' 로 남는다 -- ibd-summary.sh 를 한 번 돌리면 생긴다\n");
 
-   //  Li/He·fast-n 은 이번 버전에서 계산하지 않는다(자리만 -1/off). 인자는
-   //  Task 5 가 시그니처를 바꾸지 않고 실제로 쓸 수 있도록 받아만 둔다.
-   printf("[INFO] Li/He·fast-n 컷 (미적용, Task 5 예정) : muShowerNpe=%.1f "
+   //  ★ 예비 레시피의 손잡이. 값이 어디서 왔는지 로그에 남긴다 -- 나중에
+   //    'n_lihe 가 왜 저 값이냐' 를 이 한 줄로 되짚을 수 있어야 한다.
+   printf("[INFO] Li/He·fast-n 컷 (★예비) : muShowerNpe=%.1f "
           "liheFit=[%.3f,%.1f]s liheMinCand=%d fnE=[%.2f,%.2f]MeV fnTagS=%.2fs\n",
           muShowerNpe, liheFitLoS, liheFitHiS, liheMinCand, fnELoMev, fnEHiMev, fnTagS);
+   if (!ibdOvr.IsNull())
+      printf("[INFO] ★ IBD 컷 오버라이드 : %s  (legacy 와 컷이 다르다. "
+             "--verify 는 거부된다)\n", ibdOvr.Data());
 
    const Channel chans[2] = {CH_NGD, CH_NH};
    int nNew = 0, nSkip = 0, nMiss = 0;
@@ -220,6 +343,24 @@ static void Impl(const std::vector<int> &runs, const TString &out,
       printf("  run %d : DST 로드 singles=%zu muons=%zu live=%.1fs subrun=%d  [%.1f s]\n",
              run, sing.size(), mu.size(), liveS, nSubrun, w.RealTime());
 
+      //  샤워링 뮤온은 태그와 무관하다. 런에서 한 번만 뽑는다.
+      std::vector<double> showers = ShowerTimes(mu, muShowerNpe);
+      printf("  run %d : 샤워링 뮤온 %zu 개 (pe > %.0f NPE, 전체 뮤온의 %.3f%%)\n",
+             run, showers.size(), muShowerNpe,
+             mu.empty() ? 0.0 : 100.0 * showers.size() / mu.size());
+      //  ★ 이 레시피가 성립하려면 '상관 없는 후보의 dt 분포' 가 평평해야 한다.
+      //    샤워링 뮤온 간격이 τ(0.257 s)와 비슷해지면 그 분포 자체가 지수꼴이라
+      //    적합의 상수항이 그것을 담지 못하고 [0]/[1] 이 통째로 흡수한다.
+      //    조용히 두면 그 수를 Li/He 로 읽게 되므로 미리 말해 준다.
+      //    (실측 run 4305 : 간격 0.75 s -> n_lihe 가 후보의 절반을 넘었다.)
+      if (liveS > 0 && !showers.empty()) {
+         double gap = liveS / (double)showers.size();
+         if (gap < 5 * 0.257)
+            printf("  [WARN] run %d : 샤워링 뮤온 평균 간격 %.2f s 가 Li/He τ(0.257 s)에\n"
+                   "         가깝다. 상관 없는 후보의 dt 분포도 지수꼴이라 적합이 그것을\n"
+                   "         Li/He 로 흡수한다 -- n_lihe 는 **상한**으로 읽을 것\n", run, gap);
+      }
+
       for (Channel ch : chans) {
          SetChannel(ch);
          std::string tag = ChannelTag(ch).Data();
@@ -227,6 +368,11 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          if (!force && rows.count(key)) { nSkip++; continue; }
 
          PairWindows w2 = CurrentPairWindows();
+         //  s2_lo/s2_hi 열은 MeV 다 (w2.s2lo/s2hi 는 NPE). 오버라이드가
+         //  없으면 SetChannel() 이 채운 전역 그대로 -- BuildPairSummary.C 와
+         //  같은 값이라야 두 표를 나란히 읽을 수 있다.
+         double s2LoMev = S2_E_MIN_MEV, s2HiMev = S2_E_MAX_MEV;
+         ApplyOverrides(w2, s2LoMev, s2HiMev, ibdOvr);
          std::vector<double> promptT;
          PairCounts pc = PairAndCountW(sing, w2, &promptT);
 
@@ -239,15 +385,60 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          r.rll     = (liveS > 0) ? (double)sing.size() / liveS : -1;
          r.nSubrun = nSubrun;
          r.nMu     = (long long)mu.size();
+         r.nMuShower = (long long)showers.size();
+         //  ---- 컷 열에는 '적용된 실효값' 을 적는다 (오버라이드 여부를 표
+         //  자체가 증언하게) ----
          r.dtMin = w2.dtMin; r.dtMax = w2.dtMax; r.dtAcci = w2.dtAcci;
-         //  s2_lo/s2_hi 는 MeV 단위다 (w2.s2lo/s2hi 는 NPE). BuildPairSummary.C
-         //  와 똑같이, SetChannel() 이 채운 전역을 그대로 읽는다.
-         r.s2Lo = S2_E_MIN_MEV; r.s2Hi = S2_E_MAX_MEV;
+         r.s2Lo = s2LoMev; r.s2Hi = s2HiMev;
          r.isoPre = w2.isoPre; r.isoPost = w2.isoPost;
+         r.muShowerNpe = muShowerNpe;
+         r.fnELo = fnELoMev; r.fnEHi = fnEHiMev; r.fnTagS = fnTagS;
+         r.liheFitLo = liheFitLoS; r.liheFitHi = liheFitHiS;
          auto ir = rtype.find(run);
          if (ir != rtype.end()) r.src = ir->second;
-         //  Li/He·fast-n 열(과 그 컷 값 열)은 MetRow 의 기본값 -1/"off" 그대로
-         //  둔다 -- Task 5 가 채운다.
+
+         //  ---- Li/He (★예비) ----
+         //  후보 prompt 의 '직전 샤워링 뮤온까지의 dt' 분포를 τ 고정 2성분 +
+         //  상수로 적합한다. 히스토그램은 런·태그마다 새로 만들고 gDirectory
+         //  에 넣지 않는다 -- 같은 이름이 쌓이면 ROOT 가 조용히 갈아치운다.
+         TH1D h("hdt", "", 200, 0, liheFitHiS);
+         h.SetDirectory(nullptr);
+         long long nTag = 0;
+         LiHeWalk(promptT, showers, fnTagS, &h, &nTag);
+         r.nFnMutag = nTag;
+         if (h.GetEntries() < liheMinCand) {
+            r.liheStat = "lowstat";
+         } else {
+            double nL = -1, eL = -1;
+            TString fname = TString::Format("flihe_%06d%s", run, tag.c_str());
+            if (FitLiHe(&h, fname, liheFitLoS, liheFitHiS, nL, eL)) {
+               r.nLihe = nL; r.eLihe = eL; r.liheStat = "ok";
+            } else {
+               r.liheStat = "nofit";
+            }
+         }
+
+         //  ---- fast-n (★예비) ----
+         //  (a) 사이드밴드 : S1 창만 고에너지로 바꾼 페어링. **전역은 건드리지
+         //      않는다** -- 창을 구조체로 받는 PairAndCountW 를 쓰는 이유다.
+         //  ★ 이 값이 예비인 이유 : 싱글을 만들 때 이미 포화(saturation) 사건을
+         //    버렸다(RenePrdSingles.h 의 Step2 순서). 그래서 고에너지
+         //    사이드밴드에는 '포화 미만' 인 것만 남아 있고, 진짜 fast-n prompt
+         //    의 상당 부분이 여기 오지 못한다. 외삽 배수(sigW/sideW)도 스펙트럼이
+         //    평평하다는 가정이라, 분석팀 검증 전까지는 크기 정도로만 읽을 것.
+         PairWindows wf = w2;
+         wf.s1lo = fnELoMev * _NPE_MEV;
+         wf.s1hi = fnEHiMev * _NPE_MEV;
+         PairCounts fc = PairAndCountW(sing, wf);
+         r.nFnSide = fc.nCoincMult;
+         double sigW = (w2.s1hi - w2.s1lo), sideW = (wf.s1hi - wf.s1lo);
+         r.nFnSideScaled = (sideW > 0) ? fc.nCoincMult * (sigW / sideW) : -1;
+         //  사이드밴드가 신호 창과 겹치면 '사이드밴드' 가 아니다. 조용히
+         //  두면 그 수를 fast-n 으로 읽게 되므로 한 번 말해 준다.
+         if (wf.s1lo < w2.s1hi)
+            printf("  [WARN] run %d%-5s : fast-n 사이드밴드 하한(%.0f NPE)이 S1 신호창 "
+                   "상한(%.0f NPE)보다 낮다. n_fn_side 에 IBD prompt 가 섞인다\n",
+                   run, tag.c_str(), wf.s1lo, w2.s1hi);
 
          bool replaced = rows.count(key) > 0;
          rows[key] = r;
@@ -256,6 +447,10 @@ static void Impl(const std::vector<int> &runs, const TString &out,
                 "single=%lld  live=%.1fs  r_ll=%.2fHz\n",
                 replaced ? "REDO" : " NEW", run, tag.c_str(),
                 r.nPaired, r.nIbd, r.nIbdAcci, r.nSingle, r.liveS, r.rll);
+         printf("         ★예비 : lihe=%.1f±%.1f (%s, dt 표본 %.0f)  "
+                "fn_side=%lld (환산 %.1f)  fn_mutag=%lld\n",
+                r.nLihe, r.eLihe, r.liheStat.c_str(), h.GetEntries(),
+                r.nFnSide, r.nFnSideScaled, r.nFnMutag);
       }
       //  런 하나가 몇 분 걸릴 수 있다. 중간에 끊겨도 한 것은 남도록 그때그때
       //  쓴다 (BuildRunSummary.C/BuildPairSummary.C 와 같은 이유).
@@ -284,12 +479,14 @@ static void Impl(const std::vector<int> &runs, const TString &out,
 
 // ---------------------------------------------------------------------------
 //  runList : ',' 로 나눈 목록 (dst-build.sh/BuildMonitorDst.C 와 같은 꼴).
-//  muShowerNpe..fnTagS : Li/He·fast-n 컷. 이번 버전은 쓰지 않지만 Task 5 가
-//  시그니처를 바꾸지 않고 채울 수 있도록 자리를 잡아 둔다.
+//  muShowerNpe..fnTagS : Li/He·fast-n 의 ★예비 컷. metrics.sh 가
+//     config/monitorcuts.params 에서 읽어 넘긴다.
+//  ibdOverrides : "k=v,k=v" (기본 빈 문자열 = AnalysisCondition.h 그대로).
+//     허용 키 10종은 ApplyOverrides 참조.
 void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
                   double liheFitLoS, double liheFitHiS, int liheMinCand,
                   double fnELoMev, double fnEHiMev, double fnTagS,
-                  bool force = false) {
+                  bool force = false, const char *ibdOverrides = "") {
    TString out(outDir);
    if (!out.EndsWith("/")) out += "/";
    if (gSystem->mkdir(out, kTRUE) != 0 && gSystem->AccessPathName(out, kWritePermission)) {
@@ -305,6 +502,8 @@ void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
    }
    delete parts;
    if (runs.empty()) { printf("[FATAL] 런 목록이 비어 있다\n"); return; }
+   TString ovr = ibdOverrides ? ibdOverrides : "";
+   ovr = ovr.Strip(TString::kBoth);
    Impl(runs, out, muShowerNpe, liheFitLoS, liheFitHiS, liheMinCand,
-        fnELoMev, fnEHiMev, fnTagS, force);
+        fnELoMev, fnEHiMev, fnTagS, force, ovr);
 }
