@@ -60,6 +60,7 @@
 #include <TTree.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -237,6 +238,8 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
 
    // ---- run_summary 에서 x축(시각)과 livetime ----
    std::map<int, double> epoch, live;
+   //  run -> {total, target(FADC only), veto(SADC only), coinc(both)} [Hz]
+   std::map<int, std::array<double, 4>> typeRate;
    {
       std::ifstream in((out + "run_summary.tsv").Data());
       std::string line;
@@ -245,10 +248,15 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
          std::stringstream ss(line);
          //  run_summary.tsv 열 순서 (schema 2). BuildRunSummary.C 의 WriteTsv
          //  와 짝이다 -- 한쪽만 고치면 live 자리에 span 이 들어온다.
+         //  추가로 dead 와 타입별 수까지 읽는다 (schema 2 의 9~12열).
          int run, nsub, nbad; double es, ee, wall, span, lv;
-         if (!(ss >> run >> nsub >> nbad >> es >> ee >> wall >> span >> lv)) continue;
+         double dead; long long t1, t2, t3;
+         if (!(ss >> run >> nsub >> nbad >> es >> ee >> wall >> span >> lv
+                  >> dead >> t1 >> t2 >> t3)) continue;
          if (es > 0) epoch[run] = es;
          if (lv > 0) live[run]  = lv;
+         if (lv > 0) typeRate[run] = {(double)(t1 + t2 + t3) / lv, (double)t1 / lv,
+                                      (double)t2 / lv, (double)t3 / lv};
       }
    }
    for (auto &r : rows) {
@@ -392,8 +400,28 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
          }
          s.push_back(q);
       }
+      //  ★ 8~11번(타입별 rate) 이 이 뒤에 이어 붙으므로 여기서는 더 이상
+      //  PDF 스트림을 닫지 않는다. 실측 : ")" 로 닫은 뒤 빈 pdfMode 로
+      //  또 Print 하면 새 단일쪽 PDF 로 통째로 덮어써 앞의 7쪽이 사라진다.
       DrawPage(pdf, png, "cumulative", "Cumulative IBD candidates",
-               "#Sigma candidates", s, ")", false, page);
+               "#Sigma candidates", s, "", false, page);
+   }
+   {  // 8~11) DAQ 이벤트 rate (런당 점 하나. 표의 타입별 수와 같은 자료)
+      const char *nm[4] = {"evt_total", "evt_target", "evt_veto", "evt_coinc"};
+      const char *tt[4] = {"Total trigger rate", "Target only (FADC) rate",
+                           "VETO only (SADC) rate", "VETO+Target coincidence rate"};
+      const int   cl[4] = {kBlack, kRed + 1, kBlue + 1, kGreen + 2};
+      for (int k = 0; k < 4; ++k) {
+         Series s; s.label = tt[k]; s.color = cl[k]; s.marker = 20;
+         for (auto &kv : typeRate) {
+            auto ie = epoch.find(kv.first);
+            if (ie == epoch.end()) continue;
+            s.x.push_back(ie->second); s.y.push_back(kv.second[k]);
+         }
+         std::vector<Series> v{s};
+         //  마지막(evt_coinc) 에서만 PDF 를 닫는다 (page 7 의 주석 참조).
+         DrawPage(pdf, png, nm[k], tt[k], "Rate [Hz]", v, (k == 3) ? ")" : "", false, page);
+      }
    }
 
    printf("[SAVED] %s  (%d 쪽)\n", pdf.Data(), page);
