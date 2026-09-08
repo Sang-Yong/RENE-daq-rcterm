@@ -183,12 +183,15 @@ static bool FitLiHe(TH1D *h, const TString &fname, double lo, double hi,
 //  (= AnalysisCondition.h 값 그대로. 그때만 legacy 대조가 성립한다).
 //  키 10종은 PairWindows 의 멤버와 1:1 이다.
 //
-//  ★ *_mev 는 **_NPE_MEV 를 곱해** NPE 로 바꾼다 (스펙·브리프가 정한 규약).
-//    분석 쪽 기본값은 비선형 MeVToNpe() 로 만들어지므로, 같은 MeV
-//    숫자를 적어도 기본값과 **똑같은 창이 되지 않는다**(6 MeV : 기본 3632 NPE
-//    대 오버라이드 3053 NPE). 오버라이드는 '기본값을 다시 적는 것' 이 아니라
-//    '다른 창으로 갈아 끼우는 것' 이며, --verify 를 거부하는 이유가 이것이기도
-//    하다. 실효값은 TSV 의 컷 열에 적히므로 표가 스스로 증언한다.
+//  ★ *_mev 는 **분석 헤더 자신의 MeVToNpe() 로** NPE 로 바꾼다. 창 상수를
+//    만든 바로 그 함수다 (AnalysisCondition.h : S2_MIN_NPE = MeVToNpe(6)).
+//    선형 상수 _NPE_MEV 를 곱하면 창을 정의한 식과 변환식이 어긋나, 같은 MeV
+//    숫자가 기본값과 다른 창이 된다 (6 MeV : 3632 대 3053 NPE). 지금은
+//    's2_lo_mev = 6' 이 기본 창을 정확히 되살린다 -- 오버라이드가 무엇을
+//    바꾸는지 MeV 숫자만 보고 알 수 있다는 뜻이다 (컨트롤러 판정 R5).
+//    ★ 그래도 --verify 는 오버라이드가 있으면 언제나 거부한다. 값이 우연히
+//    기본과 같은지를 부동소수 비교로 가려 게이트를 여는 것보다, 거부하는
+//    쪽이 안전하다. 실효값은 TSV 의 컷 열에 적히므로 표가 스스로 증언한다.
 //
 //  s2LoMev/s2HiMev 는 TSV 의 s2_lo/s2_hi 열에 적을 실효값[MeV]이다. NPE 에서
 //  되돌려 나눌 수 없어(정변환이 비선형) 따로 받는다.
@@ -206,8 +209,8 @@ static void ApplyOverrides(PairWindows &w, double &s2LoMev, double &s2HiMev,
       k = k.Strip(TString::kBoth);
       if      (k == "s1_lo_npe")   w.s1lo = v;
       else if (k == "s1_hi_npe")   w.s1hi = v;
-      else if (k == "s2_lo_mev")  { w.s2lo = v * _NPE_MEV; s2LoMev = v; }
-      else if (k == "s2_hi_mev")  { w.s2hi = v * _NPE_MEV; s2HiMev = v; }
+      else if (k == "s2_lo_mev")  { w.s2lo = MeVToNpe(v); s2LoMev = v; }
+      else if (k == "s2_hi_mev")  { w.s2hi = MeVToNpe(v); s2HiMev = v; }
       else if (k == "dt_min_us")   w.dtMin = v;
       else if (k == "dt_max_us")   w.dtMax = v;
       else if (k == "dt_acci_us")  w.dtAcci = v;
@@ -426,9 +429,16 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          //    사이드밴드에는 '포화 미만' 인 것만 남아 있고, 진짜 fast-n prompt
          //    의 상당 부분이 여기 오지 못한다. 외삽 배수(sigW/sideW)도 스펙트럼이
          //    평평하다는 가정이라, 분석팀 검증 전까지는 크기 정도로만 읽을 것.
+         //  ★ MeV -> NPE 는 창 상수를 만든 그 함수(MeVToNpe)로 한다. 선형
+         //    _NPE_MEV 로 바꾸면 12 MeV 가 6106 NPE 가 되어 S1 신호창
+         //    상한(MeVToNpe(12) = 7265 NPE) **안으로 들어온다** -- 사이드밴드가
+         //    아니라 신호창의 일부가 된다 (컨트롤러 판정 R5).
+         //    ★ 경계는 양쪽 다 닫혀 있다. fn_e_lo_mev = 12 면 사이드밴드가
+         //    S1_MAX_NPE 에서 **정확히 시작**하므로 그 값에 딱 걸린 사건 하나는
+         //    신호창과 사이드밴드 양쪽에 든다. 겹침이 싫으면 문턱을 조금 올린다.
          PairWindows wf = w2;
-         wf.s1lo = fnELoMev * _NPE_MEV;
-         wf.s1hi = fnEHiMev * _NPE_MEV;
+         wf.s1lo = MeVToNpe(fnELoMev);
+         wf.s1hi = MeVToNpe(fnEHiMev);
          PairCounts fc = PairAndCountW(sing, wf);
          r.nFnSide = fc.nCoincMult;
          double sigW = (w2.s1hi - w2.s1lo), sideW = (wf.s1hi - wf.s1lo);

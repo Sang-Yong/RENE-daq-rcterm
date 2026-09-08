@@ -26,9 +26,14 @@ fn_tag_s      = 0.1     # 직전 샤워링 뮤온에서 이 시간 안의 후보
 #   s1_lo_npe  s1_hi_npe  s2_lo_mev  s2_hi_mev  dt_min_us  dt_max_us
 #   dt_acci_us  iso_pre_us  iso_post_us  lower_npe
 #
-# ★ *_mev 는 _NPE_MEV(508.818 NPE/MeV) 를 곱해 NPE 로 바꾼다. 분석 쪽 기본값은
-#   비선형 MeVToNpe() 로 만들어지므로, 같은 MeV 숫자를 적어도 기본값과 똑같은
-#   창이 되지 않는다 (6 MeV : 기본 3632 NPE 대 오버라이드 3053 NPE).
-#   오버라이드는 '기본값을 다시 적는 것' 이 아니라 '다른 창으로 갈아 끼우는
-#   것' 이다. 적용된 실효값은 metrics_summary.tsv 의 컷 열에 그대로 적히므로,
-#   나중에 표만 보고도 어떤 컷의 결과인지 알 수 있다.
+# ★ *_mev 는 분석 헤더 자신의 MeVToNpe() 로 NPE 가 된다. 창 상수를 만든 바로
+#   그 함수라(AnalysisCondition.h : S2_MIN_NPE = MeVToNpe(6)), 's2_lo_mev = 6'
+#   은 기본 창을 정확히 되살린다. 즉 여기 적는 MeV 숫자를 분석 쪽 기본값과
+#   그대로 견주어 읽으면 된다.
+#   적용된 실효값은 metrics_summary.tsv 의 컷 열에 MeV 로 적히므로, 나중에
+#   표만 보고도 어떤 컷의 결과인지 알 수 있다.
+#
+#   fn_e_lo_mev 도 같은 변환을 쓴다. 기본값 12.0 은 S1 신호창 상한
+#   (S1_E_MAX_MEV = 12) 과 같은 값이라 사이드밴드가 신호창 **바로 위**에서
+#   시작한다. 경계가 양쪽 다 닫혀 있어 그 값에 딱 걸린 사건 하나는 양쪽에
+#   드는데, 겹침이 싫으면 12.5 처럼 조금 올려 잡는다.
