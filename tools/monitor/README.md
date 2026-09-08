@@ -33,6 +33,7 @@ CLAUDE.md §11.12 — 스토리지 링크는 §11.115 이후 10G 라 지금은 �
 | 3 (신설) | `metrics.sh` | `BuildMetrics.C` | DST | IBD·acci·Li/He·fast-n(★예비) → `metrics_summary.tsv` |
 | (과도기) | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | PRD | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` — 교차검증용 + 4단계 입력, 유지 |
 | 4 (개편) | `rate-trend.sh` | `BuildRateTrend.C` | pair_summary | 효율 보정 + 시간축 추이 그림 11종 → `rate_trend.{pdf,tsv}`, `*.png` |
+| 4b (신설) | `bg-trend.sh` | `BuildBgTrend.C` | metrics_summary | 배경 지표 추이 6종 (accidental 교차검증 · fast-n · Li/He+역방향 대조 · PSD · n-like · 다중중성자) → `bg_trend.{pdf}`, `bg_trend_*.png` |
 | 5 (신설) | `websummary.sh` | `gen-runclass.sh` + `gen-summary-html.sh` + `publish_google.py` | 위 전부 + `runcatalog.db` | 런당 1줄 표(Type 열 포함) + 그림 + 구글사이트 발행. cron 매시 27분 |
 | legacy 자동화 | `monitor-all.sh` | — | — | 1·(과도기)·4 만 순서대로 수동/구식 자동화. 운영 cron 은 5단계(`websummary.sh`)가 갖는다(★ 아직 미설치 — 배포 대기, CLAUDE.md §11.142 참조) |
 
