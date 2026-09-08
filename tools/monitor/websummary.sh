@@ -22,7 +22,7 @@
 #      -> ibd-summary.sh -> rate-trend.sh
 #      -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9. 실패해도 WARN 뿐 --
 #         type='-' 로 계속) -> gen-summary-html.sh
-#      -> rate_trend_*.png 11개 + summary.html 을 webroot 로 rsync 복사
+#      -> rate_trend_*.png 11개 + bg_trend_*.png 6개 + summary.html 을 webroot 로 rsync 복사
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
 #      -> publish_google.py (publish=1 일 때만)
 #
@@ -247,9 +247,10 @@ if [ "$DRY" -eq 1 ]; then
       log "[DRY]   metrics.sh     --list $NEWLIST  (+ --verify, legacy 면 불일치해도 경고만)"
       log "[DRY]   ibd-summary.sh --list $NEWLIST"
       log "[DRY]   rate-trend.sh"
+      log "[DRY]   bg-trend.sh   (실패해도 WARN 뿐)"
       log "[DRY]   gen-runclass.sh $TSVDIR $TSVDIR/runclass.tsv  (실패해도 WARN 뿐, type='-' 로 계속)"
       log "[DRY]   gen-summary-html.sh $TSVDIR $TSVDIR/summary.html $METRICS_SOURCE $REFRESH_S"
-      log "[DRY]   rsync rate_trend_*.png + summary.html -> $WEBROOT"
+      log "[DRY]   rsync rate_trend_*.png + bg_trend_*.png + summary.html -> $WEBROOT"
       if [ "$PUBLISH" = 1 ]; then log "[DRY]   publish_google.py --params $PARAMS"
       else                        log "[DRY]   (publish=0 이므로 로컬 생성까지만)"
       fi
@@ -288,6 +289,15 @@ else
    run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
 
+   #  배경 지표 추이(bg_trend_*.png, 배경 레시피 v2). 발행을 막지 않는다 --
+   #  metrics_summary 가 schema 2 가 아니면 [SKIP] 을 찍고 0 으로 나온다.
+   log "[RUN ] bg-trend"
+   nice -n 15 ionice -c2 -n7 "$MON/bg-trend.sh" >>"$LOG" 2>&1
+   bgrc=$?
+   if [ $bgrc -ne 0 ]; then log "[WARN] bg-trend 실패 (exit=$bgrc) -- 배경 추이 그림만 빠진다"
+   else                     log "[OK  ] bg-trend"
+   fi
+
    #  type(physics/calibration/test) 열의 유일한 생산자(컨트롤러 판정 R9).
    #  실패해도 발행을 막지 않는다 -- WARN 만 남기고 지나가면 gen-summary-html.sh
    #  가 runclass.tsv 를 못 찾아 type 열을 전부 '-' 로 낸다(그 스크립트의
@@ -312,7 +322,8 @@ else
    if [ ! -r "$TSVDIR/summary.html" ]; then
       log "[FAIL] $TSVDIR/summary.html 이 없다"; exit 1
    fi
-   pngs=("$TSVDIR"/rate_trend_*.png); [ -e "${pngs[0]}" ] || pngs=()
+   pngs=("$TSVDIR"/rate_trend_*.png "$TSVDIR"/bg_trend_*.png)
+   pngs=($(for f in "${pngs[@]}"; do [ -e "$f" ] && echo "$f"; done))
    nice -n 15 ionice -c2 -n7 rsync -a "${pngs[@]}" "$TSVDIR/summary.html" "$WEBROOT/" >>"$LOG" 2>&1
    rc=$?
    if [ $rc -ne 0 ]; then log "[FAIL] webroot 복사 (exit=$rc)"; exit 1; fi

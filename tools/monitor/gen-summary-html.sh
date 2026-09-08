@@ -16,7 +16,9 @@
 #                n_ibd(7) n_ibd_acci(8) ... n_single(16) r_ll(17) n_subrun(18)
 #   metrics_summary(=pair_summary 와 앞 11열이 같은 자리) ... 뒤에
 #                n_mu(12) n_mu_shower(13) n_lihe(14) e_lihe(15) lihe_stat(16)
-#                n_fn_side(17) n_fn_side_scaled(18) ...
+#                n_fn_side(17) n_fn_side_scaled(18) ... (schema 2 부터 19열 이후에
+#                n_fn_side_lin fn_sat_frac n_lihe_rev e_lihe_rev r_mu_shower n_acci_rp
+#                n_mult_rej psd_mean psd_rms n_ibd_psd_nlike 가 더 있다 -- 이 표는 안 쓴다)
 #   runclass     run(1) type(2) -- gen-runclass.sh 가 만든다(physics/
 #                calibration/test/-, 컨트롤러 판정 R9). 이 스크립트는 순수
 #                소비자로 그 파일을 키 조회만 한다 -- 분류 규칙을 여기서

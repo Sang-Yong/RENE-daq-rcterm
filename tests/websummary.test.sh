@@ -66,7 +66,7 @@ EOF
 mk_fake_mon() {
    local mon=$1 s
    mkdir -p "$mon"
-   for s in run-summary.sh dst-build.sh metrics.sh ibd-summary.sh rate-trend.sh; do
+   for s in run-summary.sh dst-build.sh metrics.sh ibd-summary.sh rate-trend.sh bg-trend.sh; do
       cat > "$mon/$s" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s %s %s\n' "$(date '+%s.%N')" "$(basename "$0")" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
