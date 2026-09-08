@@ -10,10 +10,11 @@
 #   --list 와 함께 주면 먼저 만들고 나서 대조한다.
 #
 #   ---- 컷은 config/monitorcuts.params 에서 온다 ----
-#   Li/He·fast-n 의 ★예비 컷(mu_shower_npe / lihe_fit_lo_s / lihe_fit_hi_s /
-#   lihe_min_cand / fn_e_lo_mev / fn_e_hi_mev / fn_tag_s)을 읽어 매크로 인자로
-#   넘긴다. 파일이 없으면 아래 getp 의 기본값을 쓰며, 그 값은
-#   config/monitorcuts.params.example 에 적힌 것과 같다.
+#   배경 레시피 v2 의 ★예비 컷(mu_shower_npe / lihe_fit_lo_s / lihe_fit_hi_s /
+#   lihe_min_cand / fn_e_lo_mev / fn_e_hi_mev / lihe_li_frac / psd_nsig)을 읽어
+#   매크로 인자로 넘긴다. 파일이 없으면 아래 getp 의 기본값을 쓰며, 그 값은
+#   config/monitorcuts.params.example 에 적힌 것과 같다. 옛 키 fn_tag_s 는
+#   더 이상 쓰지 않는다 (있으면 경고만 하고 무시한다).
 #
 #   IBD 컷 오버라이드 10종(s1_lo_npe s1_hi_npe s2_lo_mev s2_hi_mev dt_min_us
 #   dt_max_us dt_acci_us iso_pre_us iso_post_us lower_npe)은 params 에서
@@ -56,13 +57,15 @@ getp() {          # getp <키> <기본값>
       END { if (f) print v; else exit 1 }' "$CUTS" 2>/dev/null || printf '%s\n' "$d"
 }
 
-MU_SHOWER_NPE=$(getp mu_shower_npe 3000)
+MU_SHOWER_NPE=$(getp mu_shower_npe 20000)
 LIHE_FIT_LO_S=$(getp lihe_fit_lo_s 0.002)
 LIHE_FIT_HI_S=$(getp lihe_fit_hi_s 10.0)
 LIHE_MIN_CAND=$(getp lihe_min_cand 100)
 FN_E_LO_MEV=$(getp fn_e_lo_mev 12.0)
 FN_E_HI_MEV=$(getp fn_e_hi_mev 50.0)
-FN_TAG_S=$(getp fn_tag_s 0.1)
+LIHE_LI_FRAC=$(getp lihe_li_frac 1.0)
+PSD_NSIG=$(getp psd_nsig 3.0)
+[ -n "$(getp fn_tag_s "")" ] && echo "[WARN] fn_tag_s 는 v2 에서 쓰지 않는다. 무시한다 ($CUTS)"
 
 #  IBD 컷 오버라이드 : 기본값이 없다. params 에 있는 것만 모은다
 #  (없으면 AnalysisCondition.h 값을 그대로 쓴다는 뜻이다).
@@ -108,7 +111,7 @@ if [ -n "$LIST" ]; then
    echo "지표  : $OUT/metrics_summary.tsv   런 : $LIST"
    if [ -r "$CUTS" ]; then echo "컷    : $CUTS"; else echo "컷    : 기본값 ($CUTS 없음)"; fi
    [ -n "$IBD_OVR" ] && echo "★ IBD 오버라이드 : $IBD_OVR  (--verify 는 거부된다)"
-   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $FN_TAG_S, $FORCE, \"$IBD_OVR\""
+   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $LIHE_LI_FRAC, $PSD_NSIG, $FORCE, \"$IBD_OVR\""
    if [ "$DRY" = 1 ]; then
       echo "(dry-run) root -l -b -q '$DIR/BuildMetrics.C+($ARGS)'"
    else

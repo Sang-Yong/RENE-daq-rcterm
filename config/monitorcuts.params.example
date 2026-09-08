@@ -4,14 +4,26 @@
 #   읽는 곳 : tools/monitor/metrics.sh -> BuildMetrics.C 의 매크로 인자
 #   형식    : 'key = value' 한 줄. '#' 뒤는 주석. 같은 키가 여러 번이면 나중 것.
 #
-# 새 지표(예비)의 손잡이. ★ 분석팀 검증 전까지 웹에 '(예비)' 로 표시된다.
-mu_shower_npe = 3000    # 이 NPE 초과 target 뮤온을 '샤워링' 으로 본다 ★미검증
-lihe_fit_lo_s = 0.002   # Li/He 적합 창 [s]
+# 배경 레시피 v2 (2026-09-08, docs/superpowers/specs/2026-09-08-background-recipes-v2-design.md)
+# ★ 분석팀 검증 전까지 웹에 '(예비)' 로 표시된다.
+#
+# ---- Li/He : 직전 샤워링 뮤온까지의 시간 분포를 Daya Bay Eq.2 로 적합 ----
+mu_shower_npe = 20000   # 이 NPE 초과 target 뮤온을 '샤워링' 으로 본다.
+                        #   뜻은 에너지가 아니라 **rate 손잡이** 다 -- 적분창 1 µs 라
+                        #   NPE 가 5만을 못 넘는다. run 4305 실측 : 3000 -> 1.33 Hz(1/R
+                        #   0.75 s, τ_Li 0.257 s 와 축퇴), 20000 -> 0.63 Hz(1/R 1.6 s).
+                        #   R_μ 가 1/τ_Li 의 2 배 안이면 lihe_stat=degen 으로 낸다
+lihe_fit_lo_s = 0.002   # 적합 창 [s]. 첫 빈 중심(0.025 s)보다 작으면 아무 빈도 안 뺀다
 lihe_fit_hi_s = 10.0
-lihe_min_cand = 100     # 이보다 후보가 적으면 적합하지 않는다 (lowstat)
-fn_e_lo_mev   = 12.0    # fast-n prompt 사이드밴드 [MeV] ★미검증
-fn_e_hi_mev   = 50.0
-fn_tag_s      = 0.1     # 직전 샤워링 뮤온에서 이 시간 안의 후보 수 = n_fn_mutag
+lihe_min_cand = 100     # 창 안 표본이 이보다 적으면 적합하지 않는다 (lowstat)
+lihe_li_frac  = 1.0     # ⁹Li 분율 R (Eq.2). 1.0 = ⁹Li 만. 이 통계로는 띄울 수 없어 고정
+#
+# ---- fast-n : prompt 창을 사이드밴드로 올린 페어링을 0차·1차 외삽 ----
+fn_e_lo_mev   = 12.0    # 사이드밴드 [MeV]. S1 신호창 상한(12)과 같으면 경계 사건이 양쪽에 든다
+fn_e_hi_mev   = 50.0    #   ★ 12 MeV 이상은 실측 93 % 가 포화 -> T_Sat 을 합쳐 센다 (schema 2 DST)
+#
+# ---- PSD : 1-3 MeV single 의 꼬리비율 γ-band 에서 몇 σ 밖을 n-like 로 세나 ----
+psd_nsig      = 3.0     # NEOS 는 p_psd > 3.5 를 기각. 여기서는 분리력이 약해(FoM 0.5) 추이용
 
 # ---- IBD 컷 오버라이드 (스펙 §4 '컷 변경 = DST 초 단위 재계산') ----
 # 주석을 풀면 AnalysisCondition.h 대신 이 값을 쓴다. ★ 하나라도 풀면
@@ -28,12 +40,5 @@ fn_tag_s      = 0.1     # 직전 샤워링 뮤온에서 이 시간 안의 후보
 #
 # ★ *_mev 는 분석 헤더 자신의 MeVToNpe() 로 NPE 가 된다. 창 상수를 만든 바로
 #   그 함수라(AnalysisCondition.h : S2_MIN_NPE = MeVToNpe(6)), 's2_lo_mev = 6'
-#   은 기본 창을 정확히 되살린다. 즉 여기 적는 MeV 숫자를 분석 쪽 기본값과
-#   그대로 견주어 읽으면 된다.
-#   적용된 실효값은 metrics_summary.tsv 의 컷 열에 MeV 로 적히므로, 나중에
-#   표만 보고도 어떤 컷의 결과인지 알 수 있다.
-#
-#   fn_e_lo_mev 도 같은 변환을 쓴다. 기본값 12.0 은 S1 신호창 상한
-#   (S1_E_MAX_MEV = 12) 과 같은 값이라 사이드밴드가 신호창 **바로 위**에서
-#   시작한다. 경계가 양쪽 다 닫혀 있어 그 값에 딱 걸린 사건 하나는 양쪽에
-#   드는데, 겹침이 싫으면 12.5 처럼 조금 올려 잡는다.
+#   은 기본 창을 정확히 되살린다. 적용된 실효값은 metrics_summary.tsv 의 컷
+#   열에 MeV 로 적히므로, 나중에 표만 보고도 어떤 컷의 결과인지 알 수 있다.

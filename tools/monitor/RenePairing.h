@@ -58,9 +58,12 @@ inline PairWindows CurrentPairWindows() {
 
 //  onPromptT 를 주면, multiplicity 를 통과한 on-time 쌍마다 prompt(S1) 의
 //  t_us 를 push 한다. off-time(우발) 루프는 수집하지 않는다.
+//  onPromptE 를 주면 같은 쌍의 prompt(S1) NPE 도 같은 순서로 push 한다 --
+//  fast-n 사이드밴드의 prompt 스펙트럼(0차/1차 외삽)에 쓴다.
 inline PairCounts PairAndCountW(const std::vector<S1S2_Candidate> &ev,
                                 const PairWindows &w,
-                                std::vector<double> *onPromptT = nullptr) {
+                                std::vector<double> *onPromptT = nullptr,
+                                std::vector<double> *onPromptE = nullptr) {
    PairCounts c;
    const long long nEv = (long long)ev.size();
    if (nEv == 0) return c;
@@ -108,6 +111,7 @@ inline PairCounts PairAndCountW(const std::vector<S1S2_Candidate> &ev,
                       next._pe_sum, next._t_us, s2._t_us, vetoExtra)) {
             c.nCoincMult++;
             if (onPromptT) onPromptT->push_back(s1._t_us);
+            if (onPromptE) onPromptE->push_back(s1._pe_sum);
          }
          break;   // delayed 하나에 prompt 하나. 재사용하지 않는다
       }

@@ -23,9 +23,15 @@ OUT=$(root -l -b -q -e "
    TTree*i=(TTree*)f.Get(\"T_Info\");
    printf(\"CHK trees=%d\n\", (int)(s&&m&&i));
    printf(\"CHK muons_pos=%d\n\", (int)(m->GetEntries()>0));
+   TTree*x=(TTree*)f.Get(\"T_Sat\"); Int_t sch=0; i->SetBranchAddress(\"schema\",&sch); i->GetEntry(0);
+   printf(\"CHK schema2=%d\n\", (int)(sch==2 && x!=nullptr && s->GetBranch(\"psd\")!=nullptr));
+   Float_t psd=-1; s->SetBranchAddress(\"psd\",&psd); int ok=1; for(Long64_t k=0;k<s->GetEntries();k++){ s->GetEntry(k); if(!(psd>=0 && psd<=1)) ok=0; }
+   printf(\"CHK psd_range=%d\n\", ok);
 " 2>&1)
 echo "$OUT" | grep -q 'CHK trees=1'     || { echo "FAIL trees"; exit 1; }
 echo "$OUT" | grep -q 'CHK muons_pos=1' || { echo "FAIL muons"; exit 1; }
+echo "$OUT" | grep -q 'CHK schema2=1'   || { echo "FAIL schema2 (psd 열·T_Sat·schema=2)"; echo "$OUT" | tail -5; exit 1; }
+echo "$OUT" | grep -q 'CHK psd_range=1' || { echo "FAIL psd_range"; exit 1; }
 # 3) 재실행은 캐시 경로 -- '캐시 1 / 새로 0' 이어야 한다
 RUNSUM_OUT="$T/out" "$DIR/tools/monitor/dst-build.sh" --list $RUN --force > "$T/log2" 2>&1
 grep -q '캐시 1 / 새로 0' "$T/log2" || { echo "FAIL resume"; tail -5 "$T/log2"; exit 1; }
@@ -55,7 +61,7 @@ if [ "$FOUND2" = 1 ]; then
       }" 2>&1)
    echo "$OUT2" | grep -q 'CHK T_Singles_mono=1 nsub=2' || { echo "FAIL boundary-singles"; exit 1; }
    echo "$OUT2" | grep -q 'CHK T_Muons_mono=1 nsub=2'   || { echo "FAIL boundary-muons"; exit 1; }
-   echo "PASS monitor-dst (6/6)"
+   echo "PASS monitor-dst (8/8)"
 else
-   echo "PASS monitor-dst (4/4, 경계 시험 SKIP: 4237 없음)"
+   echo "PASS monitor-dst (6/6, 경계 시험 SKIP: 4237 없음)"
 fi

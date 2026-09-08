@@ -107,6 +107,22 @@ struct ReneMuon {
    Char_t   sat  = 0;
 };
 
+//  DST 용 '포화 사건' 한 건 (스키마 2, 배경 레시피 v2 스펙 §2). muon ·
+//  after-muon 은 통과했는데 **포화라서 clean single 에서 버린** 사건이다.
+//  pe 는 잘린 파형의 적분값이라 실제보다 작은 **하한**이다. fast-n
+//  사이드밴드(prompt 12 MeV 이상)는 실측 93 % 가 포화라, 이것을 함께 세지
+//  않으면 사이드밴드가 표본의 7 % 로 만든 값이 된다.
+struct ReneSat {
+   Int_t    sub  = -1;
+   Double_t t_us = 0;
+   Float_t  pe   = 0;
+};
+
+//  PSD 꼬리 시작 : 채널별 피크에서 이만큼 뒤부터 적분창 끝까지. 2 ns/샘플이라
+//  20 샘플 = 40 ns. AmBe run 4221 실측에서 40/60/80/100 ns 중 40 ns 가 분리력이
+//  가장 컸다(FoM 0.53 -- 약하다. 사건별 컷이 아니라 런 단위 통계량으로 쓴다).
+static const int kRenePsdTailSamples = 20;
+
 // ---------------------------------------------------------------------------
 static TString ReneRunStr(int run) { return TString::Format("%06d", run); }
 
@@ -175,6 +191,26 @@ inline double ReneChannelNpe(int ch, int timeWindow, bool &saturate) {
    double charge_pC = DT_NS * ((DYNAMIC_RANGE / RESOLUTION) * integral) / IMPEDANCE;
    if (GetSaturation(FFwaveform[ch])) saturate = true;
    return charge_pC / kChargeToNpe;
+}
+
+//  PSD 재료. 채널 하나의 적분창(문턱-10 .. 문턱+240 샘플)에서 전체 적분과
+//  '피크 + tailSamples 이후' 적분을 tot/tail 에 **더한다** (두 채널을 합쳐
+//  하나의 꼬리비율을 만들기 위해서다). 신호가 없으면 아무것도 더하지 않는다.
+//  적분 범위·페데스탈은 ReneChannelNpe 와 같아야 한다 -- 같은 파형을 같은
+//  창으로 잘라야 tail/tot 이 뜻을 갖는다.
+inline void ReneChannelTail(int ch, int timeWindow, int tailSamples,
+                            double &tot, double &tail) {
+   if (Fbit[ch] == 0 || !FFwaveform[ch]) return;
+   double ped = GetPed(FFwaveform[ch], 0, PEDESTAL_RANGE);
+   auto thr = GetBinAbove(FFwaveform[ch], 0, timeWindow, ped, Fthr[ch]);
+   int thrTime = thr.second;
+   if (thrTime < 0) return;
+   int sIdx = std::max(0, thrTime - 10);
+   int eIdx = std::min((int)FFwaveform[ch]->size(), thrTime + 240);
+   auto mx = GetMax(FFwaveform[ch], sIdx, eIdx, ped);
+   int tIdx = std::min(eIdx, mx.second + tailSamples);
+   tot  += GetQsum(FFwaveform[ch], sIdx, eIdx, ped);
+   tail += GetQsum(FFwaveform[ch], tIdx, eIdx, ped);
 }
 
 // ---------------------------------------------------------------------------
@@ -274,29 +310,78 @@ inline bool ReneLoadCacheMuons(const TString &path,
    return true;
 }
 
+//  스키마 2 캐시의 나머지 -- T_Singles 의 psd 열과 T_Sat 트리 -- 를 읽는다.
+//  둘 중 하나라도 없으면 false (스키마 1 캐시라는 뜻. 그 서브런은 파형에서
+//  다시 만든다). psd 는 ReneLoadCache 가 채운 single 과 **같은 순서·개수**로
+//  덧붙는다 -- 두 벡터의 인덱스가 곧 짝이다.
+inline bool ReneLoadCacheExtra(const TString &path, std::vector<Float_t> &psd,
+                               std::vector<ReneSat> &sats) {
+   if (gSystem->AccessPathName(path)) return false;
+   TFile *f = TFile::Open(path, "READ");
+   if (!f || f->IsZombie()) { if (f) f->Close(); return false; }
+   TTree *tE = (TTree *)f->Get("T_Singles");
+   TTree *tX = (TTree *)f->Get("T_Sat");
+   if (!tE || !tX || !tE->GetBranch("psd")) { f->Close(); return false; }
+   Float_t e_psd = -1;
+   tE->SetBranchStatus("*", 0);
+   tE->SetBranchStatus("psd", 1);
+   tE->SetBranchAddress("psd", &e_psd);
+   Long64_t n = tE->GetEntries();
+   for (Long64_t i = 0; i < n; ++i) { tE->GetEntry(i); psd.push_back(e_psd); }
+   Int_t x_sub; Double_t x_t; Float_t x_pe;
+   tX->SetBranchAddress("sub_id", &x_sub);
+   tX->SetBranchAddress("t_us",   &x_t);
+   tX->SetBranchAddress("pe",     &x_pe);
+   Long64_t m = tX->GetEntries();
+   for (Long64_t i = 0; i < m; ++i) { tX->GetEntry(i); sats.push_back({x_sub, x_t, x_pe}); }
+   f->Close();
+   return true;
+}
+
 inline void ReneSaveCache(const TString &path, double thr, double vetoCutUs,
                           const std::vector<S1S2_Candidate> &sing, size_t first,
                           const ReneCarry &carry, const ReneSubrunStat &st,
                           const std::vector<ReneMuon> *muons = nullptr,
-                          size_t muFirst = 0) {
+                          size_t muFirst = 0,
+                          const std::vector<Float_t> *psd = nullptr,
+                          const std::vector<ReneSat> *sats = nullptr,
+                          size_t satFirst = 0) {
    //  임시 이름으로 쓰고 마지막에 옮긴다. 도중에 끊겨도 잘린 파일이 최종
    //  이름을 차지하지 않는다 (postrun.sh 가 rsync 로 하는 것과 같은 이유).
    TString tmp = path + ".tmp";
    TFile *f = TFile::Open(tmp, "RECREATE");
    if (!f || f->IsZombie()) { if (f) f->Close(); return; }
 
+   //  psd 는 sing 과 같은 길이여야 한다 (인덱스가 짝). 어긋나면 스키마 2 로
+   //  쓰지 않는다 -- 잘못된 짝을 조용히 저장하는 것보다 스키마 1 로 남겨
+   //  다음에 다시 만들게 하는 편이 낫다.
+   const bool withPsd = psd && psd->size() == sing.size();
    TTree *tE = new TTree("T_Singles", "clean singles above threshold");
    Int_t    e_evt = 0, e_sub = 0;
    Double_t e_t = 0;
-   Float_t  e_pe = 0;
+   Float_t  e_pe = 0, e_psd = -1;
    tE->Branch("evt_id", &e_evt);
    tE->Branch("sub_id", &e_sub);
    tE->Branch("t_us",   &e_t);
    tE->Branch("pe",     &e_pe);
+   if (withPsd) tE->Branch("psd", &e_psd);
    for (size_t i = first; i < sing.size(); ++i) {
       e_evt = sing[i]._evt_id; e_sub = sing[i]._sub_id;
       e_t   = sing[i]._t_us;   e_pe  = (Float_t)sing[i]._pe_sum;
+      if (withPsd) e_psd = (*psd)[i];
       tE->Fill();
+   }
+   if (withPsd && sats) {
+      TTree *tX = new TTree("T_Sat", "saturated events that passed the muon cuts (for DST)");
+      Int_t x_sub = 0; Double_t x_t = 0; Float_t x_pe = 0;
+      tX->Branch("sub_id", &x_sub);
+      tX->Branch("t_us",   &x_t);
+      tX->Branch("pe",     &x_pe);
+      for (size_t i = satFirst; i < sats->size(); ++i) {
+         x_sub = (*sats)[i].sub; x_t = (*sats)[i].t_us; x_pe = (*sats)[i].pe;
+         tX->Fill();
+      }
+      f->cd(); tX->Write();
    }
 
    TTree *tS = new TTree("T_State", "carry-over and per-subrun counts");
@@ -348,7 +433,12 @@ inline void ReneSaveCache(const TString &path, double thr, double vetoCutUs,
 inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double thr,
                                         double vetoCutUs, ReneCarry &carry,
                                         std::vector<S1S2_Candidate> &sing,
-                                        std::vector<ReneMuon> *muons = nullptr) {
+                                        std::vector<ReneMuon> *muons = nullptr,
+                                        std::vector<Float_t> *psd = nullptr,
+                                        std::vector<ReneSat> *sats = nullptr) {
+   //  psd 를 주면 single 하나마다 꼬리비율을 하나씩 **같은 순서로** 덧붙인다.
+   //  sats 를 주면 포화라 버린 사건을 따로 모은다. 둘 다 single 의 개수·순서·
+   //  pe 에는 손대지 않는다 -- legacy 패리티가 그것에 걸려 있다.
    ReneSubrunStat st;
    st.subrun = sub;
 
@@ -415,7 +505,17 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
       bool sat = false;
       double q0 = ReneChannelNpe(0, timeWindow, sat);
       double q1 = ReneChannelNpe(1, timeWindow, sat);
-      if (sat) { st.nSat++; continue; }
+      if (sat) {
+         st.nSat++;
+         if (sats && (q0 > -900 || q1 > -900)) {
+            ReneSat x;
+            x.sub  = sub;
+            x.t_us = globalTime * DAQ_NS_TO_US;
+            x.pe   = (Float_t)((q0 > -900 ? q0 : 0) + (q1 > -900 ? q1 : 0));
+            sats->push_back(x);
+         }
+         continue;
+      }
       st.nClean++;
 
       //  --- Step2Reader 의 LoadCleanSingles 와 같은 규칙 ---
@@ -428,6 +528,14 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
 
       sing.push_back({(int)i, sub, globalTime * DAQ_NS_TO_US, pe});
       st.nSingle++;
+      if (psd) {
+         //  두 채널 합의 꼬리비율. 신호가 한쪽뿐이면 그 채널만으로 잰다.
+         //  전체 적분이 0 이하(있을 수 없지만)면 -1 = '없음' 관례.
+         double tot = 0, tail = 0;
+         ReneChannelTail(0, timeWindow, kRenePsdTailSamples, tot, tail);
+         ReneChannelTail(1, timeWindow, kRenePsdTailSamples, tot, tail);
+         psd->push_back(tot > 0 ? (Float_t)(tail / tot) : (Float_t)-1);
+      }
    }
 
    st.liveSec = (st.tEnd > st.tStart) ? (st.tEnd - st.tStart) * 1e-6 : 0.0;
