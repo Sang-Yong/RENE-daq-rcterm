@@ -898,7 +898,13 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 만들기를 시도하며, 못 만들면 올려야 할 이름을 찍는다. **그림 20 장은 사용자가 폴더 `RENE_DAQ` 에 한 번 올린다**
 (zip 을 세션에서 건넸다). `finish-publish.sh` 는 20 장이 다 보이면 `--init` → `publish=1` → cron → 첫 발행.
 
-남은 것 : 그림 20 장 올리기(사용자) → finish-publish.sh 가 마무리 → 구글 사이트 퍼가기 1회(사용자).
+**✅ 켜졌다 (03:55).** 사용자가 zip 을 폴더째 올려 그림이 `RENE_DAQ/rene-runsummary-png-20/` 에 들어갔다 —
+`drive_folder_id` 를 그 하위 폴더(1IdUJ…)로 바꾸니 `--init` 이 20 장을 이름으로 찾아 map 을 만들었고,
+`publish = 1`, **cron `27 * * * * websummary.sh` 등록**, 첫 발행 rc=0 (시트 새 행 0 · 그림 20/20 교체).
+퍼가기 주소 목록 : `/Data_ssd/LOG/websummary-embed-urls.txt` (fileId 는 갱신해도 안 바뀐다).
+**★ 그림 파일을 드라이브에서 지우거나 이름을 바꾸면 map 이 끊긴다** — 그때는 다시 올리고 `--init`.
+
+남은 것 : 구글 사이트에 시트 + 그림 주소 퍼가기 1회(사용자).
 
 #### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
 
@@ -2779,10 +2785,10 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 백업       ★ 1회차 끝 (09-09 13:08, code=3). 하드 8장(A~H) 참 · 런 1,681 개 남음 · 실패 0 (§11.170)
            이어가려면 새 하드 2장 + 같은 명령 (002452 의 1,828 개부터). G·H 는 아직 마운트된 채 — 뽑기 전 umount
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
-발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
-                미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
-                수동 실행/확인은 지금도 된다. 09-09 밤 : veto 단계 + 표 20 열 + 부팅 실패 런
-                건너뛰기 추가, 게이트 0 불일치로 **metrics_source=dst 전환 완료**, last_run=4335 (§11.174)
+발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
+                시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
+                RENE_DAQ/rene-runsummary-png-20 의 20 장(내용 교체). metrics_source=dst, last_run=4335.
+                상태 : tools/monitor/websummary.sh --status · 로그 /Data_ssd/LOG/websummary.log
 웹 표      ★ DST 출처 표는 만들어졌다 : /scratch/RunSummary/web/summary_dst.html (53 행)
                 + bg_trend_*.png 6장. metrics_summary.tsv 80 행 (40 런 × 2 채널).
                 legacy 출처 표(summary.html)는 websummary.sh 가 ibd-summary 단계(PRD 재독,
@@ -2804,7 +2810,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
-§11.176         ★ 구글 시트 발행 켬 (GoodRuns 문서의 DAQ_runsummary 탭, gid 511745186 ★ 0 금지). 드라이브 폴더는 403 — 공유 대기
+§11.176         ★ 구글 발행 가동 — 시트(DAQ_runsummary 탭, gid 511745186 ★ 0 금지) + 드라이브 그림 20장, cron 27분.
+                서비스 계정은 파일을 못 만들어(storageQuotaExceeded) 그림은 사용자가 올리고 --init 이 이름으로 찾는다
 §11.175         ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 (run 4341 부터). 시트 행 20 열 결함 수정
 §11.174         ★ 런 서머리 파이프라인 개선 — veto 단계(veto_summary.tsv · veto_*.png) · 표 20 열
                 (FADC/VETO Hz · Δ · Panels) · 부팅 실패 런 건너뜀 · legacy 4282~4293 재계산 → dst 전환
@@ -2860,7 +2867,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **드라이브 폴더 RENE_DAQ 에 그림 20 장 올리기** (zip 을 건넸다) | 서비스 계정은 파일을 못 만든다(storageQuotaExceeded). 올리면 finish-publish.sh 가 --init·publish=1·cron 까지 자동 | §11.176 |
+| 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |

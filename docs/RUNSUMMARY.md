@@ -217,7 +217,7 @@ tools/monitor/websummary.sh               # 완결 런까지 1→2→3→과도�
 
 | 무엇 | 누가 | 근거 |
 |---|---|---|
-| 구글 시트/드라이브 `--init` 과 cron 매시 27 분 `websummary.sh` 등록 | 사람 (자격증명·공유) | §11.157 · README 5 단계 |
+| ~~구글 시트/드라이브 `--init` 과 cron 27 분~~ | ✅ 09-10 03:55 가동. 시트 = GoodRuns 문서 DAQ_runsummary 탭(gid 511745186), 그림 = 사용자가 올린 20 장을 `--init` 이 이름으로 찾아 내용만 교체(서비스 계정은 파일 생성 불가) | CLAUDE.md §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 전환 완료 | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 (웹의 '(예비)' 를 떼려면) | 분석팀 | v2 스펙 · §11.161 |
 | DST 재생성 때 psd 꼬리 시작을 40 → 60 ns (`kRenePsdTailSamples` 20 → 30) | 다음 일괄 재생성 때 | `tools/psd/README.md` §2.5 |
