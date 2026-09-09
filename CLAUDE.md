@@ -866,6 +866,33 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.174 ★★ 파이프라인 개선 실행 — legacy 재계산 · veto 단계 · 계수율 열 · 부팅 실패 런 (사용자 지시, 22:50 ~)
+
+사용자 : "legacy 4282~4293 다시 계산해서 게이트 닫아줘, 개선해야 할 것 말한 대로 진행해줘."
+
+```
+① legacy 재계산   ibd-summary.sh --list 4282,4283,4284,4286,…,4293 --force  (nice 15, 백그라운드)
+                   로그 /Data_ssd/LOG/legacy-recompute-4282-4293.log.  끝나면 /Data_ssd/LOG/after-recompute.sh 가
+                   metrics.sh --verify 를 돌려 불일치 0 이면 config/websummary.params 의 metrics_source 를
+                   dst 로 바꾸고 websummary.sh 를 한 바퀴 돌린다 (로그 after-recompute.log)
+                   ★ ibd-summary 두 벌을 동시에 돌리지 말 것 -- pair_summary.tsv 를 통째로 다시 쓴다
+② veto 단계       tools/monitor/veto-summary.sh (4v). 런당 서브런 10·100·600·1200 의 트리거 비트만 읽어
+                   veto_summary.tsv + veto_*.png. 증분이라 런당 한 번. websummary 가 rate-trend 뒤에 부른다 (WARN 만)
+③ 표 20 열        V+T 다음에 FADC [Hz] · VETO [Hz] · Δ F/V [%] (|Δ|>=10 붉게) · Panels (1 % 이상 패널 수/15).
+                   시트 HEADER 도 20 열 -- 구글 --init 전이라 충돌 없음
+④ 부팅 실패 런    websummary.params 의 min_subruns(기본 2) 미만 FADC 파일만 남긴 완결 런은 싣지 않고 지나간다
+                   (run 4335). 게이트도 막지 않고 last_run 은 전진한다
+⑤ websummary.params  없어서 기본값 publish=1 이던 것을 publish=0 으로 만들어 두었다 (--init 전)
+```
+
+commit 476eafe (work-web 에서 만들고 운영 디렉터리는 pull). 시험 : monitor-veto 14 · monitor-html 9/9 ·
+monitor-publish 9/9 · websummary 11/11 -- 전부 mktemp 샌드박스, 실데이터·ROOT·구글 무접촉.
+
+**시험이 잡은 것 둘.** ⓐ awk 프로그램 안 주석의 작은따옴표(`'살아 있다'`)가 bash 의 따옴표를 닫아
+표 전체가 비었다 -- 한글 주석도 코드다. ⓑ `min_subruns` 기본 3 은 기존 시험 픽스처(FADC 2개)를
+전부 '부팅 실패' 로 걸러 발행 경로 시험 셋이 조용히 exit 0 으로 지나갔다 -- 2 로 내렸다.
+부팅 실패 런은 실제로 서브런 1개(4335)라 2 로도 걸러진다.
+
 #### 11.173 ★★ veto 문턱 평가 (채널 단위) + 런 서머리 파이프라인 점검 (22:30 ~ 22:50, 전부 읽기 전용)
 
 **veto — 트리거 비트(`S_Triggered`) 채널별, run 4333(옛 문턱) 대 4340(새 문턱, 서브런 10·100).**
@@ -2699,7 +2726,9 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
 발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
-                수동 실행/확인은 지금도 된다
+                수동 실행/확인은 지금도 된다. 09-09 밤 : veto 단계 + 표 20 열 + 부팅 실패 런
+                건너뛰기 추가 (§11.174). legacy 4282~4293 재계산이 끝나면 after-recompute.sh 가
+                게이트를 닫고 metrics_source=dst 로 바꾼 뒤 한 바퀴 돈다
 웹 표      ★ DST 출처 표는 만들어졌다 : /scratch/RunSummary/web/summary_dst.html (53 행)
                 + bg_trend_*.png 6장. metrics_summary.tsv 80 행 (40 런 × 2 채널).
                 legacy 출처 표(summary.html)는 websummary.sh 가 ibd-summary 단계(PRD 재독,
@@ -2718,9 +2747,11 @@ ssh store 'tail -c 400 ~/sykim/backup_log/code9.log | tr "\r" "\n" | tail -3'
 tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cron 미설치라도 읽힌다)
 ```
 
-**최근에 크게 바뀐 것 여덟** (자세한 것은 각 절)
+**최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.174         ★ 런 서머리 파이프라인 개선 — veto 단계(veto_summary.tsv · veto_*.png) · 표 20 열
+                (FADC/VETO Hz · Δ · Panels) · 부팅 실패 런 건너뜀 · legacy 4282~4293 재계산 → dst 전환
 §11.172         ★ 메일 정책 — 문제·복구는 전문가 목록 + 책임자, 정상 런 교체(rotate)는 책임자만.
                 chainwatch 가 런 교체를 보고, daq-notify 가 mail_expert_events 로 가른다
 §11.171         ★ 크레이트 전원 재투입 뒤 수집 재개 (run 4340). usbreset 이 두 번 필요했다 —
