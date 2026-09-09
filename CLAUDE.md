@@ -604,6 +604,11 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   같은 파일시스템 안의 **이름 바꾸기**(`mv -T stage dst`)는 예외다. 자료가
   움직이지 않는 원자적 연산이고, 스테이징을 제자리에 끼우는 데 필요하다.
 - 프로토콜 상수(§3)와 설계 판단(§5)은 근거가 있다. 바꾸려면 먼저 이유를 설명할 것.
+- **★ 메일 정책 (2026-09-09 사용자 지침, 영구).** 수집에 문제가 생기거나, 해결돼 다시 정상
+  가동할 때는 **상황을 파악해 메일링리스트(전문가 목록) + 책임자**에게 보낸다. 정상적인 런 교체는
+  **책임자에게만.** 자동은 §11.172 대로 돌고 있고, 세션에서 손으로 보낼 때는
+  `tools/notify/send_mail.py --params config/notify.params --to both|routine --subject ... --body-file ...`
+  (제목 접두어 `[RENE DAQ]` 는 스크립트가 붙인다). 본문에 원인·조치·현재 상태·남은 것을 적는다.
 - 커밋 메시지는 기존 스타일을 따를 것(`docs:`, `fix:`, 영문, 명령형).
 - 검증하지 않은 것을 "검증했다"고 쓰지 말 것. 이 문서의 ✅/⚠️ 구분을 유지하라.
 
@@ -860,6 +865,45 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.172 ★★ 메일 정책 (사용자 지시, 영구) — 문제·복구는 메일링리스트로, 정상 런 교체는 책임자에게만
+
+사용자 지시 (16:00) : "앞으로 데이터 수집에 문제가 있거나 해결된 뒤 다시 정상 가동할 때마다
+상황을 파악해서 메일을 보내라. 정상적으로 런이 바뀌는 경우는 책임자인 나에게만."
+먼저 오늘의 재개 안내를 전문가 11명 + 책임자에게 보냈다(`send_mail.py --to expert` 와
+`--to routine` 각 rc=0, 16:0x). 그리고 이것을 **사람 손 없이** 도는 규칙으로 옮겼다.
+
+```
+정상 런 교체     rotate   -> 책임자만          chainwatch 가 낸다 (cron 5분)
+문제 발생        restart · stale · fatal · recovery_failed · chain_down · rate_low
+                          -> 전문가 목록 + 책임자   (감시자 · usb-recover · chainwatch 가 낸다)
+문제 뒤 재가동   recovered (자동 복구) · resumed (chainwatch) -> 전문가 목록 + 책임자
+```
+
+**어디를 고쳤나 (commit 7576384, 시험 `tests/chainwatch-runchange.test.sh` 29건)**
+
+| 곳 | 무엇 |
+|---|---|
+| `scripts/chainwatch.sh` | 런 번호가 바뀐 것을 본다. **새 런이 warmup(180 s)을 넘겨 계수율이 잡힌 뒤에만** 판정하고 그 전엔 다음 주기로 미룬다. 이전 런이 `onlbit=1` 이고 종료→시작 간격이 600 s 이하이고 **사이에 다른 런 번호가 DB 에 없으면** `rotate`, 아니면 `resumed`. 상세(이전 런 길이·이벤트·평균 계수율, 새 런 계수율, 간격, rundesc 동일 여부, 사이의 실패 런)를 `--detail-file` 로 넘긴다 |
+| `scripts/daq-notify.sh` | `mail_expert_events` (params) 에 있는 사건은 `--to both`, 아니면 `routine`. 키가 없으면 예전 규칙(recovery_failed·fatal 만 expert) 그대로. 사건 `rotate`·`resumed` 추가 |
+| `tools/notify/send_mail.py` | `--to both` = 책임자 + 전문가, 중복 제거. **전문가 목록에는 책임자가 없어서**(§11.128) 목록에만 보내면 책임자가 빠진다 |
+| `config/notify.params` (현장, 미추적) | `on_rotate` · `on_resumed` · `mail_expert_events = restart stale recovered recovery_failed fatal chain_down rate_low resumed`. 백업 `.bak-20260909155850` |
+
+**왜 감시자가 아니라 chainwatch 인가.** 감시자는 실패 때만 `restart`/`stale` 을 내고 정상 교체는
+알리지 않는다(`rcsupervisor.cc` 의 Notify 자리 둘). 거기에 넣으려면 바이너리를 다시 빌드하고
+감시자를 재기동해야 하는데, 그러면 갓 시작한 run 4340 을 끝내야 한다. chainwatch 는 이미 5분마다
+heartbeat 를 읽으므로 거기서 본다. **DB 를 못 읽으면 `rotate` 로 낸다** — 전문가 11명에게
+오보를 보내느니 책임자에게만 가는 쪽이 싸다. 본문에 그 사유를 적는다.
+
+**★ 시험이 잡은 것** — 부팅 실패로 warmup 도 못 넘긴 런은 heartbeat 에 잠깐만 보여 `last_run` 에
+안 잡힌다. 그 뒤 새 런이 뜨면 "이전 정상 런 → 새 런, 간격 짧음" 으로 읽혀 `rotate` 가 된다.
+그래서 **사이에 런 번호가 있는지 DB 로 센다.** 오늘 새벽 4334 → (4335~4339 실패) → 4340 이
+정확히 그 모양이다.
+
+**Claude 세션이 살아 있을 때는 한 겹 더** — 이 세션의 모니터가 재시작·FATAL·LIBUSB 를 잡으면
+상황을 파악해 같은 규칙으로 메일을 쓴다(자동 메일의 본문은 진단 표이고, 세션 메일은 원인·조치·
+남은 것까지 문장으로). 새 세션도 같은 규칙을 따를 것 — §8 에 적었다.
+
 
 #### 11.171 ★★ 복구 순서 실측 — NOTICE 설정 → usbreset ×2 → 확인 런 → 감시자 (15:31 ~ 15:47)
 
@@ -2582,7 +2626,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 1회차 끝 (09-09 13:08, code=3). 하드 8장(A~H) 참 · 런 1,681 개 남음 · 실패 0 (§11.170)
            이어가려면 새 하드 2장 + 같은 명령 (002452 의 1,828 개부터). G·H 는 아직 마운트된 채 — 뽑기 전 umount
-감시       chainwatch cron 5분 · sheetlog 매시 07분 · mailq-send 5분
+감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
 발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
                 수동 실행/확인은 지금도 된다
@@ -2607,6 +2651,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 여덟** (자세한 것은 각 절)
 
 ```
+§11.172         ★ 메일 정책 — 문제·복구는 전문가 목록 + 책임자, 정상 런 교체(rotate)는 책임자만.
+                chainwatch 가 런 교체를 보고, daq-notify 가 mail_expert_events 로 가른다
 §11.171         ★ 크레이트 전원 재투입 뒤 수집 재개 (run 4340). usbreset 이 두 번 필요했다 —
                 첫 확인 런은 계수가 나오는데도 DRAM 8/8 정렬 실패. 계수율 712 Hz 는 평소보다 25 % 낮다
 §11.170         ★ 외장하드 백업 1회차 종료 (09-09 13:08) — 하드 8장(A~H, UUID 표) · 002443·002447·002451 완료 ·
