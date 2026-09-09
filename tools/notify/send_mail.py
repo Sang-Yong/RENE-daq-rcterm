@@ -2,7 +2,7 @@
 """
 config/notify.params 를 읽어 SMTP 로 메일 한 통을 보낸다.
 
-    send_mail.py --params <파일> --to expert --subject '...' [--body-file <파일>]
+    send_mail.py --params <파일> --to expert|routine|both --subject '...' [--body-file <파일>]
 
 '#' 뒤는 주석으로 잘리는 파서를 셸 쪽과 똑같이 맞췄다. 두 곳이 같은 파일을
 읽으므로 해석이 갈리면 안 된다.
@@ -30,17 +30,28 @@ def load_params(path):
 
 
 def recipients(cfg, who):
-    """책임자(routine) / 전문가(expert). 전문가가 비어 있으면 책임자에게 간다."""
-    raw = cfg.get("mail_to", "")
+    """책임자(routine) / 전문가(expert) / 둘 다(both).
+    전문가가 비어 있으면 책임자에게 간다. both 는 책임자를 앞에 두고 중복을 뺀다 --
+    전문가 목록에는 책임자가 없으므로(§11.128) 문제 알림을 목록에만 보내면 책임자가 빠진다."""
+    def split(raw):
+        return [a.strip() for a in raw.replace(";", ",").split(",") if a.strip()]
+    routine = split(cfg.get("mail_to", ""))
+    expert = split(cfg.get("mail_to_expert", "")) or routine
     if who == "expert":
-        raw = cfg.get("mail_to_expert", "").strip() or raw
-    return [a.strip() for a in raw.replace(";", ",").split(",") if a.strip()]
+        return expert
+    if who == "both":
+        out = []
+        for a in routine + expert:
+            if a not in out:
+                out.append(a)
+        return out
+    return routine
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--params", required=True)
-    ap.add_argument("--to", default="routine", choices=["routine", "expert"])
+    ap.add_argument("--to", default="routine", choices=["routine", "expert", "both"])
     ap.add_argument("--subject", required=True)
     ap.add_argument("--body-file")
     ap.add_argument("--dry-run", action="store_true")

@@ -16,7 +16,14 @@
 #     sheetlog         구글시트 런 로그에 등재했다 (scripts/sheetlog-auto.sh)
 #     chain_down       후처리 사슬이 끊겼다 -- /scratch·postrun·dataflow 중 하나가 없다
 #     rate_low         수집은 도는데 ADC 별 계수율이 문턱 아래다 (HV 를 먼저 의심)
-#                      위 둘은 scripts/chainwatch.sh 가 보낸다
+#     rotate           정상 런 교체 (이전 런 정상 마감, 간격 짧음). ★ 책임자에게만
+#     resumed          문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다
+#                      위 넷은 scripts/chainwatch.sh 가 보낸다
+#
+#  누구에게 가나 (config/notify.params 의 mail_expert_events, 2026-09-09 사용자 지시)
+#     목록에 있는 사건  -> 전문가 목록 + 책임자   (문제가 생겼거나, 해결돼 다시 정상 가동)
+#     그 밖의 사건      -> 책임자만               (정상 런 교체 rotate 가 대표)
+#     비어 있으면 예전 규칙 : recovery_failed · fatal 만 전문가
 #
 #  rcsupervisor 가 이것을 부른다 :
 #     rcsupervisor --notify-cmd <이 스크립트>
@@ -44,7 +51,9 @@ NOTIFY_LOG=/Data/LOG/daq-notify.log
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
-                [sheetlog]=mail [chain_down]=mail [rate_low]=mail )
+                [sheetlog]=mail [chain_down]=mail [rate_low]=mail \
+                [rotate]=mail [resumed]=mail )
+EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -70,6 +79,9 @@ load_params() {
          on_sheetlog)        ON[sheetlog]=$v ;;
          on_chain_down)      ON[chain_down]=$v ;;
          on_rate_low)        ON[rate_low]=$v ;;
+         on_rotate)          ON[rotate]=$v ;;
+         on_resumed)         ON[resumed]=$v ;;
+         mail_expert_events) EXPERT_EVENTS=$v ;;
          *) : ;;
       esac
    done < "$f"
@@ -166,7 +178,10 @@ build_body() {
 
       if [ -n "$DETAIL" ] && [ -r "$DETAIL" ]; then
          echo
-         echo "== 복구 시도 기록 =="
+         case "$EVENT" in
+            rotate|resumed) echo "== 런 교체 상세 ==" ;;
+            *)              echo "== 복구 시도 기록 ==" ;;
+         esac
          sed 's/^/  /' "$DETAIL"
       fi
 
@@ -206,6 +221,13 @@ build_body() {
             echo "  3) 마운트한 뒤 pane 에서 다시 띄운다 :"
             echo "     postrun  : scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot /Data_ssd/RAW"
             echo "     dataflow : scripts/dataflow.sh --params config/dataflow.params --follow" ;;
+         rotate)
+            echo "  정상적인 런 교체다. 할 일은 없다."
+            echo "  계수율이 이전 런과 크게 다르면 그때만 볼 것 (위 '런 교체 상세')." ;;
+         resumed)
+            echo "  문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다."
+            echo "  이전 런이 왜 끝났는지는 위 '런 교체 상세' 와 감시자 로그를 볼 것."
+            echo "  이전 런의 산출물 개수 대조 :  scripts/runcheck.sh --run <이전 런>" ;;
          rate_low)
             echo "  ★ 보드보다 검출기를 먼저 의심할 것. 2026-09-01 에 계수가 0 이었던"
             echo "     원인은 PMT HV 였고, 보드 진단에 30분을 헛되이 썼다."
@@ -235,8 +257,14 @@ case "$ACT" in
          log "메일 생략 (도배 방지, ${MAIL_MIN_INTERVAL}초 이내 같은 사건)"
          exit 0
       fi
+      #  전문가 목록에는 책임자가 없으므로 'both' 로 보낸다 (send_mail.py 가 합친다).
+      #  params 에 목록이 없으면 예전 규칙(recovery_failed·fatal 만 expert) 그대로.
       WHO=routine
-      case "$EVENT" in recovery_failed|fatal) WHO=expert ;; esac
+      if [ "$EXPERT_EVENTS" = "recovery_failed fatal" ]; then
+         case "$EVENT" in recovery_failed|fatal) WHO=expert ;; esac
+      else
+         case " $EXPERT_EVENTS " in *" $EVENT "*) WHO=both ;; esac
+      fi
       BODY=$(mktemp /tmp/daq-notify-XXXXXX.txt) || exit 0
       build_body "$BODY"
       SUBJ="$EVENT"

@@ -78,6 +78,12 @@ on_sheetlog         = mail
 #                      both 로 올리는 것을 권한다
 on_chain_down       = mail
 on_rate_low         = mail
+on_rotate           = mail      # 정상 런 교체. 책임자에게만 (아래 목록에 넣지 말 것)
+on_resumed          = mail      # 문제 뒤 다시 정상 가동
+
+#  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
+#  나머지는 책임자만.  비워 두면 예전 규칙(recovery_failed · fatal 만 전문가).
+mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed
 
 #  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
 #  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
