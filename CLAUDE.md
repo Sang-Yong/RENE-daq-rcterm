@@ -80,6 +80,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `.claude/skills/recovering-aborted-daq-runs/SKILL.md` | **런이 비정상 종료했을 때 무엇부터 하나.** Claude Code 가 증상을 보면 스스로 읽는다 |
+| `docs/RUNSUMMARY.md` | **런 서머리 모니터링의 구조 지도** — 파일 목록(신설/수정) · 원칙 · 산출물 · 검증 · 밖에서 이어서 보는 법. 모니터링을 이어받으면 여기부터 |
 | `tools/monitor/README.md` | 모니터링 5단계(2026-09-08~) — PRD/DST 에서 livetime·이벤트 수 -> DST(2차 프로덕션) -> IBD·Li/He·fast-n(예비) -> 효율 보정 rate 추이 -> 웹 표+발행 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가. `claude-transcript` 도 여기 |
 | `docs/*.pptx` | 발표 자료 — 종합(한/영) · 운용자용(한). **저장소에 없다** — `.gitignore` 대상이라 `tools/slides/make_*.py` 로 만들어 쓴다 |
