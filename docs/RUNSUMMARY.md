@@ -218,14 +218,14 @@ tools/monitor/websummary.sh               # 완결 런까지 1→2→3→과도�
 | 무엇 | 누가 | 근거 |
 |---|---|---|
 | 구글 시트/드라이브 `--init` 과 cron 매시 27 분 `websummary.sh` 등록 | 사람 (자격증명·공유) | §11.157 · README 5 단계 |
-| `metrics_source=dst` 승인 | 사람 — `--verify` 가 여러 런에서 반복 통과한 뒤 | §11.155 |
+| ~~`metrics_source=dst` 승인~~ | ✅ 09-09 전환 완료 | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 (웹의 '(예비)' 를 떼려면) | 분석팀 | v2 스펙 · §11.161 |
 | DST 재생성 때 psd 꼬리 시작을 40 → 60 ns (`kRenePsdTailSamples` 20 → 30) | 다음 일괄 재생성 때 | `tools/psd/README.md` §2.5 |
 | run 4237 의 legacy 페어링 (51 시간) — DST 값은 있고 교차 행만 없다 | 급하지 않다 | §11.155 |
 | fast-n 지표가 08-26 뒤 4 배인 원인 | 미상. 패널 1 하강으로는 설명되지 않는다 | §11.166 · §11.167 |
 | VETO 패널 9 · 10 무반응 (문턱과 무관) — 케이블·PMT 확인 | 현장 | `tools/psd/README.md` §6 |
 | SADC 문턱 MIP/2 의 첫 적용 확인 | ✅ 09-09 run 4340 에서 봤다 — 패널 5·12 회생, 0·8·11 손실, 죽은 7 패널은 HV 의심 | CLAUDE.md §11.171 · §11.173 |
-| 전환 게이트 불일치 14 행(4282~4293) — legacy 행이 08-19 컷 변경 전 것. 재계산하면 맞는다 (4285 로 확인) | legacy 12 런 `ibd-summary.sh --force` 뒤 `metrics.sh --verify` | §11.173 |
+| ~~전환 게이트 불일치 14 행~~ | ✅ 09-09 legacy 재계산 뒤 72 행 0 불일치 → `metrics_source=dst` | §11.174 |
 | veto 패널 반응·veto Hz 를 표와 추이에 싣기 | ✅ 09-09 `veto-summary.sh` (4v 단계) + 표 20 열 (FADC/VETO Hz · Δ · Panels) | §11.174 |
 | 부팅 실패 런이 완결로 잡혀 test 행으로 들어간다 | ✅ 09-09 `min_subruns`(기본 2) 미만은 건너뛴다 | §11.174 |
 

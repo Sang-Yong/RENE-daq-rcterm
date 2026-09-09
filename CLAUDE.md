@@ -885,6 +885,12 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ⑤ websummary.params  없어서 기본값 publish=1 이던 것을 publish=0 으로 만들어 두었다 (--init 전)
 ```
 
+**결과 (09-10 00:15).** 재계산은 23:17 에 끝났고(4292·4293 은 캐시가 있어 빨랐다) `--verify` 가
+**공통 72 행 · 불일치 0** → `metrics_source=dst` 로 전환(백업 `websummary.params.bak-20260909231714`).
+websummary 한 바퀴 : 4333 · 4334 처리, **4335 는 건너뜀**(last_run=4335), veto 단계 OK, 표 55 행 · 20 열 ·
+출처 dst · 4333 의 fast-n 28.1 · Li/He 12.7 이 '(예비)' 로 실렸다. 다음은 run 4340(수집 중)에서 막힘 — 정상.
+veto 되채움 52 런은 78 초. **이제 표의 출처는 DST 다** — legacy `ibd-summary` 는 교차검증용으로만 남는다.
+
 commit 476eafe (work-web 에서 만들고 운영 디렉터리는 pull). 시험 : monitor-veto 14 · monitor-html 9/9 ·
 monitor-publish 9/9 · websummary 11/11 -- 전부 mktemp 샌드박스, 실데이터·ROOT·구글 무접촉.
 
@@ -2727,8 +2733,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 발행       tools/monitor/websummary.sh (5단계)  ★ 배포 대기 — cron(매시 27분)
                 미설치. 스크립트·게이트·발행 모듈은 완성·검증됨(§11.154~159).
                 수동 실행/확인은 지금도 된다. 09-09 밤 : veto 단계 + 표 20 열 + 부팅 실패 런
-                건너뛰기 추가 (§11.174). legacy 4282~4293 재계산이 끝나면 after-recompute.sh 가
-                게이트를 닫고 metrics_source=dst 로 바꾼 뒤 한 바퀴 돈다
+                건너뛰기 추가, 게이트 0 불일치로 **metrics_source=dst 전환 완료**, last_run=4335 (§11.174)
 웹 표      ★ DST 출처 표는 만들어졌다 : /scratch/RunSummary/web/summary_dst.html (53 행)
                 + bg_trend_*.png 6장. metrics_summary.tsv 80 행 (40 런 × 2 채널).
                 legacy 출처 표(summary.html)는 websummary.sh 가 ibd-summary 단계(PRD 재독,
@@ -2805,7 +2810,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
 | 구글 시트/드라이브 `--init` + cron 매시 27분 `websummary.sh` | 웹 발행이 아직 안 켜져 있다 | §11.157 · §11.159 |
-| `metrics_source=dst` 승인 | DST 일괄 생성 뒤 여러 런에서 `--verify` 반복 통과하면 | §11.155 · §11.164 |
+| ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
 | **하드 E·F 를 다시 꽂으면 `e2fsck -f` 먼저** | 09-07 21:15 에 마운트된 채 독에서 떨어져 두 하드의 저널이 끊겼다 | §11.170 |
