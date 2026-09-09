@@ -316,6 +316,15 @@ print(len(m.HEADER))
 RC9=$?
 HDR1=$(printf '%s\n' "$OUT9" | sed -n 1p)
 HDRLEN=$(printf '%s\n' "$OUT9" | sed -n 2p)
+#  ⑨b 행 길이도 HEADER 와 같아야 한다 -- 헤더만 늘리고 행을 안 늘리면 되대조가 [FATAL] 로 죽는다
+ROWLEN=$(cd "$DIR" && python3 - "$T/websummary.params" <<'PY'
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location("pg", "tools/monitor/publish_google.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+p = m.read_params(sys.argv[1]); rows = m.build_rows(p)
+print(len(rows[-1]) if rows else 0)
+PY
+)
+[ "$ROWLEN" = "$HDRLEN" ] || { echo "[9b] 진단 : 행 길이 $ROWLEN != HEADER $HDRLEN"; HDRLEN=mismatch; }
 if [ "$RC9" -eq 0 ] && [ "$HDR1" = "Type" ] && [ "$HDRLEN" = "20" ]; then
    R="$R
 CHK header_has_type=1"

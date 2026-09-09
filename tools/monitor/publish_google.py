@@ -35,7 +35,7 @@ def read_tsv(path):
     return rows
 
 def build_rows(p):
-    """TSV 셋을 합쳐 시트 열(= HTML 표와 같은 16열, Run 다음이 Type) 리스트를
+    """TSV 셋을 합쳐 시트 열(= HTML 표와 같은 20열, Run 다음이 Type) 리스트를
        만든다. gen-summary-html.sh 와 같은 조인 규칙. run 오름차순 (시트는
        아래로 자라는 것이 자연스럽다 -- HTML 만 최신을 위로 뒤집는다).
        type 은 gen-runclass.sh 가 낸 runclass.tsv 를 run 을 키로만 읽는다
@@ -49,7 +49,16 @@ def build_rows(p):
     for r in read_tsv(os.path.join(d, pair_f)):
         ibd[(int(r[0]), r[1])] = r
     runclass = {int(r[0]): r[1] for r in read_tsv(os.path.join(d, "runclass.tsv"))}
+    #  veto_summary.tsv (veto-summary.sh) : 패널 AND 비율 1 % 이상인 패널 수 -- HTML 의 Panels 열과 같은 규칙
+    panels = {}
+    for r in read_tsv(os.path.join(d, "veto_summary.tsv")):
+        try:
+            alive = [q for q in range(15) if float(r[11 + q]) >= 1.0]
+            panels[int(r[0])] = f"{len(alive)}/15"
+        except (ValueError, IndexError):
+            pass
     out = []
+    pf = pv = None            # 앞 런의 FADC/VETO 계수율 (Δ 열. HTML 과 같은 규칙 : 바로 앞 런)
     for run in sorted(rs):
         if run < start: continue
         r = rs[run]
@@ -72,9 +81,20 @@ def build_rows(p):
         #  gen-summary-html.sh 의 awk strftime() 은 utc 인자를 안 주면 로컬
         #  시간이다 -- 여기도 맞춰야 한다(발견 1). gmtime 이면 한국 사이트
         #  기준 약 9시간이 어긋난다.
+        #  2026-09-09 넉 열 (HTML 표 20 열과 같은 자리) : FADC Hz · VETO Hz · dF/dV % · Panels
+        if live > 0:
+            fhz, vhz = (t1 + t3) / live, (t2 + t3) / live
+            fs, vs = f"{fhz:.1f}", f"{vhz:.1f}"
+            df = f"{100*(fhz-pf)/pf:+.1f}" if pf else "-"
+            dv = f"{100*(vhz-pv)/pv:+.1f}" if pv else "-"
+            delta = f"{df} / {dv}" if (pf or pv) else "-"
+            pf, pv = fhz, vhz
+        else:
+            fs = vs = delta = "-"
         out.append([run, runclass.get(run, "-"),
                     time.strftime("%Y-%m-%d %H:%M", time.localtime(es)),
                     f"{live/3600:.1f}/{wall/3600:.1f}", t1 + t2 + t3, t1, t2, t3,
+                    fs, vs, delta, panels.get(run, "-"),
                     col(gd, 6), col(gd, 7), col(nh, 6), col(nh, 7),
                     rll, fn, lihe, srcflag])
     return out
