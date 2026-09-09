@@ -195,7 +195,10 @@ def main():
     bak = os.path.join(bdir, time.strftime("sheet-backup-%Y%m%d%H%M%S.tsv"))
     with open(bak, "w", encoding="utf-8") as fh:
         for r in grid: fh.write("\t".join(r) + "\n")
-    if not grid:
+    #  gspread 는 빈 탭을 [] 로도, [[]] 처럼 빈 행 하나로도 돌려준다(실측 : 새로 만든
+    #  DAQ_runsummary 탭이 rows=1, cols=0 이었다). 내용 있는 행이 하나도 없으면 빈 것이다 --
+    #  그 판정을 안 하면 헤더 없이 자료 행부터 붙는다.
+    if not any(any(c.strip() for c in r) for r in grid):
         ws.append_row(HEADER, value_input_option="RAW"); grid = [HEADER]
     have = {r[0] for r in grid[1:] if r and r[0].isdigit()}
     new = [[str(c) for c in r] for r in rows if str(r[0]) not in have]
