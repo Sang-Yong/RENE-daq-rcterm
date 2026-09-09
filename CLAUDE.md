@@ -885,7 +885,14 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 **헤더 없이 자료 행부터 붙을 뻔했다.** 내용 있는 행이 없으면 빈 것으로 보게 고쳤다(50efb79).
 `sheet_id` 를 params 에 넣을 때는 **탭 gid 를 반드시 같이** 넣을 것 — §11.5 의 "gid 로 찾는다" 와 같은 이유.
 
-남은 것 : 드라이브 폴더 공유 → `--init` → `websummary.params` 의 `publish = 1` → cron 27분.
+**★ 403 의 진짜 원인 (04:0x) — 폴더 공유가 아니라 GCP 프로젝트 936418031507 에 Google Drive API 가 꺼져 있다.**
+사용자가 폴더를 공유한 뒤에도 403 이라 오류 본문을 읽었다 : `Google Drive API has not been used in project
+936418031507 before or it is disabled`. 시트 API 만 켜져 있던 것이다(`append_runs.py` 는 시트만 써서 여태 몰랐다).
+켜는 곳 : https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=936418031507
+(서비스 계정 json 을 만든 구글 계정으로). 켜지면 `/Data_ssd/LOG/finish-publish.sh` 가 2분마다 확인하다가
+`--init` → `publish = 1` → cron 27분 등록 → 첫 발행까지 스스로 마친다(로그 finish-publish.log, 24 h 상한).
+
+남은 것 : Drive API 켜기(사용자) → 나머지는 finish-publish.sh 가 한다 → 구글 사이트 퍼가기 1회(사용자).
 
 #### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
 
@@ -2847,7 +2854,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| 드라이브 폴더를 서비스 계정에 편집자로 공유 → `publish_google.py --init` → `publish = 1` → cron 27분 | 시트는 09-10 03:37 에 켰다(38 행). 그림만 남았다 (폴더 403) | §11.176 |
+| **GCP 콘솔에서 Google Drive API 켜기** (프로젝트 936418031507) | 시트는 켰다(38 행). 그림은 API 가 꺼져 403. 켜지면 finish-publish.sh 가 --init·publish=1·cron 까지 자동 | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
