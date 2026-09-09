@@ -4,7 +4,7 @@
    드라이브 : map_file 의 이름->fileId 로 PNG 내용을 같은 ID 에 교체
    --init : PNG 를 새 파일로 올리고 map_file 과 퍼가기 URL 을 찍는다
    새 pip 의존 없음 : gspread + google-auth + urllib 뿐이다."""
-import argparse, glob, json, os, sys, time, urllib.request
+import argparse, glob, json, os, sys, time, urllib.parse, urllib.request
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
           "https://www.googleapis.com/auth/drive"]
@@ -109,8 +109,23 @@ def drive_update(token, file_id, path, dry):
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.status == 200
 
+def drive_find(token, folder_id, name):
+    """폴더 안에서 이름이 같은 파일의 fileId (없으면 None). --init 이 먼저 이것을 본다 --
+       ★ 서비스 계정은 저장 용량이 없어 내 드라이브에 파일을 *만들* 수 없다
+       (storageQuotaExceeded, 2026-09-10 실측). 사용자가 올려 둔 파일의 내용을 갈아끼우는
+       것(drive_update 의 PATCH)은 된다. 그래서 그림은 사용자가 한 번 올리고, 여기서는 찾기만 한다."""
+    q = urllib.parse.quote(f"'{folder_id}' in parents and name = '{name}' and trashed = false")
+    req = urllib.request.Request(
+        f"https://www.googleapis.com/drive/v3/files?q={q}&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true",
+        headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        fs = json.load(r).get("files", [])
+    return fs[0]["id"] if fs else None
+
 def drive_create(token, folder_id, name, path):
-    """--init 전용 : multipart 업로드로 새 파일. fileId 를 돌려준다."""
+    """--init 전용 : multipart 업로드로 새 파일. fileId 를 돌려준다.
+       ★ 내 드라이브 폴더에서는 storageQuotaExceeded 로 실패한다(위 drive_find 참조).
+       공유 드라이브(Workspace)일 때만 된다."""
     meta = json.dumps({"name": name, "parents": [folder_id]}).encode()
     png = open(path, "rb").read()
     B = b"rene_boundary_7f3a"
@@ -177,16 +192,31 @@ def main():
     cr = Credentials.from_service_account_file(creds, scopes=SCOPES)
     cr.refresh(google.auth.transport.requests.Request())
     if a.init:
-        fmap = {}
+        fmap = {}; missing = []
         for f in sorted(glob.glob(os.path.join(p["webroot"], "*.png"))):
             n = os.path.splitext(os.path.basename(f))[0]
-            fid = drive_create(cr.token, p["drive_folder_id"], n + ".png", f)
+            fid = drive_find(cr.token, p["drive_folder_id"], n + ".png")
+            how = "found"
+            if not fid:
+                try:
+                    fid = drive_create(cr.token, p["drive_folder_id"], n + ".png", f); how = "created"
+                except urllib.error.HTTPError as e:
+                    body = e.read().decode(errors="replace")
+                    if "storageQuotaExceeded" in body:
+                        missing.append(n + ".png"); continue
+                    raise
             fmap[n] = fid
-            print(f"[INIT] {n}.png -> fileId {fid}")
+            print(f"[INIT] {n}.png -> fileId {fid} ({how})")
             print(f"       퍼가기 URL : https://drive.google.com/thumbnail?id={fid}&sz=w1600")
-        with open(p["map_file"], "w", encoding="utf-8") as fh:
-            for n, fid in fmap.items(): fh.write(f"{n}\t{fid}\n")
-        print(f"[INIT] {p['map_file']} 에 {len(fmap)}줄을 썼다")
+        if fmap:
+            with open(p["map_file"], "w", encoding="utf-8") as fh:
+                for n, fid in fmap.items(): fh.write(f"{n}\t{fid}\n")
+            print(f"[INIT] {p['map_file']} 에 {len(fmap)}줄을 썼다")
+        if missing:
+            print(f"[INIT] ★ 서비스 계정은 내 드라이브에 파일을 만들 수 없다 (storageQuotaExceeded)."
+                  f" 아래 {len(missing)}개를 사람이 폴더에 올린 뒤 --init 을 다시 돌리면 찾아서 map 에 넣는다 :")
+            for n in missing: print(f"       {n}")
+            sys.exit(1)
         return
     ws = gspread.authorize(cr).open_by_key(p["sheet_id"]) \
                .get_worksheet_by_id(int(p.get("sheet_gid", "0")))
