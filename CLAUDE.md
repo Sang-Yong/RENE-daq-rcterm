@@ -892,7 +892,13 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 (서비스 계정 json 을 만든 구글 계정으로). 켜지면 `/Data_ssd/LOG/finish-publish.sh` 가 2분마다 확인하다가
 `--init` → `publish = 1` → cron 27분 등록 → 첫 발행까지 스스로 마친다(로그 finish-publish.log, 24 h 상한).
 
-남은 것 : Drive API 켜기(사용자) → 나머지는 finish-publish.sh 가 한다 → 구글 사이트 퍼가기 1회(사용자).
+**★ Drive API 를 켠 뒤에도 업로드가 403 (03:46) — `storageQuotaExceeded`. 서비스 계정은 저장 용량이 없어
+내 드라이브에 파일을 *만들* 수 없다**(구글 정책. 공유 드라이브는 Workspace 만). 사용자 소유 파일의 내용을
+갈아끼우는 PATCH 는 된다. 그래서 (f04d341) `--init` 은 폴더에서 이름으로 찾아 map 을 만들고, 없을 때만
+만들기를 시도하며, 못 만들면 올려야 할 이름을 찍는다. **그림 20 장은 사용자가 폴더 `RENE_DAQ` 에 한 번 올린다**
+(zip 을 세션에서 건넸다). `finish-publish.sh` 는 20 장이 다 보이면 `--init` → `publish=1` → cron → 첫 발행.
+
+남은 것 : 그림 20 장 올리기(사용자) → finish-publish.sh 가 마무리 → 구글 사이트 퍼가기 1회(사용자).
 
 #### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
 
@@ -2854,7 +2860,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **GCP 콘솔에서 Google Drive API 켜기** (프로젝트 936418031507) | 시트는 켰다(38 행). 그림은 API 가 꺼져 403. 켜지면 finish-publish.sh 가 --init·publish=1·cron 까지 자동 | §11.176 |
+| **드라이브 폴더 RENE_DAQ 에 그림 20 장 올리기** (zip 을 건넸다) | 서비스 계정은 파일을 못 만든다(storageQuotaExceeded). 올리면 finish-publish.sh 가 --init·publish=1·cron 까지 자동 | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
