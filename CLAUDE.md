@@ -866,6 +866,27 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.176 ★★ 구글 발행 — 시트는 켰고, 드라이브는 폴더 공유가 막혀 있다 (2026-09-10 03:37)
+
+사용자가 `sheet_id` · `drive_folder_id` 를 넣고 "4~6 단계 대신 돌려 달라" 고 했다. **두 가지가 걸렸다.**
+
+```
+① sheet_id 가 GoodRuns 문서(§11.5) 였다.  gid 는 비어 있어 기본 0 = Y2026B(남의 행 282개) 를 가리켰다.
+   ★ 그대로 돌렸으면 남의 시트 탭에 20 열짜리 행 38 개를 붙였을 것이다.
+   문서 안에 사용자가 만든 빈 탭 'DAQ_runsummary' (gid 511745186) 가 있어 그것을 쓴다.
+   운영·작업 클론 두 params 모두 sheet_gid = 511745186 으로 박아 두었다 -- 0 으로 두지 말 것.
+② drive_folder_id 는 서비스 계정에서 403 Forbidden.  폴더가 공유되지 않았거나 ID 가 틀리다.
+   --init(그림 20장 업로드)은 이것이 풀려야 된다.  사용자 몫.
+```
+
+**시트 발행은 했다** — `publish_google.py --params config/websummary.params` : 38 행 + 되대조 통과
+(백업 `/Data_ssd/LOG/websummary/sheet-backup-20260910033705.tsv`), 드라이브는 map 이 없어 0/0.
+**곁들여 잡은 결함** — gspread 가 빈 탭을 `[[]]`(빈 행 하나) 로 돌려주어 `if not grid` 가 거짓이 되고
+**헤더 없이 자료 행부터 붙을 뻔했다.** 내용 있는 행이 없으면 빈 것으로 보게 고쳤다(50efb79).
+`sheet_id` 를 params 에 넣을 때는 **탭 gid 를 반드시 같이** 넣을 것 — §11.5 의 "gid 로 찾는다" 와 같은 이유.
+
+남은 것 : 드라이브 폴더 공유 → `--init` → `websummary.params` 의 `publish = 1` → cron 27분.
+
 #### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
 
 ```
@@ -2770,6 +2791,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.176         ★ 구글 시트 발행 켬 (GoodRuns 문서의 DAQ_runsummary 탭, gid 511745186 ★ 0 금지). 드라이브 폴더는 403 — 공유 대기
 §11.175         ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 (run 4341 부터). 시트 행 20 열 결함 수정
 §11.174         ★ 런 서머리 파이프라인 개선 — veto 단계(veto_summary.tsv · veto_*.png) · 표 20 열
                 (FADC/VETO Hz · Δ · Panels) · 부팅 실패 런 건너뜀 · legacy 4282~4293 재계산 → dst 전환
@@ -2825,7 +2847,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| 구글 시트/드라이브 `--init` + cron 매시 27분 `websummary.sh` | 웹 발행이 아직 안 켜져 있다 | §11.157 · §11.159 |
+| 드라이브 폴더를 서비스 계정에 편집자로 공유 → `publish_google.py --init` → `publish = 1` → cron 27분 | 시트는 09-10 03:37 에 켰다(38 행). 그림만 남았다 (폴더 403) | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
