@@ -866,6 +866,21 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
+
+```
+설정   /home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026.config  SADCT THR 줄 (백업 .bak-20260910)
+       09-09 줄은 주석으로 남겼다.  새 줄 : ch1 180->100 · ch17 220->100 · ch22 200->100 · ch23 200->100, 나머지는 MIP/2 그대로
+적용   다음 로테이션 run 4341 (09-10 15:46) 부터.  /Data_ssd/LOG/veto-check-4341.sh 가 PRD 12개가 생기면
+       veto-history 를 돌려 veto-check-4341.log 에 패널 반응을 남긴다 (4340 용과 같은 것)
+기대   패널 0·8·11 이 4333 수준(14 · 11.6 · 5.7 %)으로 돌아오고 5·12 는 그대로. veto 계수 ~750 Hz 근처
+```
+
+**곁들여 잡은 결함** — `publish_google.py` 의 HEADER 는 20 열로 늘렸는데 `build_rows()` 는 16 열
+그대로였다. 첫 실제 발행에서 되대조(`r[:len(HEADER)] != new`)가 [FATAL] 로 죽었을 것이다.
+행에도 FADC/VETO Hz · Δ · Panels 를 HTML 과 같은 규칙으로 넣고, 시험 ⑨b 가 행 길이 == HEADER 길이를
+본다 (commit ffee414). 실데이터로 38 행 × 20 열 확인. **시트를 아직 만들지 않았으니 스키마 충돌은 없다.**
+
 #### 11.174 ★★ 파이프라인 개선 실행 — legacy 재계산 · veto 단계 · 계수율 열 · 부팅 실패 런 (사용자 지시, 22:50 ~)
 
 사용자 : "legacy 4282~4293 다시 계산해서 게이트 닫아줘, 개선해야 할 것 말한 대로 진행해줘."
@@ -2755,6 +2770,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.175         ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 (run 4341 부터). 시트 행 20 열 결함 수정
 §11.174         ★ 런 서머리 파이프라인 개선 — veto 단계(veto_summary.tsv · veto_*.png) · 표 20 열
                 (FADC/VETO Hz · Δ · Panels) · 부팅 실패 런 건너뜀 · legacy 4282~4293 재계산 → dst 전환
 §11.172         ★ 메일 정책 — 문제·복구는 전문가 목록 + 책임자, 정상 런 교체(rotate)는 책임자만.
