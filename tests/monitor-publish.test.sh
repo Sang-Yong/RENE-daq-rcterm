@@ -25,7 +25,7 @@
 #      있는 두 런(physics/calibration)과 없는 런('-') 을 함께 본다
 #      (컨트롤러 판정 R9 -- 소비 쪽만 본다. 분류 규칙 자체는
 #      tests/monitor-runclass.test.sh 의 몫이다)
-#   ⑨ HEADER 상수에 "Type" 이 인덱스 1(Run 다음)에 있고 전체 16열인가
+#   ⑨ HEADER 상수에 "Type" 이 인덱스 1(Run 다음)에 있고 전체 20열인가
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -305,7 +305,7 @@ CHK type_position=0"
    echo "진단(⑧) : $(printf '%s\n' "$OUT1" | grep '(dry) sheet row:')"
 fi
 
-# ⑨ HEADER 상수 -- "Type" 이 인덱스 1(Run 다음)이고 전체 16열. main() 을
+# ⑨ HEADER 상수 -- "Type" 이 인덱스 1(Run 다음)이고 전체 20열. main() 을
 #    부르지 않으므로(모듈 import 뿐) 네트워크 차단 하네스가 필요 없다.
 OUT9=$(env -i PATH="$PATH" HOME="$T/fake-home" python3 -c "
 import sys; sys.path.insert(0, '$DIR/tools/monitor')
@@ -316,7 +316,7 @@ print(len(m.HEADER))
 RC9=$?
 HDR1=$(printf '%s\n' "$OUT9" | sed -n 1p)
 HDRLEN=$(printf '%s\n' "$OUT9" | sed -n 2p)
-if [ "$RC9" -eq 0 ] && [ "$HDR1" = "Type" ] && [ "$HDRLEN" = "16" ]; then
+if [ "$RC9" -eq 0 ] && [ "$HDR1" = "Type" ] && [ "$HDRLEN" = "20" ]; then
    R="$R
 CHK header_has_type=1"
 else

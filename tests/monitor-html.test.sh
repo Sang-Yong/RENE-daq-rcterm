@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# monitor-html.test.sh -- gen-summary-html.sh 가 스펙 §5 의 16열 표(Run 다음
+# monitor-html.test.sh -- gen-summary-html.sh 가 스펙 §5 의 20열 표(Run 다음
 # type)를 정확히 만드는지. bash/awk 만 있으면 되므로 ROOT 없이도 언제나 돈다.
 # 실데이터·실디스크는 건드리지 않는다 -- 픽스처는 mktemp -d 안에 만든다.
 set -u
@@ -41,6 +41,13 @@ cat > "$T/runclass.tsv" <<'EOF'
 4306	test
 EOF
 
+#  veto_summary.tsv : 4312 는 패널 8개 살아 있음, 4310 은 6개. 4308·4306 은 없다 -> Panels '-'
+cat > "$T/veto_summary.tsv" <<'EOF'
+#run	epoch	date	n_sub	rate_fadc_hz	rate_veto_hz	sthr_ch2	sthr_ch3	sthr_ch9	ch2_pct	ch3_pct	panel0_pct	panel1_pct	panel2_pct	panel3_pct	panel4_pct	panel5_pct	panel6_pct	panel7_pct	panel8_pct	panel9_pct	panel10_pct	panel11_pct	panel12_pct	panel13_pct	panel14_pct
+4310	1725100000	09-01 00:00	4	187.0	749.0	100	150	1000	27.0	26.8	14.0	26.5	16.4	3.5	0.04	0.05	0.04	0.03	11.6	0.06	0.09	5.7	0.03	0.03	0.01
+4312	1725300000	09-03 00:00	4	186.6	507.8	150	150	300	21.4	21.4	6.1	21.1	21.1	5.1	0.14	2.5	0.18	0.15	2.1	0.06	0.04	0.10	14.2	0.05	0.05
+EOF
+
 cat > "$T/pair_summary.tsv" <<'EOF'
 # schema 2
 #run	tag	src	live_s	n_paired	n_paired_acci	n_ibd	n_ibd_acci	dt_min	dt_max	dt_acci	s2_lo	s2_hi	iso_pre	iso_post	n_single	r_ll	n_subrun
@@ -80,11 +87,11 @@ n_tr=$(grep -c '<tr>' "$LEGACY")
 bad_td=0
 while IFS= read -r line; do
    n=$(printf '%s' "$line" | grep -o '<td>' | wc -l)
-   [ "$n" -eq 16 ] || bad_td=$((bad_td + 1))
+   [ "$n" -eq 20 ] || bad_td=$((bad_td + 1))
 done < <(grep -o '<tr>.*</tr>' "$LEGACY")
 r4308=$(row_of "$LEGACY" 4308)
 ndash4308=$(printf '%s' "$r4308" | grep -o '<td>-</td>' | wc -l)
-if [ "$n_tr" -eq 5 ] && [ "$bad_td" -eq 0 ] && [ "$ndash4308" -eq 7 ]; then
+if [ "$n_tr" -eq 5 ] && [ "$bad_td" -eq 0 ] && [ "$ndash4308" -eq 8 ]; then
    R="$R
 CHK rows_and_dash=1"
 else
@@ -163,7 +170,7 @@ if [ -r "$NOMETRICS" ]; then
    nm_tr=$(grep -c '<tr>' "$NOMETRICS")
    while IFS= read -r line; do
       n=$(printf '%s' "$line" | grep -o '<td>' | wc -l)
-      [ "$n" -eq 16 ] || nm_bad_td=$((nm_bad_td + 1))
+      [ "$n" -eq 20 ] || nm_bad_td=$((nm_bad_td + 1))
    done < <(grep -o '<tr>.*</tr>' "$NOMETRICS")
 fi
 if [ "$NMRC" -eq 0 ] && [ "$nm_tr" -eq 5 ] && [ "$nm_bad_td" -eq 0 ]; then
@@ -191,8 +198,28 @@ ok8=1
 CHK type_position=1" || R="$R
 CHK type_position=0"
 
+# ⑨ 계수율·Δ·Panels 열 (2026-09-09) -- 4312 : FADC=(950000+470000)/86000=16.5 Hz,
+#    VETO=(16000+470000)/86000=5.7 Hz ; 앞 런 4310 : FADC 16.3 · VETO 5.6 -> Δ +1.3 / +0.6 (경고 없음)
+#    4310 의 앞 런 4308 : FADC 42.3 · VETO 14.6 -> 4310 은 -61 / -61 -> .warn
+#    Panels : 4312 = 7/15, 4310 = 6/15, 4308 = '-'. 가장 오래된 4306 은 앞 런이 없어 Δ '-'
+cells() { row_of "$1" "$2" | sed -E 's#</td><td>#\n#g; s#<tr><td>##; s#</td></tr>##'; }
+ok9=1
+c4312=$(cells "$LEGACY" 4312)
+[ "$(printf '%s\n' "$c4312" | sed -n 9p)"  = "16.5" ] || ok9=0
+[ "$(printf '%s\n' "$c4312" | sed -n 10p)" = "5.7" ]  || ok9=0
+printf '%s\n' "$c4312" | sed -n 11p | grep -q '^+1.3 / +0.6$' || ok9=0
+printf '%s\n' "$c4312" | sed -n 12p | grep -q '>7/15<' || ok9=0
+c4310=$(cells "$LEGACY" 4310)
+printf '%s\n' "$c4310" | sed -n 11p | grep -q 'class="warn">-61' || ok9=0
+printf '%s\n' "$c4310" | sed -n 12p | grep -q '>6/15<' || ok9=0
+[ "$(cells "$LEGACY" 4308 | sed -n 12p)" = "-" ] || ok9=0
+[ "$(cells "$LEGACY" 4306 | sed -n 11p)" = "-" ] || ok9=0
+[ "$ok9" -eq 1 ] && R="$R
+CHK rate_delta_panels=1" || { R="$R
+CHK rate_delta_panels=0"; echo "rate_delta_panels 진단 :"; printf '%s\n' "$c4312" | sed -n 9,12p; printf '%s\n' "$c4310" | sed -n 11,12p; }
+
 FAILED=0
-for k in rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics type_position; do
+for k in rate_delta_panels rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics type_position; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -205,4 +232,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- dst.html --"; cat "$DST"
    exit 1
 fi
-echo "PASS monitor-html (8/8)"
+echo "PASS monitor-html (9/9)"

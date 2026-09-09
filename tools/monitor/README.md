@@ -31,6 +31,7 @@ CLAUDE.md §11.12 — 스토리지 링크는 §11.115 이후 10G 라 지금은 �
 | 1 | `run-summary.sh` | `BuildRunSummary.C` | PRD | livetime, 종류별 이벤트 수 → `run_summary.{txt,tsv}` |
 | 2 (신설) | `dst-build.sh` | `BuildMonitorDst.C` | PRD | 뮤온·클린싱글 런당 DST 1개 → `dst/DST_<런>.root` — ★2차 프로덕션, 재생 가능 캐시 |
 | 3 (신설) | `metrics.sh` | `BuildMetrics.C` | DST | IBD·acci·Li/He·fast-n(★예비) → `metrics_summary.tsv` |
+| 4v (신설 2026-09-09) | `veto-summary.sh` | `tools/psd/VetoHistoryScan.C` | PRD 서브런 표본 4개 | VETO 패널 AND 비율·veto Hz → `veto_summary.tsv` + `veto_*.png` 3장. 증분(런당 한 번). 표의 Panels 열 |
 | (과도기) | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | PRD | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` — 교차검증용 + 4단계 입력, 유지 |
 | 4 (개편) | `rate-trend.sh` | `BuildRateTrend.C` | pair_summary | 효율 보정 + 시간축 추이 그림 11종 → `rate_trend.{pdf,tsv}`, `*.png` |
 | 4b (신설) | `bg-trend.sh` | `BuildBgTrend.C` | metrics_summary | 배경 지표 추이 6종 (accidental 교차검증 · fast-n · Li/He+역방향 대조 · PSD · n-like · 다중중성자) → `bg_trend.{pdf}`, `bg_trend_*.png` |
@@ -893,3 +894,29 @@ tmux new-window -t daq -n monitor 'tools/monitor/monitor-all.sh --follow'
   - Li/He·fast-n 은 이 사이트 조건(뮤온 간격 vs τ, saturation 컷)에서
     레시피 자체의 한계가 실측으로 확인돼 있다 — 분석팀 검증과 레시피 개선이
     남아 있다(3단계 절의 caveat).
+
+
+# 4v 단계 : veto-summary — VETO 패널 반응을 표와 추이에 (2026-09-09)
+
+run 4340 에서 SADC 문턱 변경으로 계수율이 25 % 떨어졌는데 표가 그것을 짚지 못했다
+(CLAUDE.md §11.171 · §11.173). 손으로 돌리던 `tools/psd/veto-history.sh` 의 스캔을
+파이프라인 단계로 옮겼다.
+
+```
+veto-summary.sh [--list a,b] [--missing] [--force] [--dry-run]
+   런마다 서브런 10·100·600·1200 의 트리거 비트만 읽는다 (런당 몇 초)
+   -> $OUT/veto/thr_history.tsv 에 누적  (서브런당 1 줄, 80 열)
+   -> $OUT/veto_summary.tsv       (런당 1 줄. tools/psd 의 veto_history.tsv 와 같은 스키마)
+   -> $OUT/veto_*.png             (VetoHistoryPlot.C -- 1 % 이상 반응한 패널만 동적으로 그린다)
+```
+
+**표(`gen-summary-html.sh`)에 넉 열이 늘었다 (16 → 20).** V+T 다음 :
+`FADC [Hz]` = (target only + V+T)/live, `VETO [Hz]` = (veto only + V+T)/live,
+`Δ F/V [%]` = 바로 앞 런 대비 (|Δ| ≥ 10 이면 붉게), `Panels` = 패널 AND 비율 1 % 이상인
+패널 수 /15 (title 에 번호). 시트 HEADER(`publish_google.py`)도 20 열이다 — **구글 `--init`
+전에 바꿨으므로 시트 스키마 충돌은 없다.**
+
+**부팅 실패 런은 표에 싣지 않는다.** `websummary.params` 의 `min_subruns`(기본 2) 미만의
+FADC 파일만 남긴 완결 런은 건너뛰고 게이트도 막지 않는다 (run 4335 처럼 서브런 하나 남긴 것).
+
+websummary.sh 에서는 rate-trend 다음에 불리고 **실패해도 WARN 뿐이다**(Panels 열과 그림만 빠진다).

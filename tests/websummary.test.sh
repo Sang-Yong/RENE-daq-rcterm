@@ -377,10 +377,48 @@ CHK runclass_before_html=0"
    echo "-- calls --"; cat "$T/8/calls" 2>&1
 fi
 
+# ==== [10] 부팅 실패 런(FADC 파일 < min_subruns)은 싣지 않고 지나간다 (2026-09-09) ==
+#     4280 완결(3) · 4281 FADC 1/PRD 1 (부팅 실패 잔재, run 4335 모양) · 4282 완결(3)
+#     -> NEWLIST 는 4280,4282 이고 4281 은 막지도 실리지도 않는다. last_run=4282.
+#     그리고 새 런이 건너뛸 것뿐일 때(4283 FADC 1/PRD 1)도 last_run 이 4283 으로 전진한다.
+mkdir -p "$T/10/tsv"
+mkrun "$T/10/RAW" 004280 3 3
+mkrun "$T/10/RAW" 004281 1 1
+mkrun "$T/10/RAW" 004282 3 3
+mkparams "$T/10/params" "$T/10/tsv" 4280
+OUT10=$(WEBSUMMARY_ROOTS="$T/10/RAW" WEBSUMMARY_LOCK="$T/10/.lock" \
+        WEBSUMMARY_STATE="$T/10/state" WEBSUMMARY_LOG="$T/10/log" \
+        WEBSUMMARY_STAGES_DISABLED=1 \
+        "$SUT" --params "$T/10/params" 2>&1)
+RC10=$?
+SLR10=$(awk -F= '$1=="last_run"{print $2}' "$T/10/state" 2>/dev/null)
+ok10=1
+[ "$RC10" -eq 0 ] || ok10=0
+[ "$SLR10" = "4282" ] || ok10=0
+grep -q 'run 4280,4282' "$T/10/log" || ok10=0          # 4281 이 목록에 없다
+grep -q '\[SKIP\] run 4281' "$T/10/log" || ok10=0
+mkrun "$T/10/RAW" 004283 1 1
+WEBSUMMARY_ROOTS="$T/10/RAW" WEBSUMMARY_LOCK="$T/10/.lock" WEBSUMMARY_STATE="$T/10/state" \
+   WEBSUMMARY_LOG="$T/10/log" WEBSUMMARY_STAGES_DISABLED=1 "$SUT" --params "$T/10/params" >/dev/null 2>&1
+SLR10b=$(awk -F= '$1=="last_run"{print $2}' "$T/10/state" 2>/dev/null)
+[ "$SLR10b" = "4283" ] || ok10=0
+#  --status 도 건너뜀을 보여준다
+mkrun "$T/10/RAW" 004284 1 1
+ST10=$(WEBSUMMARY_ROOTS="$T/10/RAW" WEBSUMMARY_STATE="$T/10/state" "$SUT" --params "$T/10/params" --status 2>&1)
+printf '%s' "$ST10" | grep -q '건너뜀.*4284' || ok10=0
+if [ "$ok10" -eq 1 ]; then
+   R="$R
+CHK skip_bootfail=1"
+else
+   R="$R
+CHK skip_bootfail=0"
+   echo "[10] 진단 : rc=$RC10 last_run=[$SLR10] 다음=[$SLR10b]"; echo "$OUT10"; cat "$T/10/log" 2>&1; echo "$ST10"
+fi
+
 # ---- 판정 -----------------------------------------------------------------
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
-         publish_fail publish_order runclass_before_html; do
+         publish_fail publish_order runclass_before_html skip_bootfail; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -389,4 +427,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (10/10)"
+echo "PASS websummary (11/11)"

@@ -32,7 +32,14 @@
 # '(예비)' 로 표시한다"). legacy 모드거나 값이 없으면 '—'(em dash) 로 둔다.
 #
 # 그 밖의 열이 없으면 '-'(hyphen) 다 -- 열이 밀리는 일은 절대 없다. 언제나
-# 16열을 낸다.
+# 20열을 낸다.
+#
+# 2026-09-09 (§11.173 개선 4·5) -- V+T 다음에 넉 열을 더했다 :
+#   FADC [Hz]  = (n_type1+n_type3)/live_s      VETO [Hz] = (n_type2+n_type3)/live_s
+#   Δ F/V [%]  = 바로 앞 런(번호가 작은 쪽, 표에 있는 것)과의 계수율 차이. |Δ|>=10 은 .warn
+#   Panels     = veto_summary.tsv(veto-summary.sh) 에서 패널 AND 비율이 1 % 이상인 패널 수 '/15'.
+#                title 속성에 살아 있는 패널 번호를 단다. 파일이 없거나 그 런이 없으면 '-'
+#   run 4340 의 25 % 하락을 표가 먼저 짚었어야 했다 -- 그래서 넣었다.
 #
 # R_LL·선원(src) 은 run 만으로 키를 잡는다(태그별이 아니다) -- 표에 R_LL
 # 열이 하나뿐이라서다. 같은 런에 _nGd/_nH 두 행이 있으면 TSV 안에서 나중에
@@ -55,6 +62,7 @@ RS="$TSV/run_summary.tsv"
 PS="$TSV/pair_summary.tsv"
 MS="$TSV/metrics_summary.tsv"
 RC="$TSV/runclass.tsv"
+VS="$TSV/veto_summary.tsv"
 
 [ -r "$RS" ] && [ -r "$PS" ] || { echo "표의 입력이 없다 : $RS / $PS"; exit 1; }
 [ "$SRC" = dst ] && [ ! -r "$MS" ] && { echo "metrics_source=dst 인데 $MS 가 없다"; exit 1; }
@@ -68,12 +76,13 @@ AWK_FILES=("$RS" "$PS")
 [ "$SRC" = dst ] && AWK_FILES+=("$MS")
 HAVE_RC=0
 [ -r "$RC" ] && { AWK_FILES+=("$RC"); HAVE_RC=1; }
+[ -r "$VS" ] && AWK_FILES+=("$VS")
 
 mkdir -p "$(dirname "$OUTF")" 2>/dev/null
 
 TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
 
-awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v SRC="$SRC" '
+awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v VSF="$VS" -v SRC="$SRC" '
    #  TSV 에서 온 문자열을 HTML 에 넣기 전에 반드시 거친다. 지금 이 표에서
    #  그런 열은 선원(src)과 type 둘이다 -- 나머지 14열은 이 스크립트가 직접
    #  만든 숫자/고정 문자열(strftime·sprintf·"-"·"—")이라 &·<·> 를 담을 수
@@ -143,7 +152,27 @@ awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v SRC="$SRC" '
       next
    }
 
+   #  veto_summary.tsv : run(1) ... panel0_pct(12) .. panel14_pct(26). 1 % 이상이면 살아 있는 패널로 센다
+   FILENAME==VSF {
+      na = 0; alive = ""
+      for (q = 0; q < 15; q++) if ($(12+q)+0 >= 1.0) { na++; alive = alive (alive=="" ? "" : ",") q }
+      npan[$1]  = na
+      apan[$1]  = alive
+      next
+   }
+
    END {
+      #  계수율과 앞 런 대비 변화 -- 번호 오름차순으로 한 번 훑어 prev 를 잡는다
+      PROCINFO["sorted_in"] = "@ind_num_asc"
+      pf = -1; pv = -1
+      for (r in have) {
+         if (live[r]+0 > 0) { fhz[r] = (t1[r]+t3[r])/live[r]; vhz[r] = (t2[r]+t3[r])/live[r] }
+         if (r in fhz) {
+            if (pf > 0) dF[r] = 100*(fhz[r]-pf)/pf
+            if (pv > 0) dV[r] = 100*(vhz[r]-pv)/pv
+            pf = fhz[r]; pv = vhz[r]
+         }
+      }
       PROCINFO["sorted_in"] = "@ind_num_desc"        # 최신(큰 run) 이 위
       for (r in have) {
          start = (es[r]+0 > 0)   ? strftime("%Y-%m-%d %H:%M", es[r]) : "-"
@@ -173,8 +202,19 @@ awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v SRC="$SRC" '
          if (srcv != "-" && srcv != "?" && srcv != "none")
             srcv = "<span class=\"src\">" srcv "</span>"
 
-         printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
-                r, typev, start, lw, total, t1[r], t2[r], t3[r], \
+         fhzv = (r in fhz) ? sprintf("%.1f", fhz[r]) : "-"
+         vhzv = (r in vhz) ? sprintf("%.1f", vhz[r]) : "-"
+         if ((r in dF) || (r in dV)) {
+            a = (r in dF) ? sprintf("%+.1f", dF[r]) : "-"
+            b = (r in dV) ? sprintf("%+.1f", dV[r]) : "-"
+            dlt = a " / " b
+            if (((r in dF) && (dF[r] >= 10 || dF[r] <= -10)) || ((r in dV) && (dV[r] >= 10 || dV[r] <= -10)))
+               dlt = "<span class=\"warn\">" dlt "</span>"
+         } else dlt = "-"
+         panv = (r in npan) ? sprintf("<span title=\"panels %s\">%d/15</span>", apan[r], npan[r]) : "-"
+
+         printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+                r, typev, start, lw, total, t1[r], t2[r], t3[r], fhzv, vhzv, dlt, panv, \
                 ibdgd, accgd, ibdh, acch, rllv, fnv, lhv, srcv
       }
    }
@@ -198,12 +238,12 @@ cat <<HTML
  th,td{border:1px solid #ccc;padding:3px 8px;text-align:right}
  th{background:#eef;position:sticky;top:0}
  td:first-child,th:first-child{text-align:center;font-weight:bold}
- .src{color:#a50}  .pre{color:#888;font-size:11px}
+ .src{color:#a50}  .pre{color:#888;font-size:11px}  .warn{color:#c00;font-weight:bold}
 </style></head><body>
 <h2>RENE Run Summary</h2>
 <p>$CAPTION</p>
 <table><tr><th>Run</th><th>Type</th><th>시작</th><th>live/wall [h]</th><th>전체</th>
-<th>Target only</th><th>VETO only</th><th>V+T</th><th>IBD nGd</th><th>acci nGd</th>
+<th>Target only</th><th>VETO only</th><th>V+T</th><th>FADC [Hz]</th><th>VETO [Hz]</th><th>Δ F/V [%]</th><th>Panels</th><th>IBD nGd</th><th>acci nGd</th>
 <th>IBD nH</th><th>acci nH</th><th>R_LL [Hz]</th><th>fast-n</th><th>Li/He</th><th>선원</th></tr>
 HTML
 awk -F'\t' '{ printf "<tr>"; for (i=1;i<=NF;i++) printf "<td>%s</td>", $i; print "</tr>" }' "$TMP"

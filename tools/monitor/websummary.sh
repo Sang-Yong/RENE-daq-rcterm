@@ -20,9 +20,16 @@
 #      -> run-summary.sh -> dst-build.sh -> metrics.sh(빌드)
 #      -> metrics.sh --verify (legacy 인 동안은 불일치해도 경고만)
 #      -> ibd-summary.sh -> rate-trend.sh
+#      -> veto-summary.sh (VETO 패널 반응·veto 계수율. 실패해도 WARN 뿐, 2026-09-09)
+#      -> bg-trend.sh   (실패해도 WARN 뿐)
 #      -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9. 실패해도 WARN 뿐 --
 #         type='-' 로 계속) -> gen-summary-html.sh
-#      -> rate_trend_*.png 11개 + bg_trend_*.png 6개 + summary.html 을 webroot 로 rsync 복사
+#      -> rate_trend_*.png 11개 + bg_trend_*.png 6개 + veto_*.png 3개 + summary.html 을 webroot 로 rsync 복사
+#
+#  ★ 부팅 실패 런 (2026-09-09, §11.173 개선 4) -- FADC 파일이 min_subruns(기본 2)개
+#      미만인 완결 런은 표에 싣지 않고 건너뛴다(게이트도 막지 않는다). run 4335 처럼
+#      서브런 하나 남기고 죽은 런이 'test' 행으로 들어가던 것을 막는다. 3분 확인 런
+#      (서브런 3)은 그대로 실린다(§11.5 의 4300 처럼 사용자가 싣기로 한 것).
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
 #      -> publish_google.py (publish=1 일 때만)
 #
@@ -125,17 +132,21 @@ REFRESH_S=$(getp refresh_s 600)
 PUBLISH=$(getp publish 1)
 START_RUN=$(getp start_run 4280)
 case "$START_RUN" in ''|*[!0-9]*) START_RUN=4280 ;; esac
+MIN_SUBRUNS=$(getp min_subruns 2)
+case "$MIN_SUBRUNS" in ""|*[!0-9]*) MIN_SUBRUNS=2 ;; esac
 
 # ---- 완결 게이트 : sheetlog-auto.sh 의 run_complete 와 같은 판정 -------
 #      시험이 픽스처 트리를 끼울 수 있게 환경으로 뺀다
 ROOTS=${WEBSUMMARY_ROOTS:-"/Data_ssd/RAW /data/RAW /scratch/RAW"}
+RC_NF=0                       # run_complete 가 마지막으로 본 FADC 파일 수 (부팅 실패 런 판정용)
 run_complete() {
    local rr d f p
-   rr=$1
+   rr=$1; RC_NF=0
    for d in $ROOTS; do
       [ -d "$d/$rr" ] || continue
       f=$(ls -U "$d/$rr"     2>/dev/null | grep -c "^FADC_$rr\.root\.")
       p=$(ls -U "$d/$rr/PRD" 2>/dev/null | grep -c '\.root$')
+      RC_NF=$f
       [ "$f" -gt 0 ] && [ "$p" -eq "$f" ] && return 0
       #  ★ 원시 파일이 **전부** badrun/ 으로 격리된 런(CLAUDE.md §5.9)은 FADC 가
       #    0 이라 위 판정으로는 영원히 '미완결' 이고, 연속 규칙이라 그 뒤 런까지
@@ -166,15 +177,21 @@ state_last_run() {
 #  start_run 부터 last(하한, 배타) 보다 큰 런을 훑어 -- 연속으로 완결된
 #  접두만 NEWLIST_ARR 에 담는다. 처음 만나는 미완결 런에서 멈춘다
 #  (sheetlog-auto.sh 와 같은 규칙 -- CONSECUTIVE, 건너뛰지 않는다).
-NEWLIST_ARR=(); BLOCKED=""
+NEWLIST_ARR=(); BLOCKED=""; SKIPPED_ARR=()
 compute_gate() {
    local last=$1 rr n
-   NEWLIST_ARR=(); BLOCKED=""
+   NEWLIST_ARR=(); BLOCKED=""; SKIPPED_ARR=()
    for rr in $(discover_runs); do
       n=$((10#$rr))
       [ "$n" -ge "$START_RUN" ] || continue
       [ "$n" -gt "$last" ] || continue
       if run_complete "$rr"; then
+         #  완결이지만 서브런이 너무 적은 런 = 부팅 실패의 잔재. 표에 싣지 않고
+         #  지나간다 (연속 규칙은 유지 -- 게이트를 막지 않는다).
+         if [ "$RC_NF" -gt 0 ] && [ "$RC_NF" -lt "$MIN_SUBRUNS" ]; then
+            SKIPPED_ARR+=("$n")
+            continue
+         fi
          NEWLIST_ARR+=("$n")
       else
          BLOCKED=$n
@@ -214,6 +231,7 @@ if [ "$STATUS" -eq 1 ]; then
    else
       echo "  새 완결 런 : ${#NEWLIST_ARR[@]}개 (${NEWLIST_ARR[*]})$( [ -n "$BLOCKED" ] && echo "  다음은 run $BLOCKED 에서 막힘" )"
    fi
+   [ ${#SKIPPED_ARR[@]} -gt 0 ] && echo "  건너뜀    : ${SKIPPED_ARR[*]} (FADC 파일 ${MIN_SUBRUNS}개 미만 -- 부팅 실패 런)"
    exit 0
 fi
 
@@ -236,6 +254,7 @@ NEWLIST=$(IFS=,; echo "${NEWLIST_ARR[*]}")
 
 # ---- --dry-run : 무엇을 할지만 찍고 아무것도 바꾸지 않는다 -------------
 if [ "$DRY" -eq 1 ]; then
+   [ ${#SKIPPED_ARR[@]} -gt 0 ] && log "[DRY] 건너뜀 : ${SKIPPED_ARR[*]} (FADC 파일 ${MIN_SUBRUNS}개 미만 -- 부팅 실패 런)"
    if [ ${#NEWLIST_ARR[@]} -eq 0 ]; then
       log "[DRY] 새로 처리할 완결 런이 없다 (start_run=$START_RUN, last_run=$LAST)"
       [ -n "$BLOCKED" ] && log "[DRY]   run $BLOCKED 에서 막혀 있다 (후처리 미완)"
@@ -247,10 +266,11 @@ if [ "$DRY" -eq 1 ]; then
       log "[DRY]   metrics.sh     --list $NEWLIST  (+ --verify, legacy 면 불일치해도 경고만)"
       log "[DRY]   ibd-summary.sh --list $NEWLIST"
       log "[DRY]   rate-trend.sh"
+      log "[DRY]   veto-summary.sh --list $NEWLIST  (실패해도 WARN 뿐)"
       log "[DRY]   bg-trend.sh   (실패해도 WARN 뿐)"
       log "[DRY]   gen-runclass.sh $TSVDIR $TSVDIR/runclass.tsv  (실패해도 WARN 뿐, type='-' 로 계속)"
       log "[DRY]   gen-summary-html.sh $TSVDIR $TSVDIR/summary.html $METRICS_SOURCE $REFRESH_S"
-      log "[DRY]   rsync rate_trend_*.png + bg_trend_*.png + summary.html -> $WEBROOT"
+      log "[DRY]   rsync rate_trend_*.png + bg_trend_*.png + veto_*.png + summary.html -> $WEBROOT"
       if [ "$PUBLISH" = 1 ]; then log "[DRY]   publish_google.py --params $PARAMS"
       else                        log "[DRY]   (publish=0 이므로 로컬 생성까지만)"
       fi
@@ -261,8 +281,16 @@ fi
 # ---- 새로 할 것이 없다 -- cron 이 시끄러우면 안 되므로 조용히 나간다 ---
 if [ ${#NEWLIST_ARR[@]} -eq 0 ]; then
    [ "$FORCE" -eq 1 ] && log "[FORCE] 새로 처리할 완결 런이 없다 (start_run=$START_RUN)"
+   if [ ${#SKIPPED_ARR[@]} -gt 0 ]; then
+      #  건너뛴 런만 있다 -- 그 번호까지 상태를 전진시킨다 (매 회차 다시 훑지 않게)
+      LAST_SKIP=${SKIPPED_ARR[$((${#SKIPPED_ARR[@]}-1))]}
+      if [ "$LAST_SKIP" -gt "$LAST" ] && printf 'last_run=%s\n' "$LAST_SKIP" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; then
+         log "[SKIP] run ${SKIPPED_ARR[*]} : FADC 파일 ${MIN_SUBRUNS}개 미만(부팅 실패 런). 표에 싣지 않고 last_run=$LAST_SKIP"
+      fi
+   fi
    exit 0
 fi
+[ ${#SKIPPED_ARR[@]} -gt 0 ] && log "[SKIP] run ${SKIPPED_ARR[*]} : FADC 파일 ${MIN_SUBRUNS}개 미만(부팅 실패 런). 표에 싣지 않는다"
 
 # ---- 실행 ---------------------------------------------------------------
 if [ "$STAGES_DISABLED" = 1 ]; then
@@ -288,6 +316,14 @@ else
 
    run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
+
+   #  VETO 패널 반응·veto 계수율 (veto_summary.tsv + veto_*.png). 발행을 막지 않는다.
+   log "[RUN ] veto-summary"
+   nice -n 15 ionice -c2 -n7 "$MON/veto-summary.sh" --list "$NEWLIST" >>"$LOG" 2>&1
+   vsrc=$?
+   if [ $vsrc -ne 0 ]; then log "[WARN] veto-summary 실패 (exit=$vsrc) -- Panels 열과 veto 추이만 빠진다"
+   else                     log "[OK  ] veto-summary"
+   fi
 
    #  배경 지표 추이(bg_trend_*.png, 배경 레시피 v2). 발행을 막지 않는다 --
    #  metrics_summary 가 schema 2 가 아니면 [SKIP] 을 찍고 0 으로 나온다.
@@ -322,7 +358,7 @@ else
    if [ ! -r "$TSVDIR/summary.html" ]; then
       log "[FAIL] $TSVDIR/summary.html 이 없다"; exit 1
    fi
-   pngs=("$TSVDIR"/rate_trend_*.png "$TSVDIR"/bg_trend_*.png)
+   pngs=("$TSVDIR"/rate_trend_*.png "$TSVDIR"/bg_trend_*.png "$TSVDIR"/veto_*.png)
    pngs=($(for f in "${pngs[@]}"; do [ -e "$f" ] && echo "$f"; done))
    nice -n 15 ionice -c2 -n7 rsync -a "${pngs[@]}" "$TSVDIR/summary.html" "$WEBROOT/" >>"$LOG" 2>&1
    rc=$?
@@ -341,6 +377,7 @@ fi
 #  쓰기가 실패했는데도 [DONE]/exit 0 을 내면 다음 회차가 '이미 했다'고
 #  믿고 건너뛴다. && 체인의 성공 여부로 반드시 분기할 것.
 LAST_NEW=${NEWLIST_ARR[$((${#NEWLIST_ARR[@]}-1))]}
+for sk in "${SKIPPED_ARR[@]}"; do [ "$sk" -gt "$LAST_NEW" ] && LAST_NEW=$sk; done
 if printf 'last_run=%s\n' "$LAST_NEW" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; then
    log "[DONE] run $NEWLIST 처리 완료. last_run=$LAST_NEW (publish=$PUBLISH)$( [ -n "$BLOCKED" ] && echo "  다음은 run $BLOCKED 에서 막힘")"
    exit 0

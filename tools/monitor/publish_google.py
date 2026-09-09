@@ -107,7 +107,8 @@ def drive_create(token, folder_id, name, path):
         return json.load(r)["id"]
 
 HEADER = ["Run", "Type", "Start", "live/wall [h]", "Total", "Target only",
-          "VETO only", "V+T", "IBD nGd", "acci nGd", "IBD nH", "acci nH",
+          "VETO only", "V+T", "FADC [Hz]", "VETO [Hz]", "dF/dV [%]", "Panels",
+          "IBD nGd", "acci nGd", "IBD nH", "acci nH",
           "R_LL [Hz]", "fast-n", "Li/He", "Source"]
 
 def main():

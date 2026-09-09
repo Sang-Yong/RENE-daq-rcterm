@@ -9,3 +9,4 @@ webroot       = /scratch/RunSummary/web
 tsv_dir       = /scratch/RunSummary
 publish       = 1          # 0 이면 로컬 생성까지만
 start_run     = 4280       # 이 번호부터 싣는다
+min_subruns   = 2          # FADC 파일이 이보다 적은 완결 런(부팅 실패 잔재)은 표에 싣지 않는다
