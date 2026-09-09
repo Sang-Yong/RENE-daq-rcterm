@@ -904,7 +904,13 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 퍼가기 주소 목록 : `/Data_ssd/LOG/websummary-embed-urls.txt` (fileId 는 갱신해도 안 바뀐다).
 **★ 그림 파일을 드라이브에서 지우거나 이름을 바꾸면 map 이 끊긴다** — 그때는 다시 올리고 `--init`.
 
-남은 것 : 구글 사이트에 시트 + 그림 주소 퍼가기 1회(사용자).
+**구글 사이트 퍼가기 (04:2x)** — 사이트는 API 가 없어 대신 **붙여넣기 한 번짜리 블록**을 만들었다 :
+`/Data_ssd/LOG/rene-runsummary-sites-embed.html` (시트 iframe + 그림 20 장을 4 절로 배치, 한글 제목).
+시트는 사용자가 `DAQ_runsummary` 탭만 "웹에 게시" 해 2PACX 주소를 주었고(문서 전체 공개를 피하려 API 로 하지 않았다),
+그 주소를 블록에 넣었다. 익명 HTTP 200 확인. 그림 폴더는 이미 링크 공개(anyone/reader)였다.
+사이트에서 삽입 → 삽입 코드 → 붙여넣기 → 게시 하면 끝. 이 블록은 다시 손댈 일이 없다.
+
+남은 것 : 사이트에 블록 붙여넣기 1회(사용자).
 
 #### 11.175 ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 + 시트 행 20 열 (2026-09-10 새벽, 사용자 지시)
 
