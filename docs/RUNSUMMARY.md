@@ -224,7 +224,10 @@ tools/monitor/websummary.sh               # 완결 런까지 1→2→3→과도�
 | run 4237 의 legacy 페어링 (51 시간) — DST 값은 있고 교차 행만 없다 | 급하지 않다 | §11.155 |
 | fast-n 지표가 08-26 뒤 4 배인 원인 | 미상. 패널 1 하강으로는 설명되지 않는다 | §11.166 · §11.167 |
 | VETO 패널 9 · 10 무반응 (문턱과 무관) — 케이블·PMT 확인 | 현장 | `tools/psd/README.md` §6 |
-| SADC 문턱 MIP/2 의 첫 적용 확인 (`/Data_ssd/LOG/veto-check-4335.sh` 가 대기 중) | 수집 재개 뒤 자동 | §11.168 |
+| SADC 문턱 MIP/2 의 첫 적용 확인 | ✅ 09-09 run 4340 에서 봤다 — 패널 5·12 회생, 0·8·11 손실, 죽은 7 패널은 HV 의심 | CLAUDE.md §11.171 · §11.173 |
+| 전환 게이트 불일치 14 행(4282~4293) — legacy 행이 08-19 컷 변경 전 것. 재계산하면 맞는다 (4285 로 확인) | legacy 12 런 `ibd-summary.sh --force` 뒤 `metrics.sh --verify` | §11.173 |
+| veto 패널 반응·veto Hz 를 표와 추이에 싣기 (지금은 `tools/psd/veto-history.sh` 를 손으로) | 개선 | §11.173 |
+| 부팅 실패 런(onlbit=0, 서브런 1~2)이 완결로 잡혀 test 행으로 들어간다 | 개선 | §11.173 |
 
 ---
 
