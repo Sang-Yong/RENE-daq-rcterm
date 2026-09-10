@@ -24,6 +24,13 @@ def read_params(path):
         ln = ln.split("#", 1)[0].strip()
         if "=" in ln:
             k, v = ln.split("=", 1); p[k.strip()] = v.strip()
+    #  ★ map_file 이 상대 경로면 저장소 루트(params 파일이 있는 config/ 의 부모) 기준으로 푼다.
+    #    cron 은 홈에서 부르므로 'config/websummary.map' 을 못 찾아 그림을 0/0 으로 교체했다
+    #    (2026-09-10 17:07 첫 자동 회차에서 실측). 손으로 돌릴 때는 저장소 안이라 드러나지 않았다.
+    mf = p.get("map_file", "")
+    if mf and not os.path.isabs(mf):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+        p["map_file"] = os.path.join(root, mf)
     return p
 
 def read_tsv(path):

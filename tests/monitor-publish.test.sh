@@ -334,8 +334,20 @@ CHK header_has_type=0"
    echo "진단(⑨) : rc=$RC9 header[1]=$HDR1 len=$HDRLEN"
 fi
 
+# ⑩ map_file 상대 경로는 params 파일 기준 저장소 루트로 풀린다 (cron 은 홈에서 부른다)
+mkdir -p "$T/repo/config"; printf 'map_file = config/websummary.map\ntsv_dir = x\nwebroot = y\n' > "$T/repo/config/p.params"
+RES=$(cd / && python3 - "$T/repo/config/p.params" <<'PY'
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location("pg", "/home/frontend/DAQ/work-web/tools/monitor/publish_google.py".replace("/home/frontend/DAQ/work-web", sys.argv[2] if len(sys.argv)>2 else "/home/frontend/DAQ/work-web")); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.read_params(sys.argv[1])["map_file"])
+PY
+)
+if [ "$RES" = "$T/repo/config/websummary.map" ]; then R="$R
+CHK map_relative=1"; else R="$R
+CHK map_relative=0"; echo "[10] 진단 : map_file=$RES"; fi
+
 FAILED=0
-for k in offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
+for k in map_relative offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
          local_time_start independent_gates type_position header_has_type; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
@@ -357,4 +369,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run7 stderr --"; cat "$T/err7.txt"
    exit 1
 fi
-echo "PASS monitor-publish (9/9)"
+echo "PASS monitor-publish (10/10)"
