@@ -866,6 +866,29 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.177 ★★ 첫 실전 로테이션 (4340 → 4341, 09-10 15:47) — 문턱 되돌림 적용, 그리고 rotate 오분류 사고
+
+```
+run 4340   24 h 완주, exit 0 (rotation), onlbit=1, 58,309,092 events, 평균 675 Hz
+run 4341   15:47:03 시작. TCB 로그 SADCT THR = 180 100 150 …  (ch1=100 적용 확인). LIBUSB 0 · DRAM 8/8
+           계수율 ~918 Hz (4340 의 675 에서 회복. 패널 0·8·11 이 돌아온 몫. 4333 의 952 보다는 아직 낮다)
+           veto-check-4341.sh 가 PRD 12개 뒤 패널 반응을 남긴다
+```
+
+**★ 사고 — chainwatch 가 이 정상 교체를 `resumed` 로 판정해 15:55 에 전문가 11명 + 책임자에게 보냈다.**
+원인 둘, 둘 다 §11.172 의 시험 픽스처가 실제 DB 와 달라서 못 잡은 것이다.
+
+```
+① runcatalog 의 stime/etime 은 epoch 가 아니라 'YYYY-MM-DD HH:MM:SS' 텍스트다  -> $(( c_st - p_et )) 가 깨져 gap 없음
+② 수집 중인 런의 stime 은 NULL 이다 (rcterm 이 마감 때 채운다)               -> c_st 자체가 없음
+```
+
+고침 (work-web → pull) : `to_epoch()` 로 텍스트·epoch 둘 다 받고, 새 런 시작은 **heartbeat 의 time − daqtime** 으로.
+시험 픽스처를 실제 형식(텍스트 시각 · 수집 중 런 stime NULL)으로 바꿔 30 건 통과. `daq-notify.sh` 가 `NOTIFY_LOG`
+환경변수를 받게 해 시험이 운영 로그(`/Data/LOG/daq-notify.log`)를 더럽히지 않게 했다(오늘 그것 때문에 감시가 한 번 헛돌았다).
+**정정 메일을 목록 + 책임자에게 보냈다** (16:1x, `--to both`). 상태 파일은 last_run=4341 이라 이 교체로 또 나가지 않는다.
+**교훈 : 시험 픽스처는 실제 자료 형식을 복사해서 만들 것.** 다음 실전 검증은 09-11 15:47 의 4341 → 4342 교체다.
+
 #### 11.176 ★★ 구글 발행 — 시트는 켰고, 드라이브는 폴더 공유가 막혀 있다 (2026-09-10 03:37)
 
 사용자가 `sheet_id` · `drive_folder_id` 를 넣고 "4~6 단계 대신 돌려 달라" 고 했다. **두 가지가 걸렸다.**
@@ -2786,9 +2809,9 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4340 (09-09 15:46 부터, 24h 로테이션). 크레이트 전원 재투입 뒤 재개 (§11.171)
-           ★ 계수율 712 Hz — 평소보다 25 % 낮다. 원인은 새 SADC 문턱(veto 749 -> 519 Hz, FADC 는 그대로).
-             패널 0·8·11 이 죽거나 줄고 5·12 가 살아났다. 문턱 재조정은 사용자 판단 (§11.171 끝)
+수집       run 4341 (09-10 15:47 부터, 24h 로테이션). ch1·17·22·23 문턱을 100 으로 되돌린 첫 런 (§11.175 · §11.177)
+           계수율 ~918 Hz (4340 은 675). veto-check-4341.log 가 패널 반응을 남긴다
+           ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
@@ -2821,6 +2844,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.177         ★ 첫 로테이션 4340→4341 정상, 문턱 되돌림 적용(918 Hz). chainwatch 가 rotate 를 resumed 로 오판해
+                목록에 오보 → DB 시각이 텍스트·수집 중 stime NULL. 고치고 정정 메일 (시험 픽스처는 실제 형식으로!)
 §11.176         ★ 구글 발행 가동 — 시트(DAQ_runsummary 탭, gid 511745186 ★ 0 금지) + 드라이브 그림 20장, cron 27분.
                 서비스 계정은 파일을 못 만들어(storageQuotaExceeded) 그림은 사용자가 올리고 --init 이 이름으로 찾는다
 §11.175         ★ SADC 문턱 ch1·17·22·23 을 100 으로 되돌림 (run 4341 부터). 시트 행 20 열 결함 수정
