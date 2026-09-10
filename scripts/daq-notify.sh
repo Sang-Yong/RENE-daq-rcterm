@@ -47,7 +47,7 @@ RCLOG=/Data/LOG/rcterm.log
 DAQLOG=/Data_ssd/LOG
 ALARM_STATE=/Data/LOG/daq-alarm.state
 MAIL_MIN_INTERVAL=300
-NOTIFY_LOG=/Data/LOG/daq-notify.log
+NOTIFY_LOG=${NOTIFY_LOG:-/Data/LOG/daq-notify.log}   # 시험은 갈아끼운다 -- 운영 로그를 더럽히지 않게
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \

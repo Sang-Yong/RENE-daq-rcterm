@@ -193,6 +193,17 @@ check_rate() {
 
 # ---- 런 교체 -----------------------------------------------------------
 db_q() { [ -r "$DBFILE" ] || return 1; sqlite3 -batch "$DBFILE" "$1" 2>/dev/null; }
+#  runcatalog 의 stime/etime 은 epoch 가 아니라 'YYYY-MM-DD HH:MM:SS' 텍스트다 (실측 2026-09-10 --
+#  이것을 몰라 첫 실전에서 정상 교체를 resumed 로 오판해 전문가 11명에게 오보를 냈다).
+#  둘 다 받아 epoch 로 돌려준다. 못 읽으면 빈 문자열.
+to_epoch() {
+   local v=$1
+   case "$v" in
+      '') echo "" ;;
+      *[!0-9]*) date -d "$v" +%s 2>/dev/null || echo "" ;;
+      *) echo "$v" ;;
+   esac
+}
 
 check_runchange() {
    local age phase daqtime cur prev ev gap detail msg p_onl p_st p_et p_n p_t c_st c_desc p_desc rate between
@@ -218,11 +229,18 @@ check_runchange() {
    if [ -r "$DBFILE" ]; then
       p_onl=$(db_q "select onlbit from runcatalog where runnum=$prev")
       p_st=$(db_q "select stime from runcatalog where runnum=$prev")
-      p_et=$(db_q "select etime from runcatalog where runnum=$prev")
+      p_et=$(to_epoch "$(db_q "select etime from runcatalog where runnum=$prev")")
+      p_st=$(to_epoch "$p_st")
       p_n=$(db_q "select nfadc from runcatalog where runnum=$prev")
       p_t=$(db_q "select tfadc from runcatalog where runnum=$prev")
       p_desc=$(db_q "select rundesc from runcatalog where runnum=$prev")
-      c_st=$(db_q "select stime from runcatalog where runnum=$cur")
+      #  ★ 수집 중인 런의 stime 은 DB 에 아직 없다 (rcterm 이 마감 때 채운다). heartbeat 의
+      #    time - daqtime 이 시작 시각이다. DB 에 있으면 그것을 쓴다.
+      c_st=$(to_epoch "$(db_q "select stime from runcatalog where runnum=$cur")")
+      if [ -z "$c_st" ]; then
+         local hbt; hbt=$(hb_field time)
+         c_st=$(awk -v t="${hbt:-0}" -v d="${daqtime:-0}" 'BEGIN{ if (t>0) printf "%d", t-d; }')
+      fi
       c_desc=$(db_q "select rundesc from runcatalog where runnum=$cur")
       #  ★ 사이에 다른 런 번호가 있으면(부팅 실패로 warmup 도 못 넘긴 런) 문제가 있었던 것이다.
       #    그런 런은 heartbeat 에 잠깐만 보여 last_run 에 안 잡히므로 DB 로 센다.

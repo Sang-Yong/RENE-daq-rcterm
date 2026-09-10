@@ -30,7 +30,7 @@ if [ -n "${DETAIL_COPY:-}" ]; then for a in "$@"; do :; done; fi
 while [ $# -gt 0 ]; do case "$1" in --detail-file) cat "$2" > "$CALLS.detail"; shift 2 ;; *) shift ;; esac; done
 exit 0
 N
-chmod +x "$T/notify.sh"; export CALLS
+chmod +x "$T/notify.sh"; export CALLS; export NOTIFY_LOG=$T/notify.log
 
 sqlite3 "$DB" "create table runcatalog(runnum integer primary key, onlbit integer, stime integer, etime integer, nfadc integer, tfadc real, rundesc text);"
 hb() {  # run daqtime [phase]
@@ -57,27 +57,31 @@ check "last_run 그대로"  '[ "$(sed -n s/^last_run=//p "$ST")" = 4340 ]'
 
 echo "[4] 정상 로테이션 : 이전 런 onlbit=1, 간격 30초 -> rotate"
 now=$(date +%s)
-sqlite3 "$DB" "insert into runcatalog values(4340,1,$((now-86400)),$((now-300)),82000000,86000.0,'desc A');
-               insert into runcatalog values(4341,NULL,$((now-270)),NULL,NULL,NULL,'desc A');"
-hb 4341 300; run
+#  ★ 실제 runcatalog 은 stime/etime 이 'YYYY-MM-DD HH:MM:SS' 텍스트이고, 수집 중인 런은 stime 도 NULL 이다
+#    (rcterm 이 마감 때 채운다). 첫 판 픽스처는 epoch 정수라 이 차이를 못 잡아 실전에서 오판했다.
+ts() { date -d "@$1" '+%F %T'; }
+sqlite3 "$DB" "insert into runcatalog values(4340,1,'$(ts $((now-86400)))','$(ts $((now-330)))',82000000,86000.0,'desc A');
+               insert into runcatalog values(4341,NULL,NULL,NULL,NULL,NULL,'desc A');"
+hb 4341 300; run       # 새 런 시작 = hb time - daqtime = now-300 -> 간격 30초
 check "rotate 호출"      'grep -Eq "(^| )rotate " "$CALLS"'
 check "--run 4341"       'grep -q -- "--run 4341" "$CALLS"'
 check "resumed 아님"     '! grep -Eq "(^| )resumed( |$)" "$CALLS"'
 check "상세에 이전 런"   'grep -q "4340" "$CALLS.detail"'
 check "상세에 계수율"    'grep -q "712" "$CALLS.detail"'
+check "간격이 계산됨(30초)" 'grep -q "간격 *: 30 초" "$CALLS.detail"'
 check "last_run=4341"    '[ "$(sed -n s/^last_run=//p "$ST")" = 4341 ]'
 
 echo "[5] 이전 런이 실패(onlbit=0) -> resumed"
-sqlite3 "$DB" "update runcatalog set onlbit=1, etime=$((now-200)) where runnum=4341;
-               insert into runcatalog values(4342,0,$((now-190)),NULL,NULL,NULL,'desc A');
-               insert into runcatalog values(4343,NULL,$((now-100)),NULL,NULL,NULL,'desc A');"
+sqlite3 "$DB" "update runcatalog set onlbit=1, stime='$(ts $((now-300)))', etime='$(ts $((now-320)))' where runnum=4341;
+               insert into runcatalog values(4342,0,'$(ts $((now-310)))',NULL,NULL,NULL,'desc A');
+               insert into runcatalog values(4343,NULL,NULL,NULL,NULL,NULL,'desc A');"
 hb 4343 300; run
 check "resumed 호출"     'grep -Eq "(^| )resumed " "$CALLS"'
 check "rotate 아님"      '! grep -Eq "(^| )rotate( |$)" "$CALLS"'
 
 echo "[6] 이전 런은 정상 마감했지만 간격이 크다(사람이 세웠다 올림) -> resumed"
-sqlite3 "$DB" "update runcatalog set onlbit=1, etime=$((now-7200)) where runnum=4343;
-               insert into runcatalog values(4344,NULL,$((now-300)),NULL,NULL,NULL,'desc A');"
+sqlite3 "$DB" "update runcatalog set onlbit=1, stime='$(ts $((now-7500)))', etime='$(ts $((now-7200)))' where runnum=4343;
+               insert into runcatalog values(4344,NULL,NULL,NULL,NULL,NULL,'desc A');"
 hb 4344 300; run
 check "resumed 호출"     'grep -Eq "(^| )resumed " "$CALLS"'
 
