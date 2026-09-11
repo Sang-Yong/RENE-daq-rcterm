@@ -27,9 +27,12 @@
 #      -> rate_trend_*.png 11개 + bg_trend_*.png 6개 + veto_*.png 3개 + summary.html 을 webroot 로 rsync 복사
 #
 #  ★ 부팅 실패 런 (2026-09-09, §11.173 개선 4) -- FADC 파일이 min_subruns(기본 2)개
-#      미만인 완결 런은 표에 싣지 않고 건너뛴다(게이트도 막지 않는다). run 4335 처럼
+#      미만인 런은 표에 싣지 않고 건너뛴다(게이트도 막지 않는다). run 4335 처럼
 #      서브런 하나 남기고 죽은 런이 'test' 행으로 들어가던 것을 막는다. 3분 확인 런
 #      (서브런 3)은 그대로 실린다(§11.5 의 4300 처럼 사용자가 싣기로 한 것).
+#      ★ 2026-09-11 확장 -- 완결 여부와 무관하게 건너뛴다. run 4342 는 FADC 1(8 kB 빈 파일) ·
+#      PRD 0 이라 영영 '미완결' 이고 그 뒤 런을 전부 막았다(§11.179). 단 **heartbeat 가 가리키는
+#      수집 중인 런은 제외** -- 막 시작한 런도 FADC 가 1개라서다. 그 런은 언제나 게이트를 막는다.
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
 #      -> publish_google.py (publish=1 일 때만)
 #
@@ -169,6 +172,10 @@ discover_runs() {
    done | grep -E '^[0-9]{6}$' | sort -n -u
 }
 
+#  지금 수집 중인 런 (heartbeat 의 run=). 없으면 빈 문자열. 시험은 WEBSUMMARY_HB 로 갈아끼운다.
+HBFILE=${WEBSUMMARY_HB:-/Data/LOG/rcterm.hb}
+hb_run() { sed -n 's/^run=//p' "$HBFILE" 2>/dev/null | head -1 | sed 's/^0*//'; }
+
 state_last_run() {
    [ -r "$STATE" ] || return 1
    awk -F= '$1=="last_run"{print $2; f=1} END{exit !f}' "$STATE" 2>/dev/null
@@ -193,6 +200,11 @@ compute_gate() {
             continue
          fi
          NEWLIST_ARR+=("$n")
+      elif [ "$RC_NF" -gt 0 ] && [ "$RC_NF" -lt "$MIN_SUBRUNS" ] && [ "$n" != "$(hb_run)" ]; then
+         #  미완결이지만 FADC 파일이 기준 미만이고 지금 수집 중인 런도 아니다 = 부팅 실패의
+         #  잔재가 PRD 를 영영 못 만드는 경우. 기다릴 것이 없으므로 건너뛴다.
+         SKIPPED_ARR+=("$n")
+         continue
       else
          BLOCKED=$n
          break

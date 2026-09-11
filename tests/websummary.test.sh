@@ -415,10 +415,39 @@ CHK skip_bootfail=0"
    echo "[10] 진단 : rc=$RC10 last_run=[$SLR10] 다음=[$SLR10b]"; echo "$OUT10"; cat "$T/10/log" 2>&1; echo "$ST10"
 fi
 
+# ==== [11] 미완결인데 FADC 파일이 기준 미만인 런(부팅 실패, PRD 영영 없음)도 건너뛴다 (2026-09-11) ==
+#     4280 완결(3) · 4281 FADC 1/PRD 0 (run 4342 모양) · 4282 완결(3)  -> 4281 은 막지 않는다
+#     단 heartbeat 가 4281 을 가리키면(막 시작한 런) 막아야 한다.
+mkdir -p "$T/11/tsv"
+mkrun "$T/11/RAW" 004280 3 3
+mkrun "$T/11/RAW" 004281 1 0
+mkrun "$T/11/RAW" 004282 3 3
+mkparams "$T/11/params" "$T/11/tsv" 4280
+printf 'run=004299\nphase=running\n' > "$T/11/hb"
+WEBSUMMARY_ROOTS="$T/11/RAW" WEBSUMMARY_LOCK="$T/11/.lock" WEBSUMMARY_STATE="$T/11/state" \
+   WEBSUMMARY_LOG="$T/11/log" WEBSUMMARY_STAGES_DISABLED=1 WEBSUMMARY_HB="$T/11/hb" \
+   "$SUT" --params "$T/11/params" >/dev/null 2>&1
+SLR11=$(awk -F= '$1=="last_run"{print $2}' "$T/11/state" 2>/dev/null)
+ok11=1
+[ "$SLR11" = "4282" ] || ok11=0
+grep -q 'run 4280,4282' "$T/11/log" || ok11=0
+grep -q '\[SKIP\] run 4281' "$T/11/log" || ok11=0
+#  같은 모양인데 heartbeat 가 4281 (수집 중) 이면 막힌다
+mkdir -p "$T/11b/tsv"; cp -r "$T/11/RAW" "$T/11b/RAW"; mkparams "$T/11b/params" "$T/11b/tsv" 4280
+printf 'run=004281\nphase=running\n' > "$T/11b/hb"
+WEBSUMMARY_ROOTS="$T/11b/RAW" WEBSUMMARY_LOCK="$T/11b/.lock" WEBSUMMARY_STATE="$T/11b/state" \
+   WEBSUMMARY_LOG="$T/11b/log" WEBSUMMARY_STAGES_DISABLED=1 WEBSUMMARY_HB="$T/11b/hb" \
+   "$SUT" --params "$T/11b/params" >/dev/null 2>&1
+SLR11b=$(awk -F= '$1=="last_run"{print $2}' "$T/11b/state" 2>/dev/null)
+[ "$SLR11b" = "4280" ] || ok11=0
+if [ "$ok11" -eq 1 ]; then R="$R
+CHK skip_incomplete_tiny=1"; else R="$R
+CHK skip_incomplete_tiny=0"; echo "[11] 진단 : last_run=[$SLR11] hb-blocked=[$SLR11b]"; cat "$T/11/log" "$T/11b/log" 2>&1; fi
+
 # ---- 판정 -----------------------------------------------------------------
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
-         publish_fail publish_order runclass_before_html skip_bootfail; do
+         publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -427,4 +456,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (11/11)"
+echo "PASS websummary (12/12)"
