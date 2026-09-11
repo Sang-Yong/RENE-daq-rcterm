@@ -866,6 +866,19 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.183 ★ 백업 메일에 기록 시트 링크 (사용자 지시, 09-12 새벽) — 그리고 내 감시가 시험을 깨뜨린 것
+
+`body_tail()` 에 **'백업 하드 기록'** 절 : GoodRuns 문서의 `back_up_hdd_log` 탭(gid 219954027) 링크 + 서버의
+`parts_index.txt` · `backup_log.txt` 경로. 모든 백업 메일 공통. `BACKUP_SHEET_URL` 로 갈아끼운다. 한/영 같은 패치,
+시험 `tests/storage-backup-sheetlink.test.sh` 10 건. **그 시트 탭은 사람이 손으로 채우는 곳이라 09-05(35 행)에서
+멈춰 있다** — 1회차 후반과 2회차는 §11.170 표와 서버 `backup_log.txt` 에만 있다. 자동 등재는 별도 작업.
+
+**★ 밟은 것 — `pgrep -f` 다섯 번째.** 새 세션 감지용 세션 모니터가 `ssh store 'pgrep -f "…data_backup_simple_code9.sh"'`
+를 5분마다 돌렸는데, 그 **명령줄 자체에 스크립트 이름이 들어 있어** 스크립트의 `other_backup()`(`pgrep -f
+'data_backup_simple_code[0-9]*\.sh|storage-backup\.sh'`)이 내 모니터 셸을 '이미 도는 백업' 으로 잡았다. 순서대로 돌린
+시험 스위트 셋이 통째로 실패(38/107 등)했고, 처음엔 병렬 간섭으로 오인했다. **감시 명령줄에 감시 대상의 이름을 넣지 말 것.**
+세션 pid 는 잠금 파일 보유자(`fuser ~/sykim/backup_log/.backup.lock`)로 잡는다 — 이름이 명령줄에 안 들어간다.
+
 #### 11.182 ★★ 백업 하드 이탈 감지 + 즉시 메일 · 시리얼(by-id) 마운트 (사용자 지시, 09-12 새벽)
 
 **재개 확인 (09-11 23:39)** — 사용자가 umount·e2fsck·재마운트 뒤 같은 명령으로 띄웠다. `/backup_hdd` = sdc1(ZK206014,
@@ -2981,6 +2994,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.183         ★ 백업 메일에 기록 시트 링크. 감시 명령줄의 스크립트 이름이 other_backup() 에 잡혀 시험을 깨뜨림 (pgrep -f ×5)
 §11.182         ★ 백업 하드 이탈을 전송 중에 감지해 즉시 메일 (disk_alive 폴링). by-id 시리얼 마운트 명령
 §11.181         ★ 백업 메일에 진짜 하드 시리얼(udevadm ID_SERIAL_SHORT + WWN). code9 배포, 다음 회차부터
 §11.180         ★ 외장하드 백업 2회차 : 09-11 21:03 전송 중 독 이탈 → 유령 마운트, rsync EIO 헛돎. 사람이 umount·e2fsck·재마운트
@@ -3064,10 +3078,11 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
      도는지 반드시 볼 것 (§11.151 에서 7시간 38분을 날렸다)
 2  ★ postrun 에는 잠금이 없다. 두 벌이 같은 런을 처리하면 carry 가 어긋난다.
      띄우기 전에 pgrep 으로 확인할 것
-3  pgrep -f 로 프로세스를 찾지 말 것. 네 방향으로 오탐한다 —
+3  pgrep -f 로 프로세스를 찾지 말 것. 다섯 방향으로 오탐한다 —
      저장소 경로의 'rcterm' · $( ) 서브셸 · 나를 띄운 셸의 argv ·
-     ★ 이미 죽어 ps 가 빈손인 것. pgrep -x 를 쓰거나 계보를 빼라
-     (§11.67 · §11.119 · §11.141 · §11.145)
+     이미 죽어 ps 가 빈손인 것 · ★ 감시 명령줄에 든 대상 이름(§11.183).
+     pgrep -x 를 쓰거나 계보를 빼거나, 잠금 파일 보유자(fuser)로 잡아라
+     (§11.67 · §11.119 · §11.141 · §11.145 · §11.183)
 4  ★ pkill -f 는 자기 셸을 죽인다. PID 로만 죽일 것 (이 세션에서 세 번 밟았다)
 5  ★ ps -eo pid= -p <pid> 는 -e 가 이겨 모든 프로세스를 낸다. 조건이 영원히 참이다.
      ps -p <pid> 로 볼 것
