@@ -534,8 +534,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - ~~`storage-backup.sh` 가 적는 시리얼이 하드 시리얼이 아니다~~ **2026-09-11 해결** — `udevadm` 의 `ID_SERIAL_SHORT` + `ID_WWN`
   으로 바꿨다 (§11.181). 메일에 '시리얼 : ZK206014' 처럼 제조사 값이 실린다
 - ~~`storage-backup.sh` 가 유령 마운트를 감지하지 못한다~~ **2026-09-12 해결** — `disk_alive` 폴링 + 즉시 메일 (§11.182)
-- **full 로 옮긴 조각이 `parts_index.txt` 에 안 남는다.** 런의 마지막 조각이 어느 하드에 갔는지
-  `backup_log.txt` 를 뒤져야 한다. full 도 색인에 남길 것 (§11.170)
+- ~~full 로 옮긴 조각이 `parts_index.txt` 에 안 남는다~~ **2026-09-12 해결** — 열 8~12 와 함께 full 도 남긴다 (§11.184)
 - ~~dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
   고치는 것이 정답이고, 그 전까지는 `--drop-merged` 가 유일한 단축 수단이다~~
   **2026-08-26 해결 — 링크를 10 Gb 로 올렸다** (§11.115). 쓰기 7.7 -> 534 MB/s.
@@ -865,6 +864,29 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.184 ★★ 백업 하드 기록 시트 자동 등재 (사용자 지시, 09-12) — 그리고 full 도 색인에
+
+```
+원천     저장소 서버 ~/sykim/backup_log/parts_index.txt   (열 1~7 그대로. ★ 09-12 판부터 열 8~12 : mode · 마운트 · 모델 · 시리얼 · 용량KB,
+                                                       그리고 full 전송도 남긴다 — §6 백로그 해결)
+         backup_log.txt 의 '=== 하드 … UUID=… 회차 시작 ===' (UUID→마운트) 와 '<런> 완료 및 서버에서 제거됨' (색인에 full 행이
+         없는 런의 되메움 — 옛 판 세션의 full 이 여기서만 잡힌다. 런은 한 번만 제거되므로 런이 열쇠)
+경로     서버엔 인터넷이 없다(§11.144). 이 PC 의 cron 이 ssh store 로 두 파일 + lsblk(붙은 UUID) + ls /data/RAW 를 받아
+         tools/sheetlog/append_backup_rows.py 로 back_up_hdd_log 탭(gid 219954027, 25 열)에 붙인다
+규칙     시트의 마지막 (Backup Date, Time) 뒤의 기록만 뒤에 append. 기존 행 불변. 쓰기 전 백업(/Data_ssd/LOG/backup-sheetlog/)
+         + 되읽어 대조. 기본 미리보기, --commit 라야 쓴다. --sheet-tsv 는 시험용(구글 무접촉)
+열       No·Date·Time·Run·Type(part/full)·Files·GB·Subrun Range(최소~최대)·First/Last·Files Left·Status(붙어 있으면 attached)·
+         Mount·UUID·Model·Serial·Capacity·Dest·Verified(count+bytes)·Source Deleted(full=Y, part=moved files only, 런 폴더가
+         사라졌으면 Y (run complete across disks))·Script(code9)·Notes(auto). Disk Label·KHU·Storage Location 은 사람 몫(빈칸)
+cron     scripts/backup-sheetlog.sh  매시 37분. 쓴 것이 있으면 sheetlog 사건으로 책임자 메일. ssh 가 안 되면 조용히 쉰다
+시험     tests/backup-sheetlog.test.sh 29 건 (변환·중복·순서·되메움·헤더 검사·ssh 실패 회피)
+```
+
+**✅ 09-12 05:16 첫 등재 — 14 행 추가, 되대조 통과, 책임자 메일. cron 37분 등록. 저장소 서버 code9 배포(색인 열 추가판).**
+실 기록 미리보기 : 시트 35 행(09-05) 뒤에 **14 행** — 하드 E~H 의 조각 + full 완료(002447·002451·002452·002453·002454·002455)
++ 2회차의 002455·002456. §11.170 표와 일치. ★ 시험이 잡은 것 : 첫/끝 파일이 이름순이라 서브런 범위가 `02381~01277` 로 뒤집혔다
+→ 최소~최대. 그리고 되메움을 날짜로 끊으면 **옛 판 세션이 아직 도는 동안의 full(002455, 09-12 04:10)** 을 놓친다 → 색인 유무로.
 
 #### 11.183 ★ 백업 메일에 기록 시트 링크 (사용자 지시, 09-12 새벽) — 그리고 내 감시가 시험을 깨뜨린 것
 
@@ -2966,9 +2988,11 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       2회차 재개 (09-11 23:39, §11.182). /backup_hdd = ZK206014 · /backup_hdd_2 = Z4ZBXGAA. 002455 전송 중.
-           code9 는 이탈 감지판(다음 회차부터). 독 교체 검토 (§11.180)
+백업       2회차 진행 중 (09-11 23:39 세션, 옛 판). /backup_hdd = ZK206014 · /backup_hdd_2 = Z4ZBXGAA. 002456 담는 중.
+           code9 는 이탈 감지 + 시리얼 + 시트 링크 + full 색인판 — 다음 세션부터. 시트 자동 등재 cron 37분 (§11.184).
+           독 교체 검토 (§11.180)
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
+           · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
                 시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
                 RENE_DAQ/rene-runsummary-png-20 의 20 장(내용 교체). metrics_source=dst, last_run=4335.
@@ -2994,6 +3018,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.184         ★ 백업 하드 기록 시트 자동 등재 (cron 37분, append_backup_rows.py). full 도 parts_index 에
 §11.183         ★ 백업 메일에 기록 시트 링크. 감시 명령줄의 스크립트 이름이 other_backup() 에 잡혀 시험을 깨뜨림 (pgrep -f ×5)
 §11.182         ★ 백업 하드 이탈을 전송 중에 감지해 즉시 메일 (disk_alive 폴링). by-id 시리얼 마운트 명령
 §11.181         ★ 백업 메일에 진짜 하드 시리얼(udevadm ID_SERIAL_SHORT + WWN). code9 배포, 다음 회차부터
