@@ -93,6 +93,7 @@ SAFETY_MARGIN="${BACKUP_SAFETY_MARGIN_KB:-$((2 * 1024 * 1024))}"   # 2 GB [KB]
 MIN_USEFUL="${BACKUP_MIN_USEFUL_KB:-$((100 * 1024))}"              # 100 MB [KB]
 BWLIMIT="${BACKUP_BWLIMIT-50M}"       # empty = unlimited. --no-bwlimit clears it too
 MAX_CONSEC_FAIL=3                     # this many failures in a row: suspect the disk and stop
+ALIVE_POLL="${BACKUP_ALIVE_POLL:-30}"  # how often to check the disk is still there mid-transfer [s]
 #  What to do with a folder that does not fit
 #    always: slice anything that does not fit the space left  * default.
 #    auto  : only slice folders larger than the whole disk.
@@ -183,6 +184,19 @@ IFS=',' read -r -a DISKS <<< "$MOUNTS_RAW"
 #    dataflow.sh.) Never use it in normal operation.
 # =====================================================================
 disk_is_mounted() { mountpoint -q "$1"; }
+#  Is the mount *alive*? Not the same as mounted (2026-09-11). When the USB dock drops,
+#  the mount keeps pointing at a vanished /dev/sdX1 (ghost mount), df shows cached
+#  numbers, and rsync spins for hours on EIO. Returns 0 only if the device node exists
+#  and the filesystem was not forced read-only. Polled during transfers.
+disk_alive() {
+	local m=$1 src opts
+	mountpoint -q "$m" 2>/dev/null || return 1
+	src=$(findmnt -no SOURCE "$m" 2>/dev/null); [ -n "$src" ] || return 1
+	case "$src" in /dev/*) [ -b "$src" ] || return 1 ;; esac
+	opts=$(findmnt -no OPTIONS "$m" 2>/dev/null)
+	case ",$opts," in *,ro,*) return 1 ;; esac
+	return 0
+}
 disk_df_field()   { df -k "$1" 2>/dev/null | tail -1 | awk -v f="$2" '{print $f+0}'; }
 disk_cap_kb()     { disk_df_field "$1" 2; }
 disk_used_kb()    { disk_df_field "$1" 3; }
@@ -265,6 +279,9 @@ if [ -n "${BACKUP_TEST_HOOK:-}" ]; then
 	if [ -r "$BACKUP_TEST_HOOK" ]; then
 		echo "WARNING: test mode -- capacity and mount checks replaced by $BACKUP_TEST_HOOK"
 		. "$BACKUP_TEST_HOOK"
+		#  If the hook did not replace disk_alive (pre-2026-09-11 tests), make it follow
+		#  disk_is_mounted -- otherwise the real disk_alive reads a temp dir as 'not mounted = dead'.
+		grep -q 'disk_alive()' "$BACKUP_TEST_HOOK" || disk_alive() { disk_is_mounted "$1"; }
 	else
 		echo "ERROR: cannot read BACKUP_TEST_HOOK: $BACKUP_TEST_HOOK" >&2; exit 2
 	fi
@@ -646,8 +663,32 @@ run_pass() {
 			continue
 		fi
 		#  * --remove-source-files is not used. Deletion happens after verification.
-		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE"
-		RC=$?
+		#  Catch the disk dropping mid-transfer. rsync runs in the background while
+		#  disk_alive is polled every ALIVE_POLL seconds; if it dies, stop rsync and alert now.
+		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE" &
+		RSPID=$!; DISK_LOST=0
+		while kill -0 "$RSPID" 2>/dev/null; do
+			sleep "$ALIVE_POLL"
+			kill -0 "$RSPID" 2>/dev/null || break
+			if ! disk_alive "$MOUNT_POINT"; then
+				DISK_LOST=1
+				kill -TERM "$RSPID" 2>/dev/null; sleep 2; kill -KILL "$RSPID" 2>/dev/null
+				break
+			fi
+		done
+		wait "$RSPID" 2>/dev/null; RC=$?
+		if [ "$DISK_LOST" -eq 1 ]; then
+			echo ""
+			echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+			echo "❌ $MOUNT_POINT dropped during the transfer (device gone or forced read-only)."
+			echo "   rsync stopped. Sources are untouched; files already copied are skipped next round."
+			echo "   Check :  ls /dev/sd*  ·  findmnt $MOUNT_POINT  ·  dmesg -T | tail -30"
+			echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+			echo "[$(date)] DISK LOST $MOUNT_POINT during $FOLDER_NAME (device gone / read-only). rsync killed" >> "$LOG_FILE"
+			N_FAIL=$((N_FAIL+1)); LOST_DISK=$MOUNT_POINT; LOST_RUN=$FOLDER_NAME
+			PASS_RC=4
+			break
+		fi
 
 		#  * rc=24 means source files vanished while they were being sent. That
 		#    is not a whole-run failure - what went, went. On 2026-09-04
@@ -925,7 +966,7 @@ echo ""
 
 TOT_OK=0; TOT_PARTRUN=0; TOT_FAIL=0; TOT_KB=0; TOT_SKIP=0
 REMAIN_N=-1; REMAIN_LIST=""
-USED_DISKS=""; LAST_DISK=""; OUTCOME=""
+USED_DISKS=""; LAST_DISK=""; OUTCOME=""; LOST_DISK=""; LOST_RUN=""
 
 # =====================================================================
 #  Walk the disks in order -- this loop is the heart of the script.
@@ -966,6 +1007,22 @@ EOF
 
 	# --- * can we actually write to it? ------------------------------
 	#  Checking only the mount means dying at the first rsync, plan already built.
+	if ! disk_alive "$M"; then
+		echo "❌ $M : mounted, but the device is gone or the filesystem is read-only (ghost mount)."
+		echo "   Check findmnt $M · ls /dev/sd* · dmesg -T | tail -30, then umount / e2fsck / remount."
+		echo "[$(date)] GHOST MOUNT $M -- device gone or read-only" >> "$LOG_FILE"
+		OUTCOME=disklost; LOST_RUN=""
+		finish 1 "Storage backup stopped — $M is a ghost mount (device gone / read-only)" <<EOF
+$M is mounted but its device is missing from /dev or the filesystem was forced read-only.
+Every write would be an Input/output error, so nothing was started.
+
+$(findmnt -no SOURCE,TARGET,OPTIONS "$M" 2>/dev/null | sed 's/^/  findmnt : /')
+$(ls /dev/sd* 2>/dev/null | tr '\n' ' ' | sed 's/^/  \/dev    : /')
+
+  sudo umount -l $M ; lsblk -o NAME,UUID ; sudo e2fsck -f -y /dev/<newname>1 ; sudo mount UUID=<UUID> $M
+EOF
+		exit 1
+	fi
 	if ! dest_ready "$M"; then
 		echo "ERROR: cannot write to $M -- $DEST_ERR"
 		finish 1 "Storage backup stopped -- cannot write to $M" <<EOF
@@ -1032,6 +1089,7 @@ EOF
 		D_OK=$((D_OK + N_OK)); D_PART=$((D_PART + N_PART)); D_FAIL=$((D_FAIL + N_FAIL))
 		D_KB=$((D_KB + MOVED_KB)); D_SKIP=$((D_SKIP + N_SKIP))
 		[ "$PASS_RC" -eq 2 ] && break                       # suspect the hardware
+		[ "$PASS_RC" -eq 4 ] && break                       # the disk dropped
 		[ "$DRYRUN" -eq 1 ] && break
 		[ "$((N_OK + N_PART))" -eq 0 ] && break             # no progress
 		AVAIL=$(disk_avail_kb "$M")
@@ -1050,6 +1108,36 @@ EOF
 	} >> "$PLANDIR/disks.txt"
 
 	#  Stopped on repeated failures -- suspect the hardware. Do not move on.
+	#  The disk dropped mid-transfer: alert right here and stop. Do not move on to the next
+	#  disk -- the dock is one USB device, both disks fall off together.
+	if [ "$PASS_RC" -eq 4 ]; then
+		remaining_work; :
+		OUTCOME=disklost
+		finish 1 "Storage backup stopped — $M dropped mid-transfer (run ${LOST_RUN:-?})" <<EOF
+While sending run ${LOST_RUN:-?} to $M the disk fell off the bus ($(date '+%F %T')).
+The mount points at a device that vanished from /dev, or the filesystem was forced read-only.
+rsync was stopped at once, so no hours are wasted spinning on EIO.
+
+Sources were NOT deleted. Files already copied are skipped by the next round's rsync.
+
+State now :
+$(findmnt -no SOURCE,TARGET,OPTIONS "$M" 2>/dev/null | sed 's/^/  findmnt : /')
+$(ls /dev/sd* 2>/dev/null | tr '\n' ' ' | sed 's/^/  \/dev    : /')
+$(dmesg -T 2>/dev/null | grep -iE 'device offline|USB disconnect|Aborting journal|Attached SCSI disk' | tail -6 | sed 's/^/  dmesg   : /')
+
+Recovery (root) :
+  pkill -TERM -f $(basename "$0")            # skip if already stopped
+  sudo umount -l $M                          # drop the ghost mount
+  ls /dev/sd* ; lsblk -o NAME,UUID           # find the new name it came back under (match by UUID)
+  sudo e2fsck -f -y /dev/<newname>1          # the journal was cut; full check
+  sudo mount UUID=<that UUID> $M
+  $0 --dry-run  ->  same command             # resumes with what is left
+
+Root cause is the USB dock (power, cable, bridge). The 50 MB/s limit does not prevent it -- it dropped mid-transfer on 2026-09-11.
+EOF
+		exit 1
+	fi
+
 	if [ "$PASS_RC" -eq 2 ]; then
 		remaining_work; :
 		OUTCOME=hwfail

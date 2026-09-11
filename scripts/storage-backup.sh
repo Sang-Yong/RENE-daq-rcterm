@@ -78,6 +78,7 @@ SAFETY_MARGIN="${BACKUP_SAFETY_MARGIN_KB:-$((2 * 1024 * 1024))}"   # 2 GB [KB]
 MIN_USEFUL="${BACKUP_MIN_USEFUL_KB:-$((100 * 1024))}"              # 100 MB [KB]
 BWLIMIT="${BACKUP_BWLIMIT-50M}"       # 비우면 무제한.  --no-bwlimit 로도 해제
 MAX_CONSEC_FAIL=3                     # 연속 실패가 이만큼이면 하드를 의심하고 멈춘다
+ALIVE_POLL="${BACKUP_ALIVE_POLL:-30}"  # 전송 중 하드가 살아 있는지 보는 주기 [초] (§11.180)
 #  들어가지 않는 폴더를 어떻게 할까
 #    always: 남은 자리에 안 들어가면 무엇이든 쪼개 담는다  ★ 기본.
 #    auto  : 하드보다 큰 폴더만 쪼갠다.
@@ -165,6 +166,19 @@ IFS=',' read -r -a DISKS <<< "$MOUNTS_RAW"
 #    평소 운용에서는 절대 쓰지 않는다.
 # =====================================================================
 disk_is_mounted() { mountpoint -q "$1"; }
+#  ★ 마운트가 '살아 있는가' -- 마운트돼 있다는 것과 다르다 (2026-09-11 §11.180).
+#    USB 독이 떨어지면 마운트는 사라진 /dev/sdX1 을 붙든 채 남고(유령 마운트), df 도 캐시 값을 내며,
+#    rsync 는 파일마다 EIO 를 내며 몇 시간을 헛돈다. 그 장치가 /dev 에 실재하고 read-only 로
+#    강제되지 않았을 때만 0. 전송 중에 주기적으로 부른다. 시험은 BACKUP_TEST_HOOK 으로 갈아끼운다.
+disk_alive() {
+	local m=$1 src opts
+	mountpoint -q "$m" 2>/dev/null || return 1
+	src=$(findmnt -no SOURCE "$m" 2>/dev/null); [ -n "$src" ] || return 1
+	case "$src" in /dev/*) [ -b "$src" ] || return 1 ;; esac
+	opts=$(findmnt -no OPTIONS "$m" 2>/dev/null)
+	case ",$opts," in *,ro,*) return 1 ;; esac
+	return 0
+}
 disk_df_field()   { df -k "$1" 2>/dev/null | tail -1 | awk -v f="$2" '{print $f+0}'; }
 disk_cap_kb()     { disk_df_field "$1" 2; }
 disk_used_kb()    { disk_df_field "$1" 3; }
@@ -248,6 +262,9 @@ if [ -n "${BACKUP_TEST_HOOK:-}" ]; then
 	if [ -r "$BACKUP_TEST_HOOK" ]; then
 		echo "⚠️  시험 모드 : 용량·마운트 판정을 $BACKUP_TEST_HOOK 로 갈아끼웁니다."
 		. "$BACKUP_TEST_HOOK"
+		#  훅이 disk_alive 를 안 갈아끼웠으면(2026-09-11 이전 시험들) disk_is_mounted 를 따르게 한다 --
+		#  안 그러면 실제 disk_alive 가 임시 디렉터리를 '마운트 아님 = 죽음' 으로 읽어 시험이 전부 이탈로 끝난다.
+		grep -q 'disk_alive()' "$BACKUP_TEST_HOOK" || disk_alive() { disk_is_mounted "$1"; }
 	else
 		echo "❌ BACKUP_TEST_HOOK 을 읽을 수 없습니다 : $BACKUP_TEST_HOOK" >&2; exit 2
 	fi
@@ -436,7 +453,7 @@ disk_block() {           # 마운트지점
 #  한 회차 — 하드 하나를 채운다.  code8 의 「계획 -> 실행」 이 이 안에 있다.
 #
 #  들어가는 것 : $1 = 마운트지점
-#  나오는 것   : PASS_RC   0 정상 종료 · 2 연속 실패로 중단 (하드를 의심한다)
+#  나오는 것   : PASS_RC   0 정상 종료 · 2 연속 실패로 중단 (하드를 의심한다) · 4 전송 중 하드 이탈 (§11.180)
 #                그리고 아래 회차 통계 전역들
 # =====================================================================
 run_pass() {
@@ -628,8 +645,32 @@ run_pass() {
 			continue
 		fi
 		#  ★ --remove-source-files 를 쓰지 않는다. 대조를 통과한 뒤에 지운다.
-		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE"
-		RC=$?
+		#  ★ 하드가 떨어지는 것을 전송 중에 잡는다 (§11.180). rsync 를 뒤에 두고
+		#    ALIVE_POLL 초마다 disk_alive 를 본다. 죽었으면 rsync 를 세우고 즉시 알린다.
+		rsync "${RSOPT[@]}" "$FOLDER_NAME/" "$DEST/$FOLDER_NAME/" 2>>"$LOG_FILE" &
+		RSPID=$!; DISK_LOST=0
+		while kill -0 "$RSPID" 2>/dev/null; do
+			sleep "$ALIVE_POLL"
+			kill -0 "$RSPID" 2>/dev/null || break
+			if ! disk_alive "$MOUNT_POINT"; then
+				DISK_LOST=1
+				kill -TERM "$RSPID" 2>/dev/null; sleep 2; kill -KILL "$RSPID" 2>/dev/null
+				break
+			fi
+		done
+		wait "$RSPID" 2>/dev/null; RC=$?
+		if [ "$DISK_LOST" -eq 1 ]; then
+			echo ""
+			echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+			echo "❌ $MOUNT_POINT 가 전송 도중 떨어졌습니다 (장치가 사라졌거나 read-only 로 강제됨)."
+			echo "   rsync 를 세웠습니다. ★ 원본은 그대로 둡니다. 이미 간 파일은 다음 회차가 건너뜁니다."
+			echo "   확인 :  ls /dev/sd*  ·  findmnt $MOUNT_POINT  ·  dmesg -T | tail -30"
+			echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+			echo "[$(date)] DISK LOST $MOUNT_POINT during $FOLDER_NAME (device gone / read-only). rsync killed" >> "$LOG_FILE"
+			N_FAIL=$((N_FAIL+1)); LOST_DISK=$MOUNT_POINT; LOST_RUN=$FOLDER_NAME
+			PASS_RC=4
+			break
+		fi
 
 		#  ★ rc=24 는 '보내려던 원본이 그 사이 사라졌다' 는 뜻이다. 통째로
 		#    실패로 볼 일이 아니다 -- 실제로 간 것은 갔다. 2026-09-04 에
@@ -906,7 +947,7 @@ echo ""
 
 TOT_OK=0; TOT_PARTRUN=0; TOT_FAIL=0; TOT_KB=0; TOT_SKIP=0
 REMAIN_N=-1; REMAIN_LIST=""
-USED_DISKS=""; LAST_DISK=""; OUTCOME=""
+USED_DISKS=""; LAST_DISK=""; OUTCOME=""; LOST_DISK=""; LOST_RUN=""
 
 # =====================================================================
 #  하드를 순서대로 — 이 루프가 이 스크립트의 핵심이다.
@@ -947,6 +988,22 @@ EOF
 
 	# --- ★ 목적지에 실제로 쓸 수 있는가 -----------------------------
 	#  마운트만 보고 넘어가면 계획을 다 세운 뒤에야 첫 rsync 에서 죽는다.
+	if ! disk_alive "$M"; then
+		echo "❌ $M : 마운트는 돼 있는데 장치가 사라졌거나 read-only 입니다 (유령 마운트)."
+		echo "   findmnt $M  ·  ls /dev/sd*  ·  dmesg -T | tail -30  을 보고 umount / e2fsck / 재마운트 할 것."
+		echo "[$(date)] GHOST MOUNT $M -- device gone or read-only" >> "$LOG_FILE"
+		OUTCOME=disklost; LOST_RUN=""
+		finish 1 "스토리지 백업 중단 — $M 이 유령 마운트입니다 (장치 사라짐 / read-only)" <<EOF
+$M 은 마운트돼 있지만 그 장치가 /dev 에 없거나 read-only 로 강제된 상태입니다.
+쓰기 시도가 전부 Input/output error 가 될 것이라 시작하지 않습니다.
+
+$(findmnt -no SOURCE,TARGET,OPTIONS "$M" 2>/dev/null | sed 's/^/  findmnt : /')
+$(ls /dev/sd* 2>/dev/null | tr '\n' ' ' | sed 's/^/  \/dev    : /')
+
+  sudo umount -l $M ; lsblk -o NAME,UUID ; sudo e2fsck -f -y /dev/<새이름>1 ; sudo mount UUID=<UUID> $M
+EOF
+		exit 1
+	fi
 	if ! dest_ready "$M"; then
 		echo "❌ $M 에 쓸 수 없습니다 — $DEST_ERR"
 		finish 1 "스토리지 백업 중단 — $M 에 쓸 수 없습니다" <<EOF
@@ -1012,6 +1069,7 @@ EOF
 		D_OK=$((D_OK + N_OK)); D_PART=$((D_PART + N_PART)); D_FAIL=$((D_FAIL + N_FAIL))
 		D_KB=$((D_KB + MOVED_KB)); D_SKIP=$((D_SKIP + N_SKIP))
 		[ "$PASS_RC" -eq 2 ] && break                       # 하드웨어 의심
+		[ "$PASS_RC" -eq 4 ] && break                       # 하드가 떨어졌다 (§11.180)
 		[ "$DRYRUN" -eq 1 ] && break
 		[ "$((N_OK + N_PART))" -eq 0 ] && break             # 진전 없음
 		AVAIL=$(disk_avail_kb "$M")
@@ -1028,6 +1086,36 @@ EOF
 		echo "  이번 하드: 옮김 $N_OK 개 · 나눠담음 $N_PART 개 · 실패 $N_FAIL 개 · $(fmt_kb "$MOVED_KB") · ${ROUND}회차 · 소요 $(fmt_sec "$D_EL")"
 		echo ""
 	} >> "$PLANDIR/disks.txt"
+
+	#  ★ 전송 중에 하드가 떨어졌다 (§11.180). 그 자리에서 알리고 멈춘다 — 다음 하드로 넘어가지 않는다
+	#    (독은 한 USB 장치라 두 하드가 함께 떨어진다).
+	if [ "$PASS_RC" -eq 4 ]; then
+		remaining_work; :
+		OUTCOME=disklost
+		finish 1 "스토리지 백업 중단 — $M 가 전송 도중 떨어졌습니다 (run ${LOST_RUN:-?})" <<EOF
+$M 로 run ${LOST_RUN:-?} 을 보내던 중 하드가 버스에서 떨어졌습니다 ($(date '+%F %T')).
+마운트가 가리키는 장치가 /dev 에서 사라졌거나 파일시스템이 read-only 로 강제됐습니다.
+rsync 를 바로 세웠으므로 EIO 로 헛도는 시간은 없습니다.
+
+★ 원본은 지우지 않았습니다. 이미 간 파일은 다음 회차의 rsync 가 건너뜁니다.
+
+지금 상태 :
+$(findmnt -no SOURCE,TARGET,OPTIONS "$M" 2>/dev/null | sed 's/^/  findmnt : /')
+$(ls /dev/sd* 2>/dev/null | tr '\n' ' ' | sed 's/^/  \/dev    : /')
+$(dmesg -T 2>/dev/null | grep -iE 'device offline|USB disconnect|Aborting journal|Attached SCSI disk' | tail -6 | sed 's/^/  dmesg   : /')
+
+복구 (root) :
+  pkill -TERM -f $(basename "$0")            # 이미 멈췄으면 생략
+  sudo umount -l $M                          # 유령 마운트 해제
+  ls /dev/sd* ; lsblk -o NAME,UUID           # 다시 붙은 새 이름을 찾는다 (UUID 로 가린다)
+  sudo e2fsck -f -y /dev/<새이름>1           # 저널이 끊겼으니 전체 검사
+  sudo mount UUID=<그 UUID> $M
+  $0 --dry-run  ->  같은 명령                 # 남은 것부터 이어진다
+
+근본 원인은 USB 독(전원·케이블·브리지)이다. 속도 제한(50 MB/s)으로는 막지 못한다 — 2026-09-11 에 전송 중에도 떨어졐다.
+EOF
+		exit 1
+	fi
 
 	#  연속 실패로 중단 — 하드웨어를 의심해야 한다. 다음 하드로 넘어가지 않는다.
 	if [ "$PASS_RC" -eq 2 ]; then

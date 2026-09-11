@@ -73,7 +73,7 @@ run_sut() {              # 나머지 인자는 그대로 넘어간다
 	BACKUP_MAILQ="$QUEUE" \
 	BACKUP_SAFETY_MARGIN_KB=64 \
 	BACKUP_MIN_USEFUL_KB=32 \
-	BACKUP_BWLIMIT= \
+	BACKUP_BWLIMIT= BACKUP_ALIVE_POLL=1 \
 	bash "$SUT" "$@" > "$T/out.txt" 2>&1
 	RC=$?
 }
