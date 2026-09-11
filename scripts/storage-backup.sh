@@ -79,6 +79,8 @@ MIN_USEFUL="${BACKUP_MIN_USEFUL_KB:-$((100 * 1024))}"              # 100 MB [KB]
 BWLIMIT="${BACKUP_BWLIMIT-50M}"       # 비우면 무제한.  --no-bwlimit 로도 해제
 MAX_CONSEC_FAIL=3                     # 연속 실패가 이만큼이면 하드를 의심하고 멈춘다
 ALIVE_POLL="${BACKUP_ALIVE_POLL:-30}"  # 전송 중 하드가 살아 있는지 보는 주기 [초] (§11.180)
+#  백업 하드 기록 시트 (GoodRuns 문서의 back_up_hdd_log 탭). 메일 본문에 링크로 넣는다 (2026-09-12 사용자 지시).
+SHEET_URL="${BACKUP_SHEET_URL:-https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0/edit?gid=219954027#gid=219954027}"
 #  들어가지 않는 폴더를 어떻게 할까
 #    always: 남은 자리에 안 들어가면 무엇이든 쪼개 담는다  ★ 기본.
 #    auto  : 하드보다 큰 폴더만 쪼갠다.
@@ -808,6 +810,12 @@ body_tail() {
 		echo "  옮길 것이 남은 런 : $REMAIN_N 개"
 		echo "  앞 10 개 :$REMAIN_LIST"
 	fi
+	echo ""
+	echo "── 백업 하드 기록 ───────────────────────────────────────"
+	echo "  시트 (어느 런이 어느 하드에 있나, 전체 이력) :"
+	echo "    $SHEET_URL"
+	echo "  서버 기록 : $PARTS_INDEX  (나눠 담은 조각)"
+	echo "             $LOG_FILE  (전송·대조·제거 전부. full 로 옮긴 런은 여기 '완료 및 서버에서 제거됨' 줄)"
 	echo ""
 	echo "── 이번 세션 로그 (끝 40 줄) ────────────────────────────"
 	tail -n "+$((LOG_MARK+1))" "$LOG_FILE" 2>/dev/null | tail -40

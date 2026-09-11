@@ -94,6 +94,8 @@ MIN_USEFUL="${BACKUP_MIN_USEFUL_KB:-$((100 * 1024))}"              # 100 MB [KB]
 BWLIMIT="${BACKUP_BWLIMIT-50M}"       # empty = unlimited. --no-bwlimit clears it too
 MAX_CONSEC_FAIL=3                     # this many failures in a row: suspect the disk and stop
 ALIVE_POLL="${BACKUP_ALIVE_POLL:-30}"  # how often to check the disk is still there mid-transfer [s]
+#  Disk-archive log sheet (tab back_up_hdd_log of the GoodRuns document). Linked from every mail.
+SHEET_URL="${BACKUP_SHEET_URL:-https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0/edit?gid=219954027#gid=219954027}"
 #  What to do with a folder that does not fit
 #    always: slice anything that does not fit the space left  * default.
 #    auto  : only slice folders larger than the whole disk.
@@ -827,6 +829,12 @@ body_tail() {
 		echo "  Runs with something left to move : $REMAIN_N"
 		echo "  First 10 :$REMAIN_LIST"
 	fi
+	echo ""
+	echo "-- Disk-archive records --------------------------------"
+	echo "  Sheet (which run is on which disk, full history) :"
+	echo "    $SHEET_URL"
+	echo "  On the server : $PARTS_INDEX  (split pieces)"
+	echo "                  $LOG_FILE  (every transfer/verify/removal; full-run moves show as 'completed and removed')"
 	echo ""
 	echo "-- Log for this session (last 40 lines) ----------------"
 	tail -n "+$((LOG_MARK+1))" "$LOG_FILE" 2>/dev/null | tail -40
