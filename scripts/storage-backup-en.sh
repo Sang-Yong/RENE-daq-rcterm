@@ -229,17 +229,30 @@ dest_ready() {           # mount point
 }
 
 #  Disk identity -- goes in the mail body. Someone has to know which disk to pull.
-#  Fills the globals D_DEV, D_UUID, D_MODEL, D_SERIAL.
+#  Fills the globals D_DEV, D_UUID, D_MODEL, D_SERIAL, D_WWN.
+#  The serial comes from udevadm, not lsblk (2026-09-11): lsblk -dno SERIAL returns
+#  the USB bridge's made-up 'RANDOM__…', which cannot identify a disk. udevadm's
+#  ID_SERIAL_SHORT is the manufacturer's serial and ID_WWN the world-wide name; both
+#  readable without root. Falls back to lsblk, marked as a bridge value.
 disk_ident() {
 	D_DEV=$(findmnt -no SOURCE "$1" 2>/dev/null)
-	D_UUID=""; D_MODEL=""; D_SERIAL=""
+	D_UUID=""; D_MODEL=""; D_SERIAL=""; D_WWN=""
 	[ -n "$D_DEV" ] || return 0
 	D_UUID=$(lsblk -no UUID "$D_DEV" 2>/dev/null | head -1)
 	local parent
 	parent=$(lsblk -no PKNAME "$D_DEV" 2>/dev/null | head -1)
 	if [ -n "$parent" ]; then
 		D_MODEL=$(lsblk -dno MODEL  "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
-		D_SERIAL=$(lsblk -dno SERIAL "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
+		if command -v udevadm >/dev/null 2>&1; then
+			local props
+			props=$(udevadm info --query=property --name="/dev/$parent" 2>/dev/null)
+			D_SERIAL=$(printf '%s\n' "$props" | sed -n 's/^ID_SERIAL_SHORT=//p' | head -1)
+			D_WWN=$(printf '%s\n' "$props" | sed -n 's/^ID_WWN=//p' | head -1)
+		fi
+		if [ -z "$D_SERIAL" ]; then
+			D_SERIAL=$(lsblk -dno SERIAL "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
+			[ -n "$D_SERIAL" ] && D_SERIAL="$D_SERIAL (bridge value, not the disk serial)"
+		fi
 	fi
 	return 0
 }
@@ -423,7 +436,8 @@ disk_block() {           # mount point
 	echo "  Device   : ${D_DEV:-(unknown)}"
 	echo "  UUID     : ${D_UUID:-(unknown)}"
 	[ -n "$D_MODEL" ]  && echo "  Model    : $D_MODEL"
-	[ -n "$D_SERIAL" ] && echo "  Serial   : $D_SERIAL"
+	[ -n "$D_SERIAL" ] && echo "  Serial   : $D_SERIAL   (printed on the disk; put it on the label with the UUID)"
+	[ -n "$D_WWN" ]    && echo "  WWN      : $D_WWN"
 	if [ "${cap:-0}" -gt 0 ]; then
 		echo "  Capacity : $(fmt_kb "$cap")   used $(fmt_kb "$used")  free $(fmt_kb "$avail")  ($((used*100/cap)) % full)"
 	fi

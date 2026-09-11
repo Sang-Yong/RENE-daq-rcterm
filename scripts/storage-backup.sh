@@ -211,17 +211,31 @@ dest_ready() {           # 마운트지점
 }
 
 #  하드의 신원 — 메일 본문에 넣는다. 사람이 어느 하드인지 알아야 뽑아 간다.
-#  전역 D_DEV · D_UUID · D_MODEL · D_SERIAL 을 채운다.
+#  전역 D_DEV · D_UUID · D_MODEL · D_SERIAL · D_WWN 을 채운다.
+#  ★ 시리얼은 lsblk 가 아니라 udevadm 에서 읽는다 (2026-09-11, 사용자 지시).
+#    lsblk -dno SERIAL 은 USB 브리지가 지어낸 'RANDOM__…' 을 내어 하드를 못 가린다
+#    (§11.170 실측). udevadm 의 ID_SERIAL_SHORT 는 제조사가 새긴 값(예 ZK206014)이고
+#    ID_WWN 은 세계 고유 번호다. 둘 다 root 없이 읽힌다. udevadm 이 없거나 비면 lsblk 로
+#    물러나되 그때는 '(브리지 값)' 을 붙여 진짜가 아님을 표시한다.
 disk_ident() {
 	D_DEV=$(findmnt -no SOURCE "$1" 2>/dev/null)
-	D_UUID=""; D_MODEL=""; D_SERIAL=""
+	D_UUID=""; D_MODEL=""; D_SERIAL=""; D_WWN=""
 	[ -n "$D_DEV" ] || return 0
 	D_UUID=$(lsblk -no UUID "$D_DEV" 2>/dev/null | head -1)
 	local parent
 	parent=$(lsblk -no PKNAME "$D_DEV" 2>/dev/null | head -1)
 	if [ -n "$parent" ]; then
 		D_MODEL=$(lsblk -dno MODEL  "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
-		D_SERIAL=$(lsblk -dno SERIAL "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
+		if command -v udevadm >/dev/null 2>&1; then
+			local props
+			props=$(udevadm info --query=property --name="/dev/$parent" 2>/dev/null)
+			D_SERIAL=$(printf '%s\n' "$props" | sed -n 's/^ID_SERIAL_SHORT=//p' | head -1)
+			D_WWN=$(printf '%s\n' "$props" | sed -n 's/^ID_WWN=//p' | head -1)
+		fi
+		if [ -z "$D_SERIAL" ]; then
+			D_SERIAL=$(lsblk -dno SERIAL "/dev/$parent" 2>/dev/null | head -1 | sed 's/ *$//')
+			[ -n "$D_SERIAL" ] && D_SERIAL="$D_SERIAL (브리지 값 — 하드 시리얼이 아니다)"
+		fi
 	fi
 	return 0
 }
@@ -405,7 +419,8 @@ disk_block() {           # 마운트지점
 	echo "  장치     : ${D_DEV:-(모름)}"
 	echo "  UUID     : ${D_UUID:-(모름)}"
 	[ -n "$D_MODEL" ]  && echo "  모델     : $D_MODEL"
-	[ -n "$D_SERIAL" ] && echo "  시리얼   : $D_SERIAL"
+	[ -n "$D_SERIAL" ] && echo "  시리얼   : $D_SERIAL   (하드에 새겨진 값. 라벨에 UUID 와 함께 적을 것)"
+	[ -n "$D_WWN" ]    && echo "  WWN      : $D_WWN"
 	if [ "${cap:-0}" -gt 0 ]; then
 		echo "  용량     : $(fmt_kb "$cap")   사용 $(fmt_kb "$used")  여유 $(fmt_kb "$avail")  (채움률 $((used*100/cap)) %)"
 	fi
