@@ -884,6 +884,12 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 케이블 교체 → 그래도 나면 보드. 상황 메일을 목록 + 책임자에게 보냈다(16:0x). 이어 chainwatch 가 `resumed` 를 자동으로 낸다
 (이번엔 진짜 재개다 — 사이에 4342·4343 이 있고 onlbit=0 이므로 판정이 맞아야 한다. 확인할 것).
 
+**곁들여 잡은 것 — 4342 가 웹 게이트를 막았다.** FADC 1(8 kB 빈 파일) · PRD 0 이라 영영 '미완결' 이고, §11.174 의
+건너뛰기는 완결 런에만 걸려 있었다. **완결 여부와 무관하게 FADC 파일이 `min_subruns` 미만이면 건너뛴다** — 단
+heartbeat 가 가리키는 수집 중인 런은 제외(막 시작한 런도 FADC 1 개다). 시험 12/12. `badrun.sh --scan --run 4342` 는
+`not_processed` 라 격리 대상은 아니다(§5.9 의 bad_raw 가 아니라 그냥 안 돌린 것). 16:27 회차는 4341 을 처리 중이었고(54분,
+legacy 페어링), 다음 회차부터 4342 를 건너뛰고 4344 이후로 간다.
+
 **곁들여 밟은 함정** — `for p in $(pgrep -f 'veto-check-4342.sh'); do kill $p; done` 이 **제 셸을 죽였다** (§11.142 의 4번,
 네 번째 재현). 패턴을 `'^bash veto-check-4342.sh$'` 처럼 앵커로 묶을 것. 1055 Hz 는 ch1·2·17·22·23 을 100 으로 되돌린 설정이
 처음 적용된 값이다(4341 의 919 Hz 에서 +15 %). run 4344 의 veto 패널은 `veto-check-4344.log` 가 확인한다.
