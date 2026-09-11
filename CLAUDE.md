@@ -866,6 +866,28 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.179 ★★ 로테이션 직후 FADC USB 오류 재발 — usbreset ×2 로 9분 만에 복구, 4342·4343 실패 (09-11 15:47 ~ 15:56)
+
+```
+15:46:50  run 4341 24 h 완주 마감(exit 0, onlbit=1). 마감 읽기에서 FADC USB3Read LIBUSB_ERROR_TIMEOUT 1건  ← §11.169 와 같은 자리
+15:47:16  run 4342 부팅 → STARTRUN 직후 FADC LIBUSB_ERROR_OVERFLOW → exit 2.  감시자 restart #1 (알림 both)
+15:48:10  run 4343 → FADC LIBUSB_ERROR_IO → exit 2.  restart #2
+15:48:53  감시자에 kill -TERM (backoff 중, 자식 없음) → 'rcsupervisor stop' 으로 정상 종료. 고아 0, 포트 비어 있음, lsusb 3
+          ★ 5회 실패 뒤 usb-recover 를 기다리면 런 번호 셋을 더 태운다. 같은 동작(usbreset)을 먼저 한 것뿐
+15:49:12  usbreset #1 → 확인 런 : exit 0 · LIBUSB 0 · 1055 Hz · ★ DRAM 정렬 8/8 실패      (§11.130·§11.171 세 번째 재현)
+15:52:49  usbreset #2 → 확인 런 : DRAM 8/8 정렬(5 4 4 4 3 3 3 3) · LIBUSB 0 · 1054 Hz
+15:56:29  감시자 재기동 (tmux daq:1.2, 같은 명령) → run 4344 Running, LIBUSB 0, DRAM 8/8, ~1055 Hz
+```
+
+이번엔 보드가 USB 에서 떨어지지 않아(dmesg 에 disconnect 없음) 전원 재투입이 필요 없었다. **오류 진행이 09-09 와 같다**
+(TIMEOUT → OVERFLOW/IO). 두 로테이션 연속으로 마감 읽기에서 났으므로 **FADC 보드·USB 케이블·허브를 봐야 한다** — 잦아지면
+케이블 교체 → 그래도 나면 보드. 상황 메일을 목록 + 책임자에게 보냈다(16:0x). 이어 chainwatch 가 `resumed` 를 자동으로 낸다
+(이번엔 진짜 재개다 — 사이에 4342·4343 이 있고 onlbit=0 이므로 판정이 맞아야 한다. 확인할 것).
+
+**곁들여 밟은 함정** — `for p in $(pgrep -f 'veto-check-4342.sh'); do kill $p; done` 이 **제 셸을 죽였다** (§11.142 의 4번,
+네 번째 재현). 패턴을 `'^bash veto-check-4342.sh$'` 처럼 앵커로 묶을 것. 1055 Hz 는 ch1·2·17·22·23 을 100 으로 되돌린 설정이
+처음 적용된 값이다(4341 의 919 Hz 에서 +15 %). run 4344 의 veto 패널은 `veto-check-4344.log` 가 확인한다.
+
 #### 11.178 ★ SADC ch2 도 100 으로 (사용자 지시, 2026-09-10 18:4x) — run 4342 부터
 
 §11.177 의 제안대로. 설정 파일의 활성 THR 줄은 이제 `180 100 100 150 150 150 200 200 230 300 220 180 250 280 280 300
@@ -2840,9 +2862,9 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4341 (09-10 15:47 부터, 24h 로테이션). ch1·17·22·23 문턱을 100 으로 되돌린 첫 런 (§11.175 · §11.177)
-           계수율 ~922 Hz. veto 719 Hz, 패널 0·8·11 회복, 패널 1 은 -45 % (ch2 150) → ch2 도 100 으로 바꿔 두었다.
-           run 4342 (09-11 15:47) 부터 적용, veto-check-4342.log 가 확인한다 (§11.178)
+수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
+           ★ 로테이션 직후 FADC USB 오류가 두 번째(09-09 · 09-11) — 4342·4343 실패, usbreset ×2 로 복구.
+             다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
 후처리     postrun --follow --jobs 3 --lag 3
@@ -2876,7 +2898,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
-§11.178         ★ ch2 도 100 으로 (run 4342 부터). 패널 1 회복 기대
+§11.179         ★ 09-11 로테이션 직후 FADC USB 오류 재발 → 4342·4343 실패, usbreset ×2 로 9분 만에 복구 (run 4344)
+§11.178         ★ ch2 도 100 으로 (run 4344 부터 적용). 패널 1 회복 기대
 §11.177         ★ 첫 로테이션 4340→4341 정상, 문턱 되돌림 적용(918 Hz). chainwatch 가 rotate 를 resumed 로 오판해
                 목록에 오보 → DB 시각이 텍스트·수집 중 stime NULL. 고치고 정정 메일 (시험 픽스처는 실제 형식으로!)
 §11.176         ★ 구글 발행 가동 — 시트(DAQ_runsummary 탭, gid 511745186 ★ 0 금지) + 드라이브 그림 20장, cron 27분.
