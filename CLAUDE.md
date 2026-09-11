@@ -533,8 +533,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - 단위 테스트 없음. config 파싱 / 머저 판정 / 비트마스크 디코딩은 순수 함수라 쉽다
 - ~~`storage-backup.sh` 가 적는 시리얼이 하드 시리얼이 아니다~~ **2026-09-11 해결** — `udevadm` 의 `ID_SERIAL_SHORT` + `ID_WWN`
   으로 바꿨다 (§11.181). 메일에 '시리얼 : ZK206014' 처럼 제조사 값이 실린다
-- **`storage-backup.sh` 가 유령 마운트를 감지하지 못한다.** 독이 떨어지면 rsync 가 파일 수천 개를 EIO 로 다 시도한 뒤에야
-  실패로 끝나 몇 시간 동안 알림이 없다 (§11.180). 연속 EIO 에서 끊고 메일, 전송 중 `findmnt` 장치 실재 검사.
+- ~~`storage-backup.sh` 가 유령 마운트를 감지하지 못한다~~ **2026-09-12 해결** — `disk_alive` 폴링 + 즉시 메일 (§11.182)
 - **full 로 옮긴 조각이 `parts_index.txt` 에 안 남는다.** 런의 마지막 조각이 어느 하드에 갔는지
   `backup_log.txt` 를 뒤져야 한다. full 도 색인에 남길 것 (§11.170)
 - ~~dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
@@ -866,6 +865,33 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.182 ★★ 백업 하드 이탈 감지 + 즉시 메일 · 시리얼(by-id) 마운트 (사용자 지시, 09-12 새벽)
+
+**재개 확인 (09-11 23:39)** — 사용자가 umount·e2fsck·재마운트 뒤 같은 명령으로 띄웠다. `/backup_hdd` = sdc1(ZK206014,
+실재), 002455 를 이어서 전송 중(50 MB/s), 21:03 이후 dmesg 에 이탈 없음.
+
+**이탈 감지 (commit caa34ee, code9 로 배포)** — §11.180 의 백로그 둘을 한 번에.
+```
+disk_alive()   마운트돼 있고 · findmnt 의 장치가 /dev 에 실재하고 · ro 로 강제되지 않았을 때만 0
+전송 중        rsync 를 뒤에 두고 ALIVE_POLL(기본 30 s)마다 disk_alive. 죽으면 rsync 를 세우고 그 자리에서
+               '전송 도중 떨어졌습니다' 메일(findmnt·/dev·dmesg 요약 + 복구 명령) → exit 1. 다음 하드로 안 넘어간다
+               (독은 한 USB 장치라 둘이 같이 떨어진다). 원본 무손실, 간 파일은 다음 회차가 건너뛴다
+회차 시작 전   disk_alive 가 거짓이면 '유령 마운트' 메일 + exit 1. rsync 를 시작하지 않는다
+시험           tests/storage-backup-disklost.test.sh 32 (느린 가짜 rsync 도중 훅의 disk_alive 를 뒤집는다 — 5 초 안에 세운다)
+               + 기존 KR 107 · EN 107 · 패리티 27 · 시리얼 10.  ★ 스위트를 병렬로 돌리면 서로 간섭한다 — 순서대로
+```
+**밟은 것** — ① 기존 훅이 `disk_alive` 를 안 갈아끼워 실제 함수가 임시 디렉터리를 '죽음' 으로 읽어 65 건이 깨졌다 →
+훅에 `disk_alive()` 가 없으면 `disk_is_mounted` 를 따르게. ② 폴링 30 s 가 짧은 시험 전송마다 붙어 스위트가 1,700 s 를
+넘겼다 → 시험은 `BACKUP_ALIVE_POLL=1`. **돌고 있는 회차(23:39 시작)는 옛 inode 라 다음 회차부터 적용.**
+
+**제조사 시리얼로 마운트** — udev 의 `/dev/disk/by-id/ata-<모델>_<시리얼>-part1` 링크로 된다 (실측) :
+```
+sudo mount /dev/disk/by-id/ata-ST2000DM008-2FR102_ZK206014-part1 /backup_hdd
+sudo mount /dev/disk/by-id/ata-ST2000DM006-2DM164_Z4ZBXGAA-part1 /backup_hdd_2
+새 하드 이름 찾기 : ls -l /dev/disk/by-id/ | grep ata-      (scsi-…RANDOM__… 은 브리지 값 — 쓰지 말 것)
+fstab : /dev/disk/by-id/ata-…-part1  /backup_hdd  ext4  defaults,nofail,x-systemd.device-timeout=10  0 2
+```
 
 #### 11.181 ★ 백업 메일에 진짜 하드 시리얼 (사용자 지시, 2026-09-11 밤)
 
@@ -2927,8 +2953,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       ★ 2회차 멈춤 (09-11 21:03 독 이탈, §11.180). /backup_hdd 유령 마운트, 회차는 EIO 로 헛돎.
-           사람이 pkill → umount → e2fsck /dev/sdc1 → mount → 재개. 002455 의 62 % 남음. 독 교체 검토
+백업       2회차 재개 (09-11 23:39, §11.182). /backup_hdd = ZK206014 · /backup_hdd_2 = Z4ZBXGAA. 002455 전송 중.
+           code9 는 이탈 감지판(다음 회차부터). 독 교체 검토 (§11.180)
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
                 시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
@@ -2955,6 +2981,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.182         ★ 백업 하드 이탈을 전송 중에 감지해 즉시 메일 (disk_alive 폴링). by-id 시리얼 마운트 명령
 §11.181         ★ 백업 메일에 진짜 하드 시리얼(udevadm ID_SERIAL_SHORT + WWN). code9 배포, 다음 회차부터
 §11.180         ★ 외장하드 백업 2회차 : 09-11 21:03 전송 중 독 이탈 → 유령 마운트, rsync EIO 헛돎. 사람이 umount·e2fsck·재마운트
 §11.179         ★ 09-11 로테이션 직후 FADC USB 오류 재발 → 4342·4343 실패, usbreset ×2 로 9분 만에 복구 (run 4344)
