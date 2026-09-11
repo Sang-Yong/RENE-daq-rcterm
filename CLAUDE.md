@@ -531,9 +531,8 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   → PID 파일 + `flock`
 - rate가 벽시계가 아니라 DAQ 보고 시간 기준 → ns 카운터 정지 시 순간 rate 미정의
 - 단위 테스트 없음. config 파싱 / 머저 판정 / 비트마스크 디코딩은 순수 함수라 쉽다
-- **`storage-backup.sh` 가 적는 시리얼이 하드 시리얼이 아니다.** `lsblk -dno SERIAL`(`storage-backup.sh:224`)은
-  USB 브리지가 지어낸 `RANDOM__…` 을 낸다. `udevadm info --query=property` 의 `ID_SERIAL_SHORT` 로 바꿀 것.
-  메일로 하드를 가려내는 것이 목적이었는데 그 값으로는 못 가린다 (§11.170)
+- ~~`storage-backup.sh` 가 적는 시리얼이 하드 시리얼이 아니다~~ **2026-09-11 해결** — `udevadm` 의 `ID_SERIAL_SHORT` + `ID_WWN`
+  으로 바꿨다 (§11.181). 메일에 '시리얼 : ZK206014' 처럼 제조사 값이 실린다
 - **`storage-backup.sh` 가 유령 마운트를 감지하지 못한다.** 독이 떨어지면 rsync 가 파일 수천 개를 EIO 로 다 시도한 뒤에야
   실패로 끝나 몇 시간 동안 알림이 없다 (§11.180). 연속 EIO 에서 끊고 메일, 전송 중 `findmnt` 장치 실재 검사.
 - **full 로 옮긴 조각이 `parts_index.txt` 에 안 남는다.** 런의 마지막 조각이 어느 하드에 갔는지
@@ -867,6 +866,15 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.181 ★ 백업 메일에 진짜 하드 시리얼 (사용자 지시, 2026-09-11 밤)
+
+`disk_ident()` 가 `lsblk -dno SERIAL` 대신 **`udevadm info --query=property` 의 `ID_SERIAL_SHORT` 와 `ID_WWN`** 을 읽는다
+(root 불필요). 저장소 서버 실측 : lsblk 는 `RANDOM__7EA1E3A88F9D`, udevadm 은 `ZK206014` / `0x5000c500c8b28f6e`. udevadm 이 없거나
+비면 lsblk 로 물러나되 `(브리지 값 — 하드 시리얼이 아니다)` 를 붙인다. 메일 본문에 `시리얼 : ZK206014 (하드에 새겨진 값 …)` 과
+`WWN : …` 두 줄. 한/영 두 판본 같은 패치 (commit 23e3ede). 시험 `tests/storage-backup-serial.test.sh` 10 건(가짜 findmnt/lsblk/udevadm)
++ 기존 107 + 패리티 27 통과. 저장소 서버에 `code9` 로 배포(이전 판은 `.bak-<시각>`). **★ 지금 헛도는 회차(§11.180)는 옛 inode 를
+붙들고 있어 다음 회차부터 적용된다.** 라벨은 여전히 UUID 가 정본이고 시리얼은 병기용이다.
 
 #### 11.180 ★★ 외장하드 백업 2회차 — 전송 중에 독이 떨어졌다 (09-11 21:03). 50 MB/s 도 안전하지 않다
 
@@ -2947,6 +2955,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.181         ★ 백업 메일에 진짜 하드 시리얼(udevadm ID_SERIAL_SHORT + WWN). code9 배포, 다음 회차부터
 §11.180         ★ 외장하드 백업 2회차 : 09-11 21:03 전송 중 독 이탈 → 유령 마운트, rsync EIO 헛돎. 사람이 umount·e2fsck·재마운트
 §11.179         ★ 09-11 로테이션 직후 FADC USB 오류 재발 → 4342·4343 실패, usbreset ×2 로 9분 만에 복구 (run 4344)
 §11.178         ★ ch2 도 100 으로 (run 4344 부터 적용). 패널 1 회복 기대
