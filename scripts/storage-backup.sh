@@ -724,16 +724,20 @@ run_pass() {
 		fi
 
 		#  조각이 어느 하드에 있는지 남긴다 (부분일 때만 의미가 있다)
+		#  ★ full 도 색인에 남긴다 (2026-09-12, §6 백로그). 그 전엔 full 로 옮긴 런의 소재를 backup_log 에서만
+		#    찾을 수 있었다. 열 1~7 은 그대로(옛 독자 호환), 8~12 에 mode · 마운트 · 모델 · 시리얼 · 용량KB 를 붙인다.
+		#    이 색인이 구글시트(back_up_hdd_log) 자동 등재의 원천이다 (scripts/backup-sheetlog.sh).
 		if [ "$MODE" = part ]; then
 			{
 				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B"
 				echo "# $(head -1 "$PLANDIR/list.$FOLDER_NAME") ~ $(tail -1 "$PLANDIR/list.$FOLDER_NAME")"
 				cat "$PLANDIR/list.$FOLDER_NAME"
 			} >> "$DEST/$FOLDER_NAME/.part_manifest.txt" 2>/dev/null
-			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
-				"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
-				"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" >> "$PARTS_INDEX" 2>/dev/null
 		fi
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
+			"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
+			"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" "$MODE" "$MOUNT_POINT" "${D_MODEL:-}" "${D_SERIAL:-}" \
+			"$(disk_cap_kb "$MOUNT_POINT")" >> "$PARTS_INDEX" 2>/dev/null
 
 		#  ★ 지우기 직전에 원본을 한 번 더 확인한다.
 		#    계획을 세운 뒤 전송이 끝나기까지 몇 시간이 걸린다. 그 사이 다른 작업이

@@ -743,16 +743,19 @@ run_pass() {
 		fi
 
 		#  Record which piece went to which disk (only meaningful for a part)
+		#  Full moves are indexed too (2026-09-12); columns 1-7 unchanged, 8-12 add mode, mount, model, serial, capKB.
+		#  This index feeds the automatic sheet log (scripts/backup-sheetlog.sh).
 		if [ "$MODE" = part ]; then
 			{
 				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B"
 				echo "# $(head -1 "$PLANDIR/list.$FOLDER_NAME") ~ $(tail -1 "$PLANDIR/list.$FOLDER_NAME")"
 				cat "$PLANDIR/list.$FOLDER_NAME"
 			} >> "$DEST/$FOLDER_NAME/.part_manifest.txt" 2>/dev/null
-			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
-				"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
-				"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" >> "$PARTS_INDEX" 2>/dev/null
 		fi
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
+			"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
+			"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" "$MODE" "$MOUNT_POINT" "${D_MODEL:-}" "${D_SERIAL:-}" \
+			"$(disk_cap_kb "$MOUNT_POINT")" >> "$PARTS_INDEX" 2>/dev/null
 
 		#  * Check the source once more, right before deleting.
 		#    Hours pass between building the plan and finishing the transfer, and
