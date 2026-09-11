@@ -534,6 +534,8 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **`storage-backup.sh` 가 적는 시리얼이 하드 시리얼이 아니다.** `lsblk -dno SERIAL`(`storage-backup.sh:224`)은
   USB 브리지가 지어낸 `RANDOM__…` 을 낸다. `udevadm info --query=property` 의 `ID_SERIAL_SHORT` 로 바꿀 것.
   메일로 하드를 가려내는 것이 목적이었는데 그 값으로는 못 가린다 (§11.170)
+- **`storage-backup.sh` 가 유령 마운트를 감지하지 못한다.** 독이 떨어지면 rsync 가 파일 수천 개를 EIO 로 다 시도한 뒤에야
+  실패로 끝나 몇 시간 동안 알림이 없다 (§11.180). 연속 EIO 에서 끊고 메일, 전송 중 `findmnt` 장치 실재 검사.
 - **full 로 옮긴 조각이 `parts_index.txt` 에 안 남는다.** 런의 마지막 조각이 어느 하드에 갔는지
   `backup_log.txt` 를 뒤져야 한다. full 도 색인에 남길 것 (§11.170)
 - ~~dataflow 3단계가 `/scratch` 로 옮기는 데 12시간이 걸린다. 100 Mb 링크(§11.12)를
@@ -865,6 +867,29 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.180 ★★ 외장하드 백업 2회차 — 전송 중에 독이 떨어졌다 (09-11 21:03). 50 MB/s 도 안전하지 않다
+
+사용자 : "하드 백업이 실질적으로 중단된 것 같은데 확인해 달라." 실측(읽기 전용, `ssh store`) :
+
+```
+09-10 18:52  1회차 뒤 새 하드 2장으로 재개. 002454 full → /backup_hdd_2, 002455 part … → 18:52 code=3 (하드 소진 메일)
+09-11 18:26  회차 재시작 : 002455 full → /backup_hdd (sdb1).  38 % (511 GB) 까지 감
+09-11 21:03:10  ★ USB 독 이탈 — device offline (sdb) → Aborting journal → sdb1 read-only.  21:03:18 sdc·sdd 로 재열거
+             /backup_hdd 는 사라진 sdb1 을 붙든 유령 마운트 (§11.124 와 같다). /backup_hdd_2 는 sdd1 이 새 UUID 로 자동 마운트
+이후        rsync 가 파일마다 Input/output error (55 건) 를 내며 헛돈다. 화면의 '50 MB/s' 는 죽은 장치로의 시도다
+알림        없음 — 스크립트는 rsync 가 *끝나야* 알리는데 끝나지 않는다. 마지막 메일은 09-10 18:50 '하드 소진'
+```
+
+**★ 이번엔 전송 중이었다.** §11.170 이 "50 MB/s 에서 전송 중 이탈 0" 으로 채워 둔 자리를 뒤집는다. 09-07 은 유휴 중 이탈,
+이번은 50 MB/s 전송 도중. 속도 제한으로는 못 막는다 — **독(전원·케이블·브리지)을 봐야 한다** (§11.123 의 A).
+잃은 것은 없다 : 대조 전엔 원본을 안 지우므로 `/data/RAW/002455` 그대로, 쓰인 511 GB 는 다음 rsync 가 건너뛴다.
+
+**복구 (root, 사람)** : `pkill -TERM -f data_backup_simple_code9.sh` → `sudo umount -l /backup_hdd` → `sudo e2fsck -f -y /dev/sdc1`
+(옛 sdb1) → `sudo mount /dev/sdc1 /backup_hdd` → `code9.sh --dry-run` → 같은 명령. 002455 의 남은 62 % 부터 이어진다.
+
+**스크립트 개선 후보 (§6)** : ① rsync 가 EIO 를 연속으로 내면 그 자리에서 끊고 메일 (지금은 파일 5,948 개를 다 시도한 뒤에야
+실패로 끝난다) ② 회차 시작·전송 중 주기적으로 `findmnt` 의 장치가 `/dev` 에 실재하는지 검사 (유령 마운트 감지).
 
 #### 11.179 ★★ 로테이션 직후 FADC USB 오류 재발 — usbreset ×2 로 9분 만에 복구, 4342·4343 실패 (09-11 15:47 ~ 15:56)
 
@@ -2894,8 +2919,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       ★ 1회차 끝 (09-09 13:08, code=3). 하드 8장(A~H) 참 · 런 1,681 개 남음 · 실패 0 (§11.170)
-           이어가려면 새 하드 2장 + 같은 명령 (002452 의 1,828 개부터). G·H 는 아직 마운트된 채 — 뽑기 전 umount
+백업       ★ 2회차 멈춤 (09-11 21:03 독 이탈, §11.180). /backup_hdd 유령 마운트, 회차는 EIO 로 헛돎.
+           사람이 pkill → umount → e2fsck /dev/sdc1 → mount → 재개. 002455 의 62 % 남음. 독 교체 검토
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
                 시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
@@ -2922,6 +2947,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.180         ★ 외장하드 백업 2회차 : 09-11 21:03 전송 중 독 이탈 → 유령 마운트, rsync EIO 헛돎. 사람이 umount·e2fsck·재마운트
 §11.179         ★ 09-11 로테이션 직후 FADC USB 오류 재발 → 4342·4343 실패, usbreset ×2 로 9분 만에 복구 (run 4344)
 §11.178         ★ ch2 도 100 으로 (run 4344 부터 적용). 패널 1 회복 기대
 §11.177         ★ 첫 로테이션 4340→4341 정상, 문턱 되돌림 적용(918 Hz). chainwatch 가 rotate 를 resumed 로 오판해
