@@ -889,6 +889,54 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.187 ★★ 백업 기록 시트 전면 재작성 — 하드를 꽂아 훑고, (런, 시각) 순으로, 라벨 부여 (사용자 지시, 09-12 밤)
+
+사용자 : "새 하드를 꽂기 전에 기존 백업 하드를 차례로 끼워 로그 시트를 총체적으로 재정비하자. 런 번호·시간순 정렬, 하드마다 제조사
+시리얼, 실물에 붙일 라벨 이름. 제일 앞의 두 장을 마운트했다." **꽂힌 두 장은 §11.170 의 A·B 가 아니라 2026-04 의 첫 백업이었다.**
+
+```
+/backup_hdd    sdb1  ST2000DM006-2DM164  SN Z4ZBZE87  UUID 590a79bc  포맷 04-15, 복사 04-17~04-20  런 폴더 753 (자료 있는 런 203 · 로그 파일만 539 · 빈 11)
+                     16,424 파일 · 1.496 TB · run 000938~001740.  큰 런 : 001077(6,463 · 서브런 02169~05399) · 001092 · 001093 · 001326 · 001503
+/backup_hdd_2  sdc1  ST2000DM006-2DM164  SN Z4ZBXG6X  UUID bf560411  포맷 04-28, 복사 04-28 22:25 ~ 05-01 10:26  run 001741 만 (3,548 파일 · 서브런 0~769 · 1.697 TB)
+★ 이 런들은 서버 /data/RAW 에 하나도 없다 (최소 런 002444) — 이 두 장이 유일본.  로그가 없어 백업 시각은 파일 ctime 으로 되찾았다
+  (rsync -a 는 mtime 만 보존하고 ctime 은 복사 시각이다).  '로그 파일만 있는 런' 539 개는 PRD/Run_DLY_THR.log 1 kB 하나뿐 = 자료가 이 하드에 없다
+```
+
+**도구 셋 (commit 아래)** — 하드를 꽂을 때마다 `scripts/backup-sheet-rebuild.sh --scan --commit` 한 줄이면 된다.
+
+| 무엇 | 하는 일 |
+|---|---|
+| `tools/sheetlog/disk-inventory-remote.sh` | 저장소 서버에서 돈다. 꽂힌 하드의 시리얼·모델·WWN·용량·포맷 시각 + 런마다 개수·바이트·서브런 범위·복사 시각(ctime)·매니페스트·종류별 개수. 읽기 전용 |
+| `scripts/backup-disk-inventory.sh` | 위를 ssh 로 돌려 `/Data_ssd/LOG/backup-inventory/<시리얼>_<UUID8>.tsv` 로 남긴다 (하드마다 한 파일, 재스캔이 이긴다). 사본은 `docs/backup-disks/` 에 커밋 — **하드가 유일본이라 목록도 저장소에 있어야 한다** |
+| `tools/sheetlog/rebuild_backup_sheet.py` | 스캔 + 서버 기록(parts_index · backup_log, code7 시절 `탐색된 외장하드 UUID:` 줄도 하드 경계로) + 기존 시트의 손 열(KHU · 보관 위치 · 메모, 빈 개수/용량)을 합쳐 **(런, 시각) 정렬** 25 열 표로 다시 쓴다. 기록에도 스캔에도 없는 옛 행은 그대로 옮긴다(행이 사라지지 않는다). 쓰기 전 백업 · 쓴 뒤 되읽어 대조. `--sheet-tsv` 는 시험용 |
+| `scripts/backup-sheet-rebuild.sh` | 서버 기록을 받아 위를 부른다. `--scan` 이면 스캔부터. 기본 미리보기, `--commit` 라야 쓴다 |
+| `docs/backup-disks/aliases.tsv` | 재포맷으로 UUID 가 바뀐 관계 (A→C · B→D, 시트 30·31 행 메모 근거). 옛 UUID 기록은 새 하드 라벨 + `WIPED` |
+| `docs/backup-disks/known-serials.tsv` | 안 꽂힌 하드의 시리얼 출처 (시트 메모 · §11.170 · udevadm). 스캔 파일이 생기면 그것이 이긴다 |
+| `docs/backup-disks/disks.tsv` · `docs/BACKUP-DISKS.md` | **라벨 정본 + 사람용 표.** 도구가 갱신. 한 번 준 라벨은 다시 바뀌지 않는다 |
+
+**라벨 규칙 : `RENE-BK-<처음 담은 날짜 YYYYMMDD>`, 같은 날 두 장이면 `-A`/`-B`.** 나중에 하드가 더 발견돼도 앞 번호가 밀리지 않고,
+스티커만 봐도 어느 시기 자료인지 안다. 시리얼(udevadm `ID_SERIAL_SHORT`)을 병기한다. 지금 13 장 (§BACKUP-DISKS.md) :
+
+```
+RENE-BK-20260417  Z4ZBZE87 (스캔)   RENE-BK-20260501  Z4ZBXG6X (스캔)   RENE-BK-20260901  ? (834a597b, code7/8 시절 29 런)
+RENE-BK-20260903-A  ZK206K95 (C, 옛 A 재포맷)   RENE-BK-20260903-B  ZFL3GHHS (D, 옛 B 재포맷)
+RENE-BK-20260907-A  ? (E)   RENE-BK-20260907-B  ? (F)   RENE-BK-20260908  ZK206APL (G)   RENE-BK-20260909-A  ZK2060CP (H)
+RENE-BK-20260909-B  ? (d215edd1)   RENE-BK-20260910  ? (73329c97)   RENE-BK-20260912-A  ZK206014   RENE-BK-20260912-B  Z4ZBXGAA
+```
+
+**★ §11.170 의 표를 고친다 — A·B 는 별개 하드가 아닐 가능성이 크다.** 시트 30·31 행 메모(09-05, udevadm)에 "A(e39bd49a)는 09-04 00:12 에
+재포맷돼 C(937a91bc)가 됐고 B(09387574)도 00:13 에 D(27fe8b47)가 됐다. 그 파일들은 어느 하드에도 없고 KHU 에서 복구 가능" 이라 적혀 있다.
+즉 **002443 의 첫 두 조각(8,696 + 8,061 개, 3.73 TB)은 외장하드에 없다** — KHU 의 RAW/PRD/PNG 가 사본이다. 새 표는 그 두 기록을
+`WIPED — disk reformatted` 로 실었다. 실물을 꽂아 확정되면 `aliases.tsv` 의 note 를 갱신할 것.
+
+**결과 (09-12 23:34)** — 시트 53 행 → **798 행** (스캔 744 + 기록 55 − 겹침), 하드 13, 되읽어 대조 통과. 쓰기 전 백업
+`/Data_ssd/LOG/backup-sheetlog/sheet-before-rebuild-20260912233432.tsv`. 매시 37분의 `append_backup_rows.py` 는 최대 시각·최대 No 기준이라 이
+표 위에 그대로 붙는다 (dry-run 으로 확인). 시험 `tests/backup-rebuild.test.sh` **50 건** (정렬 · 라벨 안정성 · WIPED · 손 열 보존 · 옮김 ·
+스캔 대조 · log-only · 헤더 검사 · append 호환).
+
+**다음** — 사용자가 다음 하드 두 장을 꽂을 때마다 `scripts/backup-sheet-rebuild.sh --scan --commit`. 시리얼 `?` 인 여섯 장(834a597b · E · F ·
+d215edd1 · 73329c97 · 그리고 08-27 의 ZK2060HX 가 어느 것인지)이 그때 채워진다. 라벨은 그 뒤에 인쇄해 붙인다.
+
 #### 11.186 ★★ 2회차 백업 세션이 마무리 코드에서 죽었다 — 하드 2장 가득, 종료 메일 누락, cron 메일은 옛 줄을 인용 (09-12 저녁)
 
 사용자 : "백업 세션 끝나면 종료 메일 제대로 왔는지 확인. 시트 링크가 없는 것 같다. 시트 자동 기록은 어떻게 설정하나, 니가 해라."
@@ -3108,6 +3156,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.187         ★ 백업 기록 시트 전면 재작성 — 하드를 꽂아 스캔(disk-inventory) + 기록 + 손 열 → (런, 시각) 정렬 798 행, 라벨
+                RENE-BK-<날짜>. 04월 첫 하드 두 장(Z4ZBZE87 · Z4ZBXG6X, run 000938~001741) 은 서버에 없는 유일본. A·B 는 재포맷돼 C·D
 §11.186         ★ 2회차 백업 세션이 마무리 코드에서 죽음(제자리 덮어쓰기) — 하드 2장 가득, 종료 메일 누락, 자료 손실 0.
                 cron 종료 알림은 세션 뒤의 code= 줄만 인용 + 시트 링크. 시트 자동 등재는 이미 cron 이 한다 (53 행)
 §11.185         ★ 세션 없이 도는 것/안 도는 것 표 (§0.0). 백업 세션 판 확인을 cron 으로. '여유런 3개 자동 갱신' 규칙은 없음
@@ -3183,7 +3233,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
 | **하드 E·F 를 다시 꽂으면 `e2fsck -f` 먼저** | 09-07 21:15 에 마운트된 채 독에서 떨어져 두 하드의 저널이 끊겼다 | §11.170 |
 | G·H 를 뽑기 전에 `sudo umount` | 독은 한 USB 장치라 한쪽을 뽑으면 둘 다 떨어진다 | §11.170 |
-| 시트의 `Disk Label` · `Storage Location` | 내가 알 수 없는 값이다 | — |
+| **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 | §11.187 |
+| 시트의 `Storage Location` | 내가 알 수 없는 값이다 (`Disk Label` 은 이제 도구가 채운다) | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
 | NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |
 | fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |

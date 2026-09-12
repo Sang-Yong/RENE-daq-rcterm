@@ -1,0 +1,3 @@
+#disk	/backup_hdd_2	/dev/sdc1	bf560411-cf2b-4ef2-96f7-a58f5e6a5081	ST2000DM006-2DM164	Z4ZBXG6X	0x5000c500b223abfe	1967846088704	1697369804800	2026-04-28 16:29:21	2026-09-12 23:31:14
+#cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other
+001741	3548	1697352969916	00000	00769	FADC_001741.root.00000	SADC_001741.root.00769	2026-04-28 22:25:30	2026-05-01 10:26:14	0	770	770	670	669	669	0
