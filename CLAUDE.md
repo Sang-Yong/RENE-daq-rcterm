@@ -86,6 +86,24 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/*.pptx` | 발표 자료 — 종합(한/영) · 운용자용(한). **저장소에 없다** — `.gitignore` 대상이라 `tools/slides/make_*.py` 로 만들어 쓴다 |
 | `tools/slides/README.md` | 발표자료를 코드로 만드는 이유와 방법. `audit.py` 로 배치를 점검한다 |
 
+### ★ 무엇이 스스로 돌고, 무엇이 Claude 세션이 있어야 하는가 (2026-09-12 확정)
+
+사용자 지시 : "터미널이 다 꺼지고 연결이 끊겨도 자동으로 돌아가게." 실측으로 가른 표다.
+**"여유런 3개마다 기록 페이지 자동 갱신" 같은 규칙은 없고 있을 수도 없다** — 기록 페이지(아티팩트)는
+Claude 도구로만 쓰이므로 세션이 있어야 갱신된다. 런 단위 기록은 아래 cron 들이 시트로 자동 등재한다.
+
+| 층 | 무엇 | 터미널 꺼짐 | PC 재부팅 |
+|---|---|---|---|
+| **cron** (crontab -l) | chainwatch 5분 · mailq-send 5분 · sheetlog-auto :07 · websummary :27 · backup-sheetlog :37 | 산다 | 산다 |
+| **tmux `daq`** | rcsupervisor(수집) · postrun · dataflow · rcmon | 산다 (detach) | ★ 죽는다 → `scripts/daq-tmux.sh --start` |
+| 저장소 서버 | code9 백업 세션 (nohup) | 산다 | ★ 죽는다 → 재마운트 뒤 같은 명령 |
+| Claude 세션 | 이상 상황 문장 메일 · 기록 페이지(아티팩트) 갱신 · CLAUDE.md 기록 | ★ 죽는다 | ★ 죽는다 |
+
+세션이 없을 때 빠지는 것은 **사람이 읽는 문장 메일**뿐이다. 자동 메일(감시자 restart/fatal · chainwatch
+chain_down/rate_low/rotate/resumed · 백업 스크립트의 가득참/이탈/소진 · backup-sheetlog 의 세션 시작/종료·등재)은
+전부 cron/스크립트가 보낸다. **자동 메일이 오면 그때 세션을 열어 CLAUDE.md 와 기록 페이지를 갱신한다.**
+재부팅 뒤 복구 순서는 §0.0 의 5)~7) 과 §11.119.
+
 **작업을 마칠 때마다 해야 하는 것** — 이것을 빠뜨리면 다음 PC 에서 맥락이 끊긴다.
 사용자와 **프로젝트 종료를 합의할 때까지** 계속한다.
 
@@ -864,6 +882,18 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.185 ★ 세션 없이도 도는가 — 점검과 마무리 (사용자 지시, 09-12 오후)
+
+사용자 : "여유런 3개 남겼을 때마다 기록 페이지를 자동 갱신하라고 했을 텐데 잘 되고 있나. 터미널이 꺼져도 돌게." **그런 규칙은
+문서에도 코드에도 없다** — 있는 것은 dataflow 의 `keep_ssd`(최근 런을 SSD 에 남김)와 postrun 의 `--lag 3`(서브런 3개 뒤따름)이고,
+기록 페이지는 Claude 세션이 있어야만 갱신된다. 런 단위 기록의 자동 등재는 이미 cron 이 한다(시트 3종 + HTML). §0.0 에 표로 못박았다.
+
+세션에 매여 있던 것 중 값어치 있는 하나를 cron 으로 옮겼다 — **백업 세션 시작/종료 + 새 판 판정** (`backup-sheetlog.sh`,
+잠금 파일 보유자로 pid 를 잡고 바뀌면 `backup_session` 사건으로 책임자 메일, build=NEW/OLD). 시험 39 건. 나머지 세션 감시
+(DAQ 이상 문장 메일)는 자동 메일이 이미 같은 사건을 보내므로 세션이 죽어도 빠지는 것은 문장뿐이다.
+
+로테이션 4344→4345 는 websummary :27 회차가 세션과 무관하게 처리했다(16:27 시작, dst-build 진행 확인).
 
 #### 11.184 ★★ 백업 하드 기록 시트 자동 등재 (사용자 지시, 09-12) — 그리고 full 도 색인에
 
@@ -3022,6 +3052,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.185         ★ 세션 없이 도는 것/안 도는 것 표 (§0.0). 백업 세션 판 확인을 cron 으로. '여유런 3개 자동 갱신' 규칙은 없음
 §11.184         ★ 백업 하드 기록 시트 자동 등재 (cron 37분, append_backup_rows.py). full 도 parts_index 에
 §11.183         ★ 백업 메일에 기록 시트 링크. 감시 명령줄의 스크립트 이름이 other_backup() 에 잡혀 시험을 깨뜨림 (pgrep -f ×5)
 §11.182         ★ 백업 하드 이탈을 전송 중에 감지해 즉시 메일 (disk_alive 폴링). by-id 시리얼 마운트 명령
