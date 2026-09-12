@@ -80,6 +80,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `.claude/skills/recovering-aborted-daq-runs/SKILL.md` | **런이 비정상 종료했을 때 무엇부터 하나.** Claude Code 가 증상을 보면 스스로 읽는다 |
+| `.claude/skills/RENE_daq_data_backup_management_skill/SKILL.md` | **외장하드 백업 관리 방법론** — RAW/PRD 나눠 담기 · 라벨 · 시트 재작성 · 배포 · 밟은 함정. 백업·하드·시트 작업이면 스스로 읽는다 (§11.189) |
 | `docs/RUNSUMMARY.md` | **런 서머리 모니터링의 구조 지도** — 파일 목록(신설/수정) · 원칙 · 산출물 · 검증 · 밖에서 이어서 보는 법. 모니터링을 이어받으면 여기부터 |
 | `tools/monitor/README.md` | 모니터링 5단계(2026-09-08~) — PRD/DST 에서 livetime·이벤트 수 -> DST(2차 프로덕션) -> IBD·Li/He·fast-n(예비) -> 효율 보정 rate 추이 -> 웹 표+발행 |
 | `config/dotfiles/README.md` | 터미널·편집기 설정이 왜 그렇게 되어 있는가. `claude-transcript` 도 여기 |
@@ -888,6 +889,29 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.189 ★★ 새 하드 두 장으로 RAW/PRD 백업 시작 준비 — 메일에 '담긴 것' 요약, 시트 점검, 스킬화 (사용자 지시, 09-13 01:1x)
+
+사용자 : "새 하드 두 장 ext4 로 포맷해 마운트했다. RAW/PRD 백업 시작. 시트 다시 점검. 메일에 시트 링크와 하드에 담긴 런 번호·RAW/PRD 요약을
+꼭 넣어라. 이 경험을 스킬로 만들어 두어라 (RENE_daq_data_backup_management_skill)."
+
+**새 하드 상태 (01:1x, 읽기 전용)** — `/backup_hdd` = Z4ZBXG5B (ext4, UUID 97b26e2e, 비어 있음) 이지만 **root 소유**, `/backup_hdd_2` 는
+**마운트돼 있지 않았다** (df 가 루트 디스크 886 G 를 보여줌). 둘 다 root 가 필요해 사용자에게 `chown` · 마운트를 부탁했다 (§11.148 의 그 함정).
+
+**메일 본문에 '담긴 것' 절 (한/영 같은 패치)** — `disk_contents()` 가 `parts_index` 에서 그 하드(UUID, 없으면 마운트지점)의 줄을 모아
+런마다 `런  part/full  RAW/PRD/ALL  개수  GB  서브런 범위  (시각)` 한 줄씩(최근 40 건) + 기록 시트 링크. 모든 메일의 하드 블록 뒤에 붙는다.
+시험 `storage-backup-only` 에 4 건 추가(요약 · 런 줄 · 서브런 · 링크). **★ 시험 도중에 스크립트를 고치면 안 된다** — 패리티가 한/영을 서로 다른
+시점에 읽어 2 건이 어긋났다(가짜 실패). 최종은 아무것도 안 고치는 상태에서 여섯 벌을 순서대로 다시 돌린 값 : **only 58 · 패리티 27 · 시트링크 10 · 이탈 32 · KR 107 · EN 107 전부 통과** (01:49).
+**배포 (01:49)** — code9 · code10 을 `.new` + `mv` 로 (md5 f3acb35d / 8bcdbbe6, inode 1610622041, 도는 세션 없음). 이전 판 `.bak-202609130149`.
+
+**시트 점검 (01:22)** — 헤더 25 열 · 1,426 행 · No 1~1426 연속 · (런, 시각) 정렬 · 라벨/시리얼 빈 칸 0 · Type = log-only 617 · full 463 ·
+full·RAW 323 · full·MERGED 3 · full·PRD 3 · part 17 · Notes 최대 456 자 · cron append dry-run 새 행 0.
+
+**스킬** `.claude/skills/RENE_daq_data_backup_management_skill/SKILL.md` — 어디에 무엇이 있나 · 라벨 규칙 · 백업 돌리기(RAW/PRD 순서) ·
+시트 · 하드 꽂고 빼기 · 배포 · 시험 · 밟았던 것 10 · 인수인계 순서. 백업/하드/시트/메일 일이면 자동으로 읽히고 `/RENE_daq_data_backup_management_skill` 로도 부른다.
+
+**시작 순서 (사용자가 chown·마운트를 마치면)** — `--dry-run` 둘 → `nohup … --disks /backup_hdd --only raw` → 끝나면(code=3 또는 done)
+`--disks /backup_hdd_2 --only prd`. 두 세션은 동시에 못 띄운다. 첫 메일에서 링크·요약을 확인한다.
 
 #### 11.188 ★★ 라벨을 RENE-<종류>-NNN 으로, 백업도 RAW 하드·PRD 하드로 나눠 담는다 (사용자 지시, 09-13 00:xx)
 
@@ -3297,6 +3321,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.189         ★ 메일에 '담긴 것'(런·part/full·RAW/PRD·개수·서브런) 요약 + 시트 링크. 백업 관리 스킬 신설. 새 하드 2장 RAW/PRD 시작 준비
 §11.188         ★ 라벨 RENE-<RAW|PRD|ALL>-NNN (날짜 규칙 대체) + code9 `--only raw|prd` 로 RAW 하드·PRD 하드를 따로 채운다.
                 옛 하드 두 장 더 스캔 (ZK206JXR = 001742_1 RAW · ZK206KFR = 001742_2 PRD + 18 런). 시트 818 행 · 하드 15
 §11.187         ★ 백업 기록 시트 전면 재작성 — 하드를 꽂아 스캔(disk-inventory) + 기록 + 손 열 → (런, 시각) 정렬 798 행, 라벨

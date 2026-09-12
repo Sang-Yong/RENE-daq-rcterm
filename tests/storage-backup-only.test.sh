@@ -42,6 +42,12 @@ for v in storage-backup.sh storage-backup-en.sh; do
    chk "  색인 8 열 = full (담을 부분은 통째로 들어갔다)" "$(tail -1 "$T/parts_index.txt" | cut -f8)" "full"
    grep -qE 'only=raw' "$T/backup_log.txt" && ok "세션 시작 줄에 only=raw" || bad "세션 줄" "$(grep -E '세션 시작|session start' "$T/backup_log.txt")"
    grep -qE 'RAW 만|RAW only' "$T/out.txt" && ok "기동 화면이 종류를 말한다" || bad "기동 화면" "$(grep -iE 'raw' "$T/out.txt" | head -2)"
+   #  종료 메일에 '담긴 것' 요약 : 런 · 종류 · 개수 · 서브런 (사용자 지시 2026-09-13) + 시트 링크
+   m=$(ls "$QUEUE"/*.mail 2>/dev/null | tail -1)
+   [ -n "$m" ] && grep -qE '담긴 것|Contents' "$m" && ok "메일에 '담긴 것' 요약" || bad "요약 없음" "$(grep -E '담긴|Contents' "$m" 2>/dev/null | head -2)"
+   [ -n "$m" ] && grep -qE '000001 +full +RAW +8 (개|files)' "$m" && ok "  000001 full RAW 8 개" || bad "  요약 줄" "$(grep -E '000001' "$m" 2>/dev/null | head -2)"
+   [ -n "$m" ] && grep -qE '서브런 00001~00004|subruns 00001~00004' "$m" && ok "  서브런 범위" || bad "  서브런 범위" "$(grep -E '000001' "$m" 2>/dev/null | head -2)"
+   [ -n "$m" ] && grep -qE 'gid=219954027' "$m" && ok "  시트 링크" || bad "  시트 링크 없음"
    echo "[$v] 이어서 --only prd (다른 하드) : PRD·PNG 만 옮기고 Merged 만 남는다"
    run_sut --only prd --disks "$T/hdd2"
    chk "exit 0" "$RC" "0"

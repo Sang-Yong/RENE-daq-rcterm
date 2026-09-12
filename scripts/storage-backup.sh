@@ -470,6 +470,27 @@ disk_block() {           # 마운트지점
 	fi
 }
 
+#  ★ 이 하드에 담긴 것 — 색인(parts_index)에서 이 UUID 의 줄을 모아 런마다 한 줄 (2026-09-13, 사용자 지시 : 메일만 보고 어느 런의
+#    RAW/PRD 가 어느 하드에 있는지 알 수 있어야 한다). 옛 판이 남긴 12 열 줄은 종류가 없으니 all 로 읽는다.
+disk_contents() {        # 마운트지점  (disk_block 뒤에 부른다 — D_UUID 를 쓴다)
+	local M=$1 idx=${PARTS_INDEX:-}
+	[ -s "$idx" ] || return 0
+	#  UUID 로 고른다. UUID 를 모르면(시험 훅 · 이상한 마운트) 마운트지점(9 열)으로 — 옛 12 열 줄엔 9 열이 있다
+	local sel; sel="(u!=\"\" && \$2==u) || (u==\"\" && \$9==m)"
+	local n; n=$(awk -F'\t' -v u="${D_UUID:-}" -v m="$M" "$sel" "$idx" | wc -l)
+	[ "$n" -gt 0 ] || return 0
+	echo "  담긴 것  : (색인 기준 $n 건 · 종류 RAW = 최상위 FADC·SADC, PRD = PRD·PNG, ALL = 둘 다)"
+	awk -F'\t' -v u="${D_UUID:-}" -v m="$M" "$sel {"'
+		mode=($8!="")?$8:"part"; cat=($13!="")?toupper($13):"ALL"; lo=""; hi=""
+		if (match($6,/\.root\.[0-9][0-9][0-9][0-9][0-9]$/)) lo=substr($6,RSTART+6,5)
+		if (match($7,/\.root\.[0-9][0-9][0-9][0-9][0-9]$/)) hi=substr($7,RSTART+6,5)
+		if (lo!="" && hi!="" && lo>hi) { t=lo; lo=hi; hi=t }
+		rng=(lo!="" && hi!="")? lo"~"hi : "-"
+		printf "    %s  %-4s %-6s %6d 개 %8.1f GB  서브런 %s  (%s)\n", $1, mode, cat, $4, $5/1e9, rng, substr($3,1,16) }' "$idx" | tail -40
+	[ "$n" -gt 40 ] && echo "    … (앞 $((n-40)) 건은 색인 파일에)"
+	echo "  기록 시트: ${SHEET_URL:-}"
+}
+
 # =====================================================================
 #  한 회차 — 하드 하나를 채운다.  code8 의 「계획 -> 실행」 이 이 안에 있다.
 #
@@ -1118,7 +1139,7 @@ EOF
 	TOT_SKIP=$((TOT_SKIP + N_SKIP))
 	{
 		echo "[$M]"
-		disk_block "$M"
+		disk_block "$M"; disk_contents "$M"
 		echo "  이번 하드: 옮김 $N_OK 개 · 나눠담음 $N_PART 개 · 실패 $N_FAIL 개 · $(fmt_kb "$MOVED_KB") · ${ROUND}회차 · 소요 $(fmt_sec "$D_EL")"
 		echo ""
 	} >> "$PLANDIR/disks.txt"

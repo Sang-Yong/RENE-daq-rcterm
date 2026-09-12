@@ -487,6 +487,27 @@ disk_block() {           # mount point
 	fi
 }
 
+#  * What this disk holds - the parts_index lines for this UUID, one per run (2026-09-13, user request: the mail alone
+#    must tell which run's RAW/PRD sits on which disk). Old 12-column lines carry no category and read as ALL.
+disk_contents() {        # mount point  (call after disk_block - uses D_UUID)
+	local M=$1 idx=${PARTS_INDEX:-}
+	[ -s "$idx" ] || return 0
+	#  UUID 로 고른다. UUID 를 모르면(시험 훅 · 이상한 마운트) 마운트지점(9 열)으로 — 옛 12 열 줄엔 9 열이 있다
+	local sel; sel="(u!=\"\" && \$2==u) || (u==\"\" && \$9==m)"
+	local n; n=$(awk -F'\t' -v u="${D_UUID:-}" -v m="$M" "$sel" "$idx" | wc -l)
+	[ "$n" -gt 0 ] || return 0
+	echo "  Contents : ($n index entries; kind RAW = top-level FADC/SADC, PRD = PRD/PNG, ALL = both)"
+	awk -F'\t' -v u="${D_UUID:-}" -v m="$M" "$sel {"'
+		mode=($8!="")?$8:"part"; cat=($13!="")?toupper($13):"ALL"; lo=""; hi=""
+		if (match($6,/\.root\.[0-9][0-9][0-9][0-9][0-9]$/)) lo=substr($6,RSTART+6,5)
+		if (match($7,/\.root\.[0-9][0-9][0-9][0-9][0-9]$/)) hi=substr($7,RSTART+6,5)
+		if (lo!="" && hi!="" && lo>hi) { t=lo; lo=hi; hi=t }
+		rng=(lo!="" && hi!="")? lo"~"hi : "-"
+		printf "    %s  %-4s %-6s %6d files %8.1f GB  subruns %s  (%s)\n", $1, mode, cat, $4, $5/1e9, rng, substr($3,1,16) }' "$idx" | tail -40
+	[ "$n" -gt 40 ] && echo "    ... (the first $((n-40)) entries are in the index file)"
+	echo "  Log sheet: ${SHEET_URL:-}"
+}
+
 # =====================================================================
 #  One pass -- fill a single disk.  code8's plan-then-execute lives in here.
 #
@@ -1137,7 +1158,7 @@ EOF
 	TOT_SKIP=$((TOT_SKIP + N_SKIP))
 	{
 		echo "[$M]"
-		disk_block "$M"
+		disk_block "$M"; disk_contents "$M"
 		echo "  This disk: moved $N_OK · spanned $N_PART · failed $N_FAIL · $(fmt_kb "$MOVED_KB") · ${ROUND} round(s) · took $(fmt_sec "$D_EL")"
 		echo ""
 	} >> "$PLANDIR/disks.txt"
