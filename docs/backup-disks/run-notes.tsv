@@ -5,3 +5,5 @@
 002442	ad07fc77	Merged only (8,183 files, copied 08-17~08-26 with --remove-source-files; USB drop 08-27, CLAUDE.md 11.123). Cache, not physics. PRD of this run: ZK206L7N; RAW: ZK2060HX
 002442	26f4448e	RAW copy : FADC 8,546 (subrun 3~8548) but SADC only 537 — SADC incomplete; full RAW 17,098 at KHU. One rsync temp file (.FADC_…jsQ5Tl) left
 002442	285f2fb7	PRD 8,285 (KHU has 8,548) + Merged 338 (25 zero-byte, 08-27 drop remnants)
+002443	e39bd49a	★ disk found intact 2026-09-13 (ZK20691W): part 1 of 002443 is here. The 09-05 note 'reformatted into 937a91bc' was wrong
+002443	09387574	★ disk found intact 2026-09-13 (ZK206KGB): part 2 of 002443 is here. The 09-05 note 'reformatted into 27fe8b47' was wrong

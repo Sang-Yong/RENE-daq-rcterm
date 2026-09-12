@@ -1,5 +1,5 @@
 # 같은 물리 하드가 재포맷돼 UUID 가 바뀐 관계. old_uuid -> new_uuid. 옛 UUID 의 기록은 새 하드의 라벨을 받되 '재포맷으로 소실' 로 표시한다.
 # 근거 : back_up_hdd_log 30·31 행 메모 (2026-09-05, 그때 udevadm 으로 시리얼을 읽었다). 실물을 다시 꽂아 확정되면 여기 note 를 갱신할 것.
+# ★ 2026-09-13 00:4x : A(e39bd49a, ZK20691W) · B(09387574, ZK206KGB) 는 실물이 그대로 있었다 (002443 조각 8,696 · 8,061 개 온전). '재포맷' 메모는 틀렸다.
+#   C(937a91bc, ZK206K95) · D(27fe8b47, ZFL3GHHS) 는 별개 하드. 그래서 별칭을 지웠다. (남은 줄 없음 — 형식만 유지)
 # old_uuid	new_uuid	wiped_at	note
-e39bd49a-048e-4d7e-adab-e4bdf37d902f	937a91bc-04f9-423f-ac3c-a90f8f617fab	2026-09-04 00:12	002443 part 1 (8,696 files) lost by reformat; RAW/PRD/PNG at KHU
-09387574-057f-4e82-9a54-5de598765876	27fe8b47-7fbc-4821-9c29-65d9b4b94a9c	2026-09-04 00:13	002443 part 2 (8,061 files) lost by reformat; RAW/PRD/PNG at KHU

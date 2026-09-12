@@ -1,0 +1,3 @@
+#disk	/backup_hdd_2	/dev/sdc1	09387574-057f-4e82-9a54-5de598765876	ST2000DM008-2FR102	ZK206KGB	0x5000c500c8b46f6c	1967846088704	1865680584704	2026-09-03 00:19:01	2026-09-13 00:40:24
+#cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other	layout
+002443	8061	1865661868202	08534	10642	FADC_002443.root.08534	SADC_002443.root.10535	2026-09-03 12:12:35	2026-09-03 22:07:57	8063	2106	1	2	5952	0	0	run-dir

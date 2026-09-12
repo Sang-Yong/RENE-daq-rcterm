@@ -193,14 +193,34 @@ def main():
         return (f"scan {d['scanned_at'][:10]}: {s['files']} files / {gb(s['bytes'])} GB on disk"
                 f" (FADC {s['n_fadc']} · SADC {s['n_sadc']} · PRD {s['n_prd']} · Merged {s['n_merged']} · PNG {s['n_png']})"), s
 
+    AUTO = ("auto (", "from disk scan", "scan 20", "full move recorded", "★ ", "carried from", "loose layout",
+            "starts at subrun", "log file only", "scan count", "002443 part 1", "002443 part 2")
+
+    def hand_parts(notes):
+        """옛 Notes 에서 사람이 적은 부분만. 'hand: ' 로 붙인 조각은 그 뒤만, 자동 문구는 뺀다. 안 그러면 재작성마다 Notes 가 두 배로 자라
+        한 칸 50,000 자를 넘겨 API 가 거부한다 (2026-09-13 00:4x 에 겪었다)."""
+        out = []
+        for seg in str(notes).split(" | "):
+            seg = seg.strip()
+            if not seg:
+                continue
+            while seg.startswith("hand: "):
+                seg = seg[6:].strip()                        # 앞선 판이 겹쳐 붙인 'hand: hand: …' 도 벗긴다
+            if seg.startswith(AUTO):
+                continue
+            if seg not in out:
+                out.append(seg)
+        return out
+
     def hand_merge(row, key):
         """기존 시트의 같은 행에서 손으로 적은 열을 가져온다."""
         for o in old_by_key.get(key, []):
             for i in (5, 6, 7, 8, 9, 10, 21, 23):           # Files · GB · Range · First/Last · Left · Also at KHU · Storage Location
                 if o[i].strip() and not str(row[i]).strip():
                     row[i] = o[i].strip()
-            if o[24].strip() and not o[24].strip().startswith("auto (backup-sheetlog)"):
-                row[24] = (row[24] + " | " if row[24] else "") + "hand: " + o[24].strip()
+            for h in hand_parts(o[24]):
+                if h not in str(row[24]):
+                    row[24] = (str(row[24]) + " | " if str(row[24]).strip() else "") + "hand: " + h
             used_keys.add(key)
         return row
 
@@ -299,7 +319,8 @@ def main():
             row[16] = serial
         if model and not row[15].strip():
             row[15] = model
-        row[24] = (row[24].strip() + " | " if row[24].strip() else "") + "carried from previous sheet"
+        if "carried from previous sheet" not in row[24]:
+            row[24] = (row[24].strip() + " | " if row[24].strip() else "") + "carried from previous sheet"
         rows.append(((row[3].strip(), f"{row[1].strip()} {row[2].strip()}"), pk or row[14].strip(), row))
         carried += 1
 

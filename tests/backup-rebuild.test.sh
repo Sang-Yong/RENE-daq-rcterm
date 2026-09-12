@@ -145,6 +145,9 @@ grep -q '시리얼 미확인' "$T/disks.tsv" && ok "시리얼 모르는 하드�
 sed -i 's/^SN-OLD1\tRENE-ALL-001/SN-OLD1\tRENE-BK-KEEP/' "$T/disks.tsv"
 run --commit >/dev/null 2>&1
 chk "정본의 라벨이 이긴다" "$(col "$T/sheet.tsv" $(rowof "$T/sheet.tsv" 001077 U-OL) 13)" "RENE-BK-KEEP"
+L1=$(wc -c < "$T/sheet.tsv"); run --commit >/dev/null 2>&1; run --commit >/dev/null 2>&1; L3=$(wc -c < "$T/sheet.tsv")
+chk "★ 세 번 재작성해도 Notes 가 자라지 않는다 (바이트 같음)" "$L3" "$L1"
+chk "  손 메모는 한 번만" "$(col "$T/sheet.tsv" $(rowof "$T/sheet.tsv" 002443 U-A) 25 | grep -o 'hand: Disk reformatted' | wc -l)" "1"
 chk "재실행해도 행 수 같다 (멱등)" "$(($(wc -l < "$T/sheet.tsv")-1))" "13"
 
 echo "[9] 헤더가 다르면 아무것도 안 쓴다"
