@@ -52,7 +52,7 @@ def load_inventories(d):
                 continue
             else:
                 k = ["run", "files", "bytes", "sub_lo", "sub_hi", "first", "last", "cfrom", "cto", "manifest",
-                     "n_fadc", "n_sadc", "n_prd", "n_merged", "n_png", "n_other"]
+                     "n_fadc", "n_sadc", "n_prd", "n_merged", "n_png", "n_other", "layout"]
                 cur["runs"][c[0]] = dict(zip(k, c + [""] * (len(k) - len(c))))
     return disks
 
@@ -116,6 +116,7 @@ def main():
     ap.add_argument("--source-dirs", default="", help="ls -1 /data/RAW")
     ap.add_argument("--aliases", default=os.path.join(DOCS, "aliases.tsv"))
     ap.add_argument("--known-serials", default=os.path.join(DOCS, "known-serials.tsv"))
+    ap.add_argument("--run-notes", default=os.path.join(DOCS, "run-notes.tsv"), help="(런, uuid8) 손 메모")
     ap.add_argument("--disks-tsv", default=os.path.join(DOCS, "disks.tsv"), help="라벨 정본 (읽고 갱신)")
     ap.add_argument("--disks-md", default=os.path.join(DOCS, "..", "BACKUP-DISKS.md"))
     ap.add_argument("--sheet-tsv", default="")
@@ -261,6 +262,8 @@ def main():
             rng = f"{s['sub_lo']}~{s['sub_hi']}" if s["sub_lo"] and s["sub_hi"] else ""
             left = "" if srcdirs is None else ("0" if run not in srcdirs else "(still on server)")
             note = f"from disk scan {d['scanned_at'][:10]} (no server record); copied {s['cfrom'][:16]} ~ {s['cto'][:16]}"
+            if s.get("layout") == "loose":
+                note += "; loose layout — PRD/ Merged/ sit directly under RENE_data_backup (no run folder); run read from file names"
             if int(s["files"]) == 1 and int(s["bytes"]) < 4096:
                 note += "; ★ log file only — run data not on this disk"
             elif mode == "full" and s["sub_lo"] not in ("", "00000"):
@@ -268,7 +271,7 @@ def main():
             status = ("on disk (attached)" if u in mounted else "on disk (not attached)") + " · verified by scan"
             deleted = "" if srcdirs is None else ("Y (not on server)" if run not in srcdirs else "(still on server)")
             row = ["", date, tm, run, mode, s["files"], gb(s["bytes"]), rng, s["first"], s["last"], left, status, "",
-                   d["mount"], u, model, serial, f"{int(d['cap']) / 1e12:.2f} TB", f"{d['mount']}/RENE_data_backup/{run}",
+                   d["mount"], u, model, serial, f"{int(d['cap']) / 1e12:.2f} TB", f"{d['mount']}/RENE_data_backup" + ("" if s.get("layout") == "loose" else f"/{run}"),
                    f"scan {d['scanned_at'][:10]}: {s['files']} files / {gb(s['bytes'])} GB", deleted, "",
                    "pre-code9" if ts < "2026-09-01" else "", "", note]
             row = hand_merge(row, (run, u[:8], date))
@@ -280,6 +283,8 @@ def main():
         key = (r[3].strip(), r[14].strip()[:8], r[1].strip())
         if key in used_keys:
             continue
+        if "from disk scan" in r[24]:
+            continue                                        # 옛 스캔이 만든 행은 다시 못 만들면 낡은 것이다 (예 : 잘못 읽은 폴더). 옮기지 않는다
         pk, serial, model, wwn, al = resolve(r[14].strip()) if r[14].strip() else ("", "", "", "", None)
         row = list(r)
         if serial and not row[16].strip():
@@ -336,6 +341,11 @@ def main():
         if pk and not row[12].strip():
             row[12] = labels.get(pk, "")
 
+    run_notes = {(r[0], r[1]): r[2] for r in tsv_rows(a.run_notes) if len(r) >= 3}
+    for (run, ts), pk, row in rows:
+        n = run_notes.get((row[3], str(row[14])[:8]))
+        if n:
+            row[24] = (str(row[24]).strip() + " | " if str(row[24]).strip() else "") + "★ " + n
     rows.sort(key=lambda x: x[0])
     out = []
     for i, (_, pk, row) in enumerate(rows, 1):

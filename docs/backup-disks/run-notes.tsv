@@ -1,0 +1,4 @@
+# 특정 (런, 하드) 기록에 붙이는 손 메모. rebuild_backup_sheet.py 가 Notes 열에 합친다. uuid 는 앞 8자.
+# run	uuid8	note
+001742	33de27bb	duplicate copy — the same PRD set is also on ZK206KFR as 001742_2 (user confirmed 2026-09-13)
+001742_2	dabbd4ca	duplicate copy — the same PRD set is also on ZK206K89 as 001742 (user confirmed 2026-09-13)

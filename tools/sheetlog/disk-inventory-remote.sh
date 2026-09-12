@@ -27,12 +27,25 @@ for M in "$@"; do
    read -r CAPB USEDB < <(df -B1 --output=size,used "$M" 2>/dev/null | tail -1)
    FSC=$(stat -c %w "$M/lost+found" 2>/dev/null | cut -c1-19); [ "$FSC" = "-" ] && FSC=""
    printf '#disk\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$M" "$DEV" "$UUID" "$MODEL" "$SERIAL" "$WWN" "${CAPB:-}" "${USEDB:-}" "$FSC" "$(date '+%F %T')"
-   printf '#cols\trun\tfiles\tbytes\tsub_lo\tsub_hi\tfirst_file\tlast_file\tcopied_from\tcopied_to\tmanifest_lines\tn_fadc\tn_sadc\tn_prd\tn_merged\tn_png\tn_other\n'
+   printf '#cols\trun\tfiles\tbytes\tsub_lo\tsub_hi\tfirst_file\tlast_file\tcopied_from\tcopied_to\tmanifest_lines\tn_fadc\tn_sadc\tn_prd\tn_merged\tn_png\tn_other\tlayout\n'
    ROOT="$M/RENE_data_backup"
    [ -d "$ROOT" ] || { echo "#note	$M	no RENE_data_backup"; continue; }
+   #  * 런 폴더 없이 PRD/ · Merged/ 가 RENE_data_backup 바로 밑에 있는 하드 (2026-08-26, code7 시절의 002442). 파일 이름에서 런을 읽어
+   #    런마다 한 줄로 낸다 (layout=loose). 경로가 'PRD/…' 꼴이라 시트에서는 런 폴더 안의 것과 같은 모양으로 읽힌다.
+   LOOSE=$(cd "$ROOT" && ls -d */ 2>/dev/null | sed 's#/$##' | grep -vE '^[0-9]{6}(_[0-9]+)?$' | grep -E '^(PRD|Merged|PNG|FADC|SADC)' | tr '\n' ' ')
+   if [ -n "$LOOSE" ]; then
+      ( cd "$ROOT" && find $LOOSE -type f -printf '%s\t%C@\t%p\n' 2>/dev/null ) | awk -F'\t' '
+         { p=$3; run="unknown"; if(match(p,/_[0-9][0-9][0-9][0-9][0-9][0-9][._]/)) run=substr(p,RSTART+1,6)
+           n[run]++; b[run]+=$1; c=$2+0; if(!(run in cmin)||c<cmin[run])cmin[run]=c; if(c>cmax[run])cmax[run]=c
+           if(p ~ /^PRD\//){np[run]++} else if(p ~ /^Merged\//){nm[run]++} else if(p ~ /^PNG\//){ng[run]++} else {no[run]++}
+           if(!(run in first)||p<first[run])first[run]=p; if(p>last[run])last[run]=p }
+         END { for(run in n) printf "%s\t%d\t%d\t\t\t%s\t%s\t%s\t%s\t0\t0\t0\t%d\t%d\t%d\t%d\tloose\n", run, n[run], b[run], first[run], last[run],
+                  strftime("%Y-%m-%d %H:%M:%S",cmin[run]), strftime("%Y-%m-%d %H:%M:%S",cmax[run]), np[run]+0, nm[run]+0, ng[run]+0, no[run]+0 }'
+   fi
    for R in "$ROOT"/*/; do
       [ -d "$R" ] || continue
       run=$(basename "$R")
+      printf '%s' "$run" | grep -qE '^[0-9]{6}(_[0-9]+)?$' || continue
       ml=0; [ -f "$R/.part_manifest.txt" ] && ml=$(wc -l < "$R/.part_manifest.txt")
       #  한 번의 find 로 전부 : 크기 · ctime · 상대경로
       find "$R" -type f ! -name '.part_manifest.txt' -printf '%s\t%C@\t%P\n' 2>/dev/null | awk -F'\t' -v run="$run" -v ml="$ml" '
@@ -44,6 +57,6 @@ for M in "$@"; do
          END {
            first=""; last=""; for(k in top){ if(first==""||k<first)first=k; if(k>last)last=k }
            f1=(cmin!="")?strftime("%Y-%m-%d %H:%M:%S",cmin):""; f2=(cmax!="")?strftime("%Y-%m-%d %H:%M:%S",cmax):""
-           printf "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", run, n, b, (slo==""?"":sprintf("%05d",slo)), (shi==""?"":sprintf("%05d",shi)), first, last, f1, f2, ml, nf, ns, np, nm, ng, no }'
+           printf "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\trun-dir\n", run, n, b, (slo==""?"":sprintf("%05d",slo)), (shi==""?"":sprintf("%05d",shi)), first, last, f1, f2, ml, nf, ns, np, nm, ng, no }'
    done
 done

@@ -14,6 +14,7 @@ printf '%s\n' "$H" > "$T/sheet.tsv"
 printf '1\t2026-09-01\t06:27:19\t002442\tfull\t\t\t\t\t\t\t\t\t/backup_hdd\tU-OLD\t\t\t\t\t\t\tyes (RAW 17098)\tcode7\tcabinet 1\tDisk detached. serial unknown\n' >> "$T/sheet.tsv"
 printf '2\t2026-09-03\t12:12:21\t002443\tpart\t8696\t1865.7\t\t\t\t\t\t\t/backup_hdd\tU-A\tST2000DM008\tSN-C\t1.8 TB\t\tcount+bytes\tmoved\tyes (RAW 21286)\tcode9\t\tDisk reformatted 2026-09-04\n' >> "$T/sheet.tsv"
 printf '3\t2026-09-05\t09:32:26\t002443\tpart\t15700\t1232.7\t\t\t\t\t\t\t/backup_hdd_2\tU-D\tST2000DM008\tSN-D\t1.8 TB\t\tcount+bytes\tY\tyes\tcode9\t\tDisk 2 of 2 for run 002443\n' >> "$T/sheet.tsv"
+printf '4\t2026-05-01\t10:00:00\tMerged\tfull\t338\t75.7\t\t\t\t\t\t\t/backup_hdd_2\tU-ST\t\t\t\t\t\t\t\t\t\tfrom disk scan 2026-09-12 (no server record); copied x\n' >> "$T/sheet.tsv"   # 옛 스캔이 잘못 읽은 행
 cp "$T/sheet.tsv" "$T/sheet.orig"
 # 서버 기록
 cat > "$T/index" <<'EOF2'
@@ -64,6 +65,7 @@ cmp -s "$T/sheet.tsv" "$T/sheet.orig" && ok "시트를 안 건드렸다" || bad 
 P=$T/prev.tsv
 # 행 : 000938(log-only) 001077 001093 002442(옮김) 002443×3(U-A wiped · U-C · U-D full) 002456(U-K) 002457(U-K log full) 002460×2(U-R raw 기록 · U-P prd 스캔) 002499(U-K scan) = 12
 chk "행 수 12" "$(($(wc -l < "$P")-1))" "12"
+grep -q $'\tMerged\t' "$P" && bad "옛 스캔의 낡은 행(Merged)을 옮겼다" || ok "옛 스캔이 만든 낡은 행은 옮기지 않는다"
 chk "정렬 (런, 시각)" "$(awk -F'\t' 'NR>1{print $4}' "$P" | tr '\n' ' ')" "000938 001077 001093 002442 002443 002443 002443 002456 002457 002460 002460 002499 "
 chk "No 가 1..12" "$(awk -F'\t' 'NR>1{print $1}' "$P" | tr '\n' ' ')" "1 2 3 4 5 6 7 8 9 10 11 12 "
 chk "모든 행이 25 열" "$(awk -F'\t' 'NR>1{print NF}' "$P" | sort -u | tr '\n' ' ')" "25 "
