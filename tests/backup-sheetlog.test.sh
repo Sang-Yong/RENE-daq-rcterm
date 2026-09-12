@@ -93,7 +93,7 @@ case "$cmd" in
   *lsblk*)        cat "$FX/mounts" ;;
   *"ls -1 /data/RAW"*) cat "$FX/srcdirs" ;;
   *fuser*)        cat "$FX/pid" ;;
-  *readlink*)     echo "started Sat Sep 13 01:00:00 2026 script /home/x/code9.sh build=$(cat "$FX/build")" ;;
+  *lstart*)       echo "started Sat Sep 13 01:00:00 2026 script /home/x/code9.sh (mtime x) build=$(cat "$FX/build")" ;;
   *) exit 1 ;;
 esac
 S
@@ -122,6 +122,7 @@ grep -q 'build=NEW' "$NOTIFY_CALLS" && ok "새 세션 NEW 판정 알림" || bad 
 : > "$T/pid"; : > "$NOTIFY_CALLS"; runcron
 grep -qE '세션 끝남' "$NOTIFY_CALLS" "$T/cron.log" && ok "세션 종료 알림" || bad "종료 알림 없음"
 grep -q 'session_pid=$' "$T/cron.state" && ok "state 에 빈 pid" || bad "state" "$(cat "$T/cron.state")"
-[ -f /Data_ssd/LOG/backup-sheetlog.state ] && chk "운영 state 는 안 건드렸다 (session_pid 없음 그대로)" "$(grep -c session_pid= /Data_ssd/LOG/backup-sheetlog.state)" "0" || ok "운영 state 없음"
+grep -q 'st -ge \\$mt' "$DIR/scripts/backup-sheetlog.sh" && ok "★ 판 판정은 세션 시작 시각 vs 파일 mtime (내용을 읽지 않는다)" || bad "내용으로 판정한다 (제자리 덮어쓰기에 오판)"
+[ ! -e "$T/../backup-sheetlog.state" ] && ok "state 는 환경변수로 준 자리에만 쓴다" || bad "state 가 엉뚱한 곳에"
 
 echo; echo "=========================================================="; printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"; echo "=========================================================="; [ "$FAIL" -eq 0 ]

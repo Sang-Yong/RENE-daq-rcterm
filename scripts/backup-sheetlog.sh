@@ -68,7 +68,10 @@ SESS_PID=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "fuser $REMOTE_DIR
 PREV_PID=$(sed -n 's/^session_pid=//p' "$STATE" 2>/dev/null)
 if [ "${SESS_PID:-}" != "${PREV_PID:-}" ]; then
    if [ -n "$SESS_PID" ]; then
-      SESS_INFO=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "f=\$(readlink /proc/$SESS_PID/fd/255); echo \"started \$(ps -o lstart= -p $SESS_PID) script \$f build=\$( [ \$(grep -c 'disk_alive()' \$f) -gt 0 ] && [ \$(grep -c SHEET_URL \$f) -gt 0 ] && echo NEW || echo OLD )\"" 2>/dev/null)
+      #  ★ 판 판정 = 세션 시작 시각 vs 스크립트 파일 mtime. bash 는 시작 때 읽은 코드를 돈다. 경로를 읽으면 새로 배포된
+      #    파일이, /proc/<pid>/fd/255 를 읽어도 scp 가 제자리 덮어쓰기(같은 inode)를 했으면 새 내용이 보여 옛 세션을 NEW 로
+      #    오판한다 (2026-09-12 16:39 오보). 세션이 파일보다 늦게 시작했을 때만 NEW.
+      SESS_INFO=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "f=\$(readlink /proc/$SESS_PID/fd/255); st=\$(date -d \"\$(ps -o lstart= -p $SESS_PID)\" +%s); mt=\$(stat -c %Y \$f); echo \"started \$(ps -o lstart= -p $SESS_PID) script \$f (mtime \$(date -d @\$mt '+%F %T')) build=\$( [ \$st -ge \$mt ] && echo NEW || echo OLD )\"" 2>/dev/null)
       log "백업 세션 바뀜 : pid ${PREV_PID:-없음} -> $SESS_PID  $SESS_INFO"
       [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 시작 pid $SESS_PID : $SESS_INFO" >/dev/null 2>&1
    else
