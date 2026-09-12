@@ -80,6 +80,7 @@ on_chain_down       = mail
 on_rate_low         = mail
 on_rotate           = mail      # 정상 런 교체. 책임자에게만 (아래 목록에 넣지 말 것)
 on_resumed          = mail      # 문제 뒤 다시 정상 가동
+on_backup_session   = mail      # 저장소 백업 세션 시작/종료 (새 판인지 포함). 책임자만
 
 #  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
 #  나머지는 책임자만.  비워 두면 예전 규칙(recovery_failed · fatal 만 전문가).

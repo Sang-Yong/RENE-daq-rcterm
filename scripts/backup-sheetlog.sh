@@ -21,11 +21,11 @@
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 TOOL=$DIR/tools/sheetlog/append_backup_rows.py
-NOTIFY=$DIR/scripts/daq-notify.sh
+NOTIFY=${BACKUP_SHEETLOG_NOTIFY:-$DIR/scripts/daq-notify.sh}   # 시험은 가짜로 갈아끼운다
 PARAMS=$DIR/config/notify.params
-LOG=/Data_ssd/LOG/backup-sheetlog.log
-LOCK=/Data_ssd/LOG/.backup-sheetlog.lock
-STATE=/Data_ssd/LOG/backup-sheetlog.state
+LOG=${BACKUP_SHEETLOG_LOG:-/Data_ssd/LOG/backup-sheetlog.log}
+LOCK=${BACKUP_SHEETLOG_LOCK:-/Data_ssd/LOG/.backup-sheetlog.lock}
+STATE=${BACKUP_SHEETLOG_STATE:-/Data_ssd/LOG/backup-sheetlog.state}
 STORE=${BACKUP_SHEETLOG_STORE:-store}
 REMOTE_DIR=${BACKUP_SHEETLOG_REMOTE_DIR:-'~/sykim/backup_log'}
 DRY=0; STATUS=0; NONOTIFY=0
@@ -43,6 +43,7 @@ log() { printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG"; }
 if [ "$STATUS" -eq 1 ]; then
    echo "backup-sheetlog 상태  $(date '+%F %T')"
    echo "  마지막 : $(sed -n 's/^last=//p' "$STATE" 2>/dev/null)"
+   echo "  세션   : pid $(sed -n 's/^session_pid=//p' "$STATE" 2>/dev/null)"
    echo "  로그   : $(tail -1 "$LOG" 2>/dev/null)"
    exit 0
 fi
@@ -60,6 +61,23 @@ ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "cat $REMOTE_DIR/backup_log.t
 ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "lsblk -no UUID,MOUNTPOINT | awk 'NF==2 && \$2 ~ /backup/ {print \$1\"\t\"\$2}'" > "$T/mounts" 2>/dev/null || : > "$T/mounts"
 ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "ls -1 /data/RAW" > "$T/srcdirs" 2>/dev/null || : > "$T/srcdirs"
 
+#  ★ 백업 세션이 바뀌었는가 (2026-09-12, 사용자 지시 "새 세션 시작하면 새 판인지 확인").
+#    잠금 파일 보유자(fuser)로 세션 pid 를 잡는다 -- 스크립트 이름을 명령줄에 넣으면 저쪽 other_backup() 에 걸린다(§11.183).
+#    pid 가 바뀌면 그 프로세스가 붙든 스크립트에 새 판 표식(disk_alive · SHEET_URL)이 있는지 보고 로그 + 메일 한 통.
+SESS_PID=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "fuser $REMOTE_DIR/.backup.lock 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | sort -n | head -1" 2>/dev/null)
+PREV_PID=$(sed -n 's/^session_pid=//p' "$STATE" 2>/dev/null)
+if [ "${SESS_PID:-}" != "${PREV_PID:-}" ]; then
+   if [ -n "$SESS_PID" ]; then
+      SESS_INFO=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "f=\$(readlink /proc/$SESS_PID/fd/255); echo \"started \$(ps -o lstart= -p $SESS_PID) script \$f build=\$( [ \$(grep -c 'disk_alive()' \$f) -gt 0 ] && [ \$(grep -c SHEET_URL \$f) -gt 0 ] && echo NEW || echo OLD )\"" 2>/dev/null)
+      log "백업 세션 바뀜 : pid ${PREV_PID:-없음} -> $SESS_PID  $SESS_INFO"
+      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 시작 pid $SESS_PID : $SESS_INFO" >/dev/null 2>&1
+   else
+      log "백업 세션 끝남 : pid ${PREV_PID:-?} 사라짐. 마지막 : $(grep -E 'code=|backup done' "$T/log" | tail -1 | cut -c1-100)"
+      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 끝남 (pid ${PREV_PID:-?}) : $(grep -E 'code=' "$T/log" | tail -1 | cut -c1-90)" >/dev/null 2>&1
+   fi
+   [ "$DRY" -eq 1 ] || { grep -v '^session_pid=' "$STATE" 2>/dev/null > "$STATE.tmp"; echo "session_pid=$SESS_PID" >> "$STATE.tmp"; mv -f "$STATE.tmp" "$STATE"; }
+fi
+
 ARGS=(--index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs")
 [ "$DRY" -eq 1 ] || ARGS+=(--commit)
 out=$(cd "$DIR" && timeout 600 python3 "$TOOL" "${ARGS[@]}" 2>&1); rc=$?
@@ -67,7 +85,7 @@ printf '%s\n' "$out" | grep -E '^\[' | while read -r l; do log "$l"; done
 n=$(printf '%s\n' "$out" | sed -n 's/.*새 행 \([0-9]*\).*/\1/p' | head -1)
 if [ "$rc" -ne 0 ]; then log "등재 실패 rc=$rc"; exit 0; fi
 if [ "$DRY" -eq 1 ]; then exit 0; fi
-printf 'last=%s rows=%s\n' "$(date '+%F %T')" "${n:-0}" > "$STATE" 2>/dev/null
+{ grep '^session_pid=' "$STATE" 2>/dev/null; printf 'last=%s rows=%s\n' "$(date '+%F %T')" "${n:-0}"; } > "$STATE.tmp" 2>/dev/null && mv -f "$STATE.tmp" "$STATE"
 if [ "${n:-0}" -gt 0 ] && [ "$NONOTIFY" -eq 0 ]; then
    D=$(mktemp /tmp/backup-sheetlog-XXXXXX)
    printf '%s\n' "$out" > "$D"

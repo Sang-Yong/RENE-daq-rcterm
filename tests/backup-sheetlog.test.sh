@@ -82,4 +82,46 @@ out=$(PATH="$T/bin:$PATH" BACKUP_SHEETLOG_STORE=nowhere bash "$DIR/scripts/backu
 chk "rc=0" "$rc" "0"
 printf '%s' "$out" | grep -q '닿지 않는다' && ok "물러났다" || bad "물러나지 않음" "$out"
 
+echo "[7] cron 스크립트 : 세션 pid 가 바뀌면 판(NEW/OLD)을 판정해 로그 + backup_session 알림, 같으면 조용"
+#  가짜 ssh : 원격 명령을 흉내 낸다. fuser -> $T/pid 의 값, readlink/ps/grep 조합 -> 판 판정 문구, cat -> 픽스처
+cat > "$T/bin/ssh" <<'S'
+#!/bin/bash
+cmd="${@: -1}"
+case "$cmd" in
+  *parts_index*)  cat "$FX/index" ;;
+  *backup_log.txt*) cat "$FX/log" ;;
+  *lsblk*)        cat "$FX/mounts" ;;
+  *"ls -1 /data/RAW"*) cat "$FX/srcdirs" ;;
+  *fuser*)        cat "$FX/pid" ;;
+  *readlink*)     echo "started Sat Sep 13 01:00:00 2026 script /home/x/code9.sh build=$(cat "$FX/build")" ;;
+  *) exit 1 ;;
+esac
+S
+cat > "$T/bin/notify.sh" <<'S'
+#!/bin/bash
+printf '%s\n' "$*" >> "$NOTIFY_CALLS"
+S
+chmod +x "$T/bin/ssh" "$T/bin/notify.sh"
+export FX=$T NOTIFY_CALLS=$T/notify.calls; : > "$NOTIFY_CALLS"
+echo 111 > "$T/pid"; echo OLD > "$T/build"
+cp "$T/sheet.tsv" "$T/sheet7.tsv"     # 이미 등재된 시트라 새 행 0
+runcron() { PATH="$T/bin:$PATH" BACKUP_SHEETLOG_NOTIFY="$T/bin/notify.sh" BACKUP_SHEETLOG_LOG="$T/cron.log" BACKUP_SHEETLOG_LOCK="$T/.cl" \
+            BACKUP_SHEETLOG_STATE="$T/cron.state" bash "$DIR/scripts/backup-sheetlog.sh" "$@" > "$T/cron.out" 2>&1; }
+#  ★ 도구가 구글에 닿지 않게 : --sheet-tsv 는 cron 스크립트가 안 넘기므로, 자격증명이 없는 환경으로 돌려 [FATAL] 을 유도한다
+#    (등재 실패는 '등재 실패 rc' 로만 남고, 세션 판정은 그 전에 끝난다)
+runcron; rc=$?
+chk "rc=0" "$rc" "0"
+grep -q 'session_pid=111' "$T/cron.state" && ok "첫 실행 : 세션 pid 111 기록" || bad "state 없음" "$(cat "$T/cron.state" 2>/dev/null)"
+grep -q 'backup_session' "$NOTIFY_CALLS" && ok "첫 발견도 알린다 (build=OLD)" || bad "알림 없음"
+grep -q 'build=OLD' "$NOTIFY_CALLS" && ok "  OLD 로 판정" || bad "판정 문구 없음" "$(cat "$NOTIFY_CALLS")"
+: > "$NOTIFY_CALLS"; runcron
+[ ! -s "$NOTIFY_CALLS" ] && ok "같은 세션이면 조용" || bad "같은 세션인데 알렸다"
+echo 222 > "$T/pid"; echo NEW > "$T/build"; runcron
+grep -q 'pid 111 -> 222' "$T/cron.log" && ok "세션 교체를 로그에" || bad "로그 없음" "$(tail -2 "$T/cron.log")"
+grep -q 'build=NEW' "$NOTIFY_CALLS" && ok "새 세션 NEW 판정 알림" || bad "NEW 알림 없음" "$(cat "$NOTIFY_CALLS")"
+: > "$T/pid"; : > "$NOTIFY_CALLS"; runcron
+grep -qE '세션 끝남' "$NOTIFY_CALLS" "$T/cron.log" && ok "세션 종료 알림" || bad "종료 알림 없음"
+grep -q 'session_pid=$' "$T/cron.state" && ok "state 에 빈 pid" || bad "state" "$(cat "$T/cron.state")"
+[ -f /Data_ssd/LOG/backup-sheetlog.state ] && chk "운영 state 는 안 건드렸다 (session_pid 없음 그대로)" "$(grep -c session_pid= /Data_ssd/LOG/backup-sheetlog.state)" "0" || ok "운영 state 없음"
+
 echo; echo "=========================================================="; printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"; echo "=========================================================="; [ "$FAIL" -eq 0 ]

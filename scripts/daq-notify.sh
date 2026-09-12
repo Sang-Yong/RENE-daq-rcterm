@@ -19,6 +19,7 @@
 #     rotate           정상 런 교체 (이전 런 정상 마감, 간격 짧음). ★ 책임자에게만
 #     resumed          문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다
 #                      위 넷은 scripts/chainwatch.sh 가 보낸다
+#     backup_session   저장소 서버의 외장하드 백업 세션이 시작/종료됐다 (새 판인지 포함). scripts/backup-sheetlog.sh
 #
 #  누구에게 가나 (config/notify.params 의 mail_expert_events, 2026-09-09 사용자 지시)
 #     목록에 있는 사건  -> 전문가 목록 + 책임자   (문제가 생겼거나, 해결돼 다시 정상 가동)
@@ -52,7 +53,7 @@ NOTIFY_LOG=${NOTIFY_LOG:-/Data/LOG/daq-notify.log}   # 시험은 갈아끼운다
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail \
-                [rotate]=mail [resumed]=mail )
+                [rotate]=mail [resumed]=mail [backup_session]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
@@ -81,6 +82,7 @@ load_params() {
          on_rate_low)        ON[rate_low]=$v ;;
          on_rotate)          ON[rotate]=$v ;;
          on_resumed)         ON[resumed]=$v ;;
+         on_backup_session)  ON[backup_session]=$v ;;
          mail_expert_events) EXPERT_EVENTS=$v ;;
          *) : ;;
       esac
@@ -224,6 +226,9 @@ build_body() {
          rotate)
             echo "  정상적인 런 교체다. 할 일은 없다."
             echo "  계수율이 이전 런과 크게 다르면 그때만 볼 것 (위 '런 교체 상세')." ;;
+         backup_session)
+            echo "  저장소 서버의 외장하드 백업 세션이 바뀌었다. build=NEW 면 이탈 감지·시리얼·시트 링크가 든 판이다."
+            echo "  build=OLD 면 옛 파일로 띄운 것 -- 세션을 끝내고 같은 명령으로 다시 띄우면 새 판이 된다." ;;
          resumed)
             echo "  문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다."
             echo "  이전 런이 왜 끝났는지는 위 '런 교체 상세' 와 감시자 로그를 볼 것."
