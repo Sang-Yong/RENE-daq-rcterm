@@ -1016,6 +1016,14 @@ RENE-ALL-012 ZFL3GJKH (73329c97, 포맷 09-09 22:36)  002454 마지막 조각(fu
 **재정비 결과 (09-12 23:2x ~ 09-13 01:02, 하드 13 쌍)** — `docs/BACKUP-DISKS.md` 가 스티커용 표다. RAW 2 · PRD 1 · MERGED 1 · ALL 22.
 두 벌 : 001742 PRD (KFR·K89) · 002456 (L1T 와 09-12 두 장) · 002443 앞 126 (L1T 와 A). 002442 는 다섯 장에 흩어져 있고(RAW 는 KHU 가 온전).
 런 001742~002406 사이의 옛 런은 04~06 월 하드 8 장에, 002407 부터는 8~9 월 하드에. 서버 /data/RAW 에 남은 것은 002444 · 002458 이후.
+**★ 01:03 라벨 번호를 날짜순으로 한 번 다시 매겼다** (스티커를 붙이기 전이라 가능했다. `disks-before-renumber-*.tsv` 에 옛 번호).
+위 §11.188 본문의 ALL-0xx 번호는 그 전 것이다 — **정본은 언제나 `docs/BACKUP-DISKS.md`.** 지금부터는 번호가 바뀌지 않는다.
+```
+ALL-001 Z4ZBZE87 (04-17)  ALL-002 Z4ZBXG6X  RAW-001 ZK206JXR  ALL-003 ZK206KFR  ALL-004 ZK206K89  ALL-005 ZK206KLK  ALL-006 ZK205Z8S
+ALL-007 ZFL3GKA0  ALL-008 ZFL3GKNN (06월 422런)  ALL-009 ZFL3GH36 (08-06)  MERGED-001 ZK205ZZF  PRD-001 ZK206L7N  RAW-002 ZK2060HX
+ALL-010 ZK206L1T (09-01)  ALL-011 ZK20691W (A)  ALL-012 ZK206KGB (B)  ALL-013 ZK206K95 (C)  ALL-014 ZFL3GHHS (D)  ALL-015 ZK2060L8 (E)
+ALL-016 ZK2068YX (F)  ALL-017 ZK206APL (G)  ALL-018 ZK2060CP (H)  ALL-019 ZK206ATM  ALL-020 ZFL3GJKH  ALL-021 ZK206014  ALL-022 Z4ZBXGAA
+```
 **★ 밟은 것 (여섯 번째)** — 시험 파일을 heredoc 으로 쓰면서 같은 명령줄에서 바로 돌렸더니, 그 명령줄에 든 `storage-backup.sh` 글자를
 스크립트의 `other_backup()` 이 '도는 백업' 으로 잡아 40 건이 깨졌다. **시험은 파일로 쓴 뒤 별도 명령으로, 그리고 스위트는 한 번에 하나만.**
 
