@@ -88,19 +88,23 @@ def parse_index(lines):
         rec = {"run": f[0], "uuid": f[1], "ts": f[2], "files": f[3], "bytes": f[4], "first": f[5], "last": f[6],
                "mode": f[7] if len(f) > 7 and f[7] else "part", "mount": f[8] if len(f) > 8 else "",
                "model": f[9] if len(f) > 9 else "", "serial": f[10] if len(f) > 10 else "",
-               "capkb": f[11] if len(f) > 11 else "", "src": "index"}
+               "capkb": f[11] if len(f) > 11 else "", "cat": f[12] if len(f) > 12 else "", "src": "index"}
         out.append(rec)
     return out
 
 
 def parse_log(lines, indexed_full=frozenset()):
     """UUID -> 마운트 (마지막 회차 시작 기준) 와, 색인에 없는 full 완료 기록."""
-    uuid_mount, cur_mount, cur_uuid, fulls = {}, "", "", []
+    uuid_mount, cur_mount, cur_uuid, cur_only, fulls = {}, "", "", "", []
     for ln in lines:
         p = log_ts(ln)
         if not p:
             continue
         ts, rest = p
+        m = re.search(r"세션 시작 .*only=(\w+)|session start .*only=(\w+)", rest)
+        if m:
+            cur_only = m.group(1) or m.group(2) or ""
+            continue
         m = re.search(r"=== 하드 (\S+) \S+ UUID=(\S+) 회차 시작", rest)
         if m:
             cur_mount, cur_uuid = m.group(1), m.group(2)
@@ -110,8 +114,14 @@ def parse_log(lines, indexed_full=frozenset()):
         if m and m.group(1) not in indexed_full:
             fulls.append({"run": m.group(1), "uuid": cur_uuid, "ts": ts, "files": "", "bytes": "", "first": "",
                           "last": "", "mode": "full", "mount": cur_mount, "model": "", "serial": "", "capkb": "",
-                          "src": "log"})
+                          "cat": cur_only, "src": "log"})
     return uuid_mount, fulls
+
+
+def type_of(r):
+    """시트의 Type : part/full 에 담은 종류를 붙인다 (raw -> 'part·RAW', prd -> 'full·PRD', all/빈칸 -> 그대로)."""
+    c = (r.get("cat") or "").lower()
+    return f"{r['mode']}·{c.upper()}" if c in ("raw", "prd") else r["mode"]
 
 
 def make_row(no, r, uuid_mount, mounted, srcdirs):
@@ -144,7 +154,7 @@ def make_row(no, r, uuid_mount, mounted, srcdirs):
     if r["src"] == "log":
         notes += "; full move recorded from backup_log.txt (not in index) — file count/size not available"
     dest = f"{mount}/RENE_data_backup/{r['run']}" if mount else ""
-    return [str(no), date, tm, r["run"], r["mode"], r["files"], gb(r["bytes"]), rng, r["first"], r["last"],
+    return [str(no), date, tm, r["run"], type_of(r), r["files"], gb(r["bytes"]), rng, r["first"], r["last"],
             left, status, "", mount, r["uuid"], r["model"], r["serial"], cap, dest,
             "count+bytes" if r["files"] else "", deleted, "", "code9", "", notes]
 

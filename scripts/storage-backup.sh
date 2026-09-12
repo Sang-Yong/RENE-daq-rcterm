@@ -53,6 +53,8 @@
 #     --skip a,b       이 하위 폴더를 백업에서 뺀다 (기본 Merged).
 #                      뺀 것은 원본에 남는다 -- 지우는 것은 dataflow 의 M단계 몫이다
 #     --no-skip        아무것도 빼지 않는다 (Merged 까지 담는다)
+#     --only raw|prd   담을 종류를 고른다 (기본 all = 전부).  raw = 최상위 FADC·SADC (PRD·PNG 제외),
+#                      prd = PRD·PNG 폴더만.  RAW 하드와 PRD 하드를 따로 채울 때 쓴다 (라벨 RENE-RAW-NNN · RENE-PRD-NNN)
 #     --no-mail        메일을 큐에 넣지 않는다
 #     --no-bwlimit     속도 제한 해제 (기본 50M)
 #     --margin 10      안전 마진을 10 GB 로 (기본 2 GB)
@@ -108,6 +110,9 @@ SKIP_LIST="${BACKUP_SKIP_LIST:-/home/frontend/sykim/backup_log/backup_skip.txt}"
 #
 #    빼면 그 폴더는 원본에 남는다. 지우는 것은 dataflow 의 M단계 몫이다.
 SKIP_DIRS="${BACKUP_SKIP_DIRS-Merged}"
+#  ★ 담을 종류 (2026-09-13, 사용자 지시). raw = PRD·PNG 를 빼고 담는다 (SKIP_DIRS 에 얹는다), prd = PRD·PNG 만 담는다.
+#    색인(parts_index) 13 열과 매니페스트 머리에 남아 시트의 Type 이 "part·RAW" 처럼 갈린다.
+ONLY="${BACKUP_ONLY:-all}"
 MAILQ_DIR="${BACKUP_MAILQ:-/data/MAILQ}"
 MAIL_ENABLE="${BACKUP_MAIL:-1}"
 DRYRUN=0
@@ -118,6 +123,7 @@ while [ $# -gt 0 ]; do
 		--disks)       MOUNTS_RAW=$2; shift 2 ;;
 		--skip)        SKIP_DIRS=$2; shift 2 ;;
 		--no-skip)     SKIP_DIRS=""; shift ;;
+		--only)        ONLY=$2; shift 2 ;;
 		--no-mail)     MAIL_ENABLE=0; shift ;;
 		--mailq)       MAILQ_DIR=$2; shift 2 ;;
 		--no-bwlimit)  BWLIMIT=""; shift ;;
@@ -129,6 +135,13 @@ while [ $# -gt 0 ]; do
 		*) echo "모르는 옵션 : $1" >&2; exit 2 ;;
 	esac
 done
+
+case "$ONLY" in
+	all) ;;
+	raw) SKIP_DIRS="${SKIP_DIRS:+$SKIP_DIRS,}PRD,PNG" ;;
+	prd) ;;
+	*) echo "--only 는 raw · prd · all 중 하나여야 합니다 : $ONLY" >&2; exit 2 ;;
+esac
 
 #  ★ 원본 파일 목록.  SKIP_DIRS 에 적힌 하위 폴더는 통째로 뺀다.
 #    find 의 -prune 은 그 폴더로 아예 들어가지 않으므로, 폴더가 커도 값이 싸다.
@@ -142,6 +155,9 @@ has_backup_files() {     # 런 폴더
 		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
 		IFS=$IFSO
 	fi
+	if [ "$ONLY" = prd ]; then
+		[ -n "$(find "$1/PRD" "$1/PNG" -type f -print -quit 2>/dev/null)" ]; return
+	fi
 	[ -n "$(find "$1" "${args[@]+"${args[@]}"}" -type f -print -quit 2>/dev/null)" ]
 }
 
@@ -151,6 +167,9 @@ list_files() {           # 런 폴더 안에서 실행한다 -> "<바이트>\t<�
 		local IFSO=$IFS; IFS=','
 		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
 		IFS=$IFSO
+	fi
+	if [ "$ONLY" = prd ]; then
+		find PRD PNG -type f -printf '%s\t%p\n' 2>/dev/null | sort -t"$(printf '\t')" -k2; return
 	fi
 	find . "${args[@]+"${args[@]}"}" -type f -printf '%s\t%P\n' 2>/dev/null \
 		| sort -t"$(printf '\t')" -k2
@@ -480,6 +499,7 @@ run_pass() {
 	echo "🔍 백업 대상 : $SOURCE_PARENT   ->   $DEST"
 	echo "   외장하드 : $(fmt_kb "$CAP")  (여유 $(fmt_kb "$(disk_avail_kb "$MOUNT_POINT")"))"
 	echo "   대조 : 개수+바이트 (원본을 지우기 전에 반드시 통과해야 한다)   속도 제한 : ${BWLIMIT:-없음}"
+	case "$ONLY" in raw) echo "   담는 종류 : RAW 만 (최상위 FADC·SADC. PRD·PNG 는 남긴다 → PRD 하드가 따로 담는다)" ;; prd) echo "   담는 종류 : PRD·PNG 만 (RAW 는 남긴다 → RAW 하드가 따로 담는다)" ;; esac
 
 	#  ★ 회차 사이에 계획 파일을 반드시 지운다.
 	#    앞 하드의 list.<런> 이 남아 있으면 이번 회차가 그것을 그대로 읽어,
@@ -508,6 +528,10 @@ run_pass() {
 		fi
 
 		SZ=$(folder_size "$F") || continue
+		#  ★ --only 이면 폴더 전체(du 캐시)가 아니라 담을 부분의 크기로 판단한다.
+		if [ "$ONLY" != all ]; then
+			SZ=$( ( cd "$F" && list_files ) | awk -F'\t' '{b+=$1} END{printf "%d", (b+1023)/1024}' )
+		fi
 
 		if [ "$SZ" -lt "$USABLE" ]; then
 			( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
@@ -729,15 +753,15 @@ run_pass() {
 		#    이 색인이 구글시트(back_up_hdd_log) 자동 등재의 원천이다 (scripts/backup-sheetlog.sh).
 		if [ "$MODE" = part ]; then
 			{
-				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B"
+				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B  only=$ONLY"
 				echo "# $(head -1 "$PLANDIR/list.$FOLDER_NAME") ~ $(tail -1 "$PLANDIR/list.$FOLDER_NAME")"
 				cat "$PLANDIR/list.$FOLDER_NAME"
 			} >> "$DEST/$FOLDER_NAME/.part_manifest.txt" 2>/dev/null
 		fi
-		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
 			"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
 			"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" "$MODE" "$MOUNT_POINT" "${D_MODEL:-}" "${D_SERIAL:-}" \
-			"$(disk_cap_kb "$MOUNT_POINT")" >> "$PARTS_INDEX" 2>/dev/null
+			"$(disk_cap_kb "$MOUNT_POINT")" "$ONLY" >> "$PARTS_INDEX" 2>/dev/null
 
 		#  ★ 지우기 직전에 원본을 한 번 더 확인한다.
 		#    계획을 세운 뒤 전송이 끝나기까지 몇 시간이 걸린다. 그 사이 다른 작업이
@@ -936,7 +960,7 @@ trap 'rm -rf "$PLANDIR"' EXIT
 SESSION_T0=$(date +%s)
 LOG_MARK=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
 echo "Data backup start, by sykim, $(date) " >> "$LOG_FILE"
-echo "[$(date)] 세션 시작 하드=${DISKS[*]} bwlimit=${BWLIMIT:-없음} split=$SPLIT_MODE" >> "$LOG_FILE"
+echo "[$(date)] 세션 시작 하드=${DISKS[*]} bwlimit=${BWLIMIT:-없음} split=$SPLIT_MODE only=$ONLY" >> "$LOG_FILE"
 
 #  ★ 시작할 때 하드 상태를 한 번에 보여준다. 8시간짜리 작업을 눈감고
 #    시작하지 않기 위한 것이고, 못 쓰는 하드를 미리 알아채기 위한 것이다.

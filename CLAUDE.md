@@ -889,6 +889,69 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.188 ★★ 라벨을 RENE-<종류>-NNN 으로, 백업도 RAW 하드·PRD 하드로 나눠 담는다 (사용자 지시, 09-13 00:xx)
+
+사용자 : "라벨을 더 체계적으로 — 예를 들어 RENE-PRD-00? · RENE-RAW-00? 로 백업을 수행하고 라벨도 그렇게." 그리고 옛 하드 두 장을 더 꽂았다.
+
+**꽂힌 두 장 (스캔, 읽기 전용)** — 사용자가 2026-05 에 이미 손으로 RAW 와 PRD 를 나눠 담아 두었다.
+
+```
+/backup_hdd    ZK206JXR (ST2000DM008)  UUID 6667eb2b  포맷 05-08  폴더 001742_1 하나 : FADC·SADC 2,102 + PNG 1,612 = 5,816 파일 · 1.71 TB  → RAW 쪽
+/backup_hdd_2  ZK206KFR (ST2000DM008)  UUID dabbd4ca  포맷 05-11  001742_2 (PRD 1,615 · 1.24 TB) + 001743~001764 의 18 런 (FADC·SADC 만) · 합 1.85 TB
+★ run 001742 는 사용자가 _1(RAW+PNG) · _2(PRD) 로 갈라 두 하드에 담았다. 폴더 이름의 _1/_2 는 그대로 Run 열에 실린다 (001742 뒤에 정렬)
+```
+
+**라벨 규칙 (§11.187 의 날짜 규칙을 대체)** — `RENE-<종류>-NNN`. 종류는 그 하드가 담은 것 : **RAW** (최상위 FADC·SADC 만) ·
+**PRD** (PRD 만) · **ALL** (둘 다 — 나누기 전의 옛 하드). PNG 는 어느 쪽에도 세지 않는다(05 월의 손 분할이 PNG 를 RAW 쪽에 뒀다).
+번호는 종류별로 처음 담은 순서. 한 번 준 라벨은 `docs/backup-disks/disks.tsv` 에 남아 바뀌지 않는다. 지금 15 장 (`docs/BACKUP-DISKS.md`) :
+
+```
+RENE-ALL-001 Z4ZBZE87 (04-17)   RENE-ALL-002 Z4ZBXG6X (05-01)   RENE-RAW-001 ZK206JXR (05-11, 001742_1)   RENE-ALL-003 ZK206KFR (05-14)
+RENE-ALL-004 ? (834a597b, 09-01)   RENE-ALL-005 ZK206K95 (C)   RENE-ALL-006 ZFL3GHHS (D)   RENE-ALL-007 ? (E)   RENE-ALL-008 ? (F)
+RENE-ALL-009 ZK206APL (G)   RENE-ALL-010 ZK2060CP (H)   RENE-ALL-011 ? (d215edd1)   RENE-ALL-012 ? (73329c97)
+RENE-ALL-013 ZK206014   RENE-ALL-014 Z4ZBXGAA          ← 앞으로 새로 채우는 하드는 RENE-RAW-002 · RENE-PRD-001 부터
+```
+
+시트의 Type 열도 `part·RAW` · `full·PRD` 처럼 종류가 붙는다 (전부 담은 것은 `part`/`full` 그대로).
+
+**백업 스크립트 `--only raw|prd` (한/영 두 판 같은 패치)** — 담을 종류를 고른다.
+
+```
+--only raw   최상위 FADC·SADC 만 (PRD·PNG 는 SKIP_DIRS 에 얹어 남긴다 → PRD 하드가 따로 담는다). Merged 는 여전히 안 담는다
+--only prd   PRD·PNG 폴더만 (RAW 는 남긴다)
+(없음)       예전과 같다 = 전부 (Merged 제외).  색인 13 열 = all
+★ 크기 판단은 폴더 전체(du 캐시)가 아니라 담을 부분의 합으로 한다 — 안 그러면 PRD 만 담는데 RAW 크기로 '안 들어간다' 고 쪼갠다
+★ 한 종류만 담으면 런 폴더는 남는다 ('부분백업' 으로 기록). 다른 종류 하드가 마저 담아 폴더가 비면 그때 제거된다
+색인 parts_index 13 열 · 매니페스트 머리 only= · 세션 시작 로그 줄 only= · 기동 화면 '담는 종류' 에 남는다
+```
+
+**운용 순서 (독은 2 베이)** — 베이 1 = RAW 하드, 베이 2 = PRD 하드.
+
+```bash
+ssh store
+/home/frontend/data_backup_simple_code9.sh --disks /backup_hdd   --only raw --dry-run    # 계획 확인
+/home/frontend/data_backup_simple_code9.sh --disks /backup_hdd   --only raw              # RAW 하드가 찰 때까지 (code=3 메일)
+/home/frontend/data_backup_simple_code9.sh --disks /backup_hdd_2 --only prd              # 같은 런들의 PRD·PNG 를 PRD 하드에
+#  ★ 두 세션을 동시에 띄울 수 없다 (잠금 + other_backup). 차례로. 한 장이 차면 그 베이만 갈아 끼우고 같은 명령
+```
+
+RAW 는 서브런당 87 MB, PRD 는 77 MB 라 RAW 하드가 약 1.1 배 빨리 찬다. 하드를 꽂을 때마다 `scripts/backup-sheet-rebuild.sh --scan --commit`
+이 스캔 결과로 종류를 가려 RAW-/PRD- 라벨을 준다.
+
+**결과** — 시트 818 행 · 하드 15 (되읽어 대조 통과, 백업 `sheet-before-rebuild-20260913000044.tsv`). 시험 : `tests/backup-rebuild.test.sh` 53 ·
+`tests/storage-backup-only.test.sh` **50** · 기존 스위트 전부 통과(KR/EN 107 · 패리티 27 · 이탈 32 · 시리얼 10 · 시트링크 10 · sheetlog 45).
+**배포 (00:20)** — code9(한) · code10(영) 을 `.new` + `mv` 로 (§8, 새 inode 1610622031, md5 edb5931e / 7ef5bc99, 도는 세션 없음 확인). 이전 판은 `.bak-202609130020`.
+
+**이어서 꽂은 하드 (00:06 · 00:18 스캔)** — 시트 961 행 · 하드 19 :
+```
+RENE-ALL-015 ZK206K89 (포맷 05-15) 001742 의 PRD 1,613 개 (1.31 TB) + 001765~001864 RAW 17 런 · 로그만 75 폴더
+RENE-ALL-016 ZK206KLK (05-20)      001865~001894 RAW 22 런 · 1.78 TB
+RENE-ALL-017 ZK205Z8S (05-25)      001902~001920 18 런 · 1.77 TB      RENE-ALL-018 ZFL3GKA0 (05-28)  001921~001930 10 런 · 1.77 TB
+★ 001742 의 PRD 가 두 벌로 보인다 — ZK206KFR 의 001742_2 (1,615 개) 와 ZK206K89 의 001742 (1,613 개). 같은 것을 두 번 담았는지 파일 이름 대조가 필요
+```
+**★ 밟은 것 (여섯 번째)** — 시험 파일을 heredoc 으로 쓰면서 같은 명령줄에서 바로 돌렸더니, 그 명령줄에 든 `storage-backup.sh` 글자를
+스크립트의 `other_backup()` 이 '도는 백업' 으로 잡아 40 건이 깨졌다. **시험은 파일로 쓴 뒤 별도 명령으로, 그리고 스위트는 한 번에 하나만.**
+
 #### 11.187 ★★ 백업 기록 시트 전면 재작성 — 하드를 꽂아 훑고, (런, 시각) 순으로, 라벨 부여 (사용자 지시, 09-12 밤)
 
 사용자 : "새 하드를 꽂기 전에 기존 백업 하드를 차례로 끼워 로그 시트를 총체적으로 재정비하자. 런 번호·시간순 정렬, 하드마다 제조사
@@ -3156,6 +3219,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.188         ★ 라벨 RENE-<RAW|PRD|ALL>-NNN (날짜 규칙 대체) + code9 `--only raw|prd` 로 RAW 하드·PRD 하드를 따로 채운다.
+                옛 하드 두 장 더 스캔 (ZK206JXR = 001742_1 RAW · ZK206KFR = 001742_2 PRD + 18 런). 시트 818 행 · 하드 15
 §11.187         ★ 백업 기록 시트 전면 재작성 — 하드를 꽂아 스캔(disk-inventory) + 기록 + 손 열 → (런, 시각) 정렬 798 행, 라벨
                 RENE-BK-<날짜>. 04월 첫 하드 두 장(Z4ZBZE87 · Z4ZBXG6X, run 000938~001741) 은 서버에 없는 유일본. A·B 는 재포맷돼 C·D
 §11.186         ★ 2회차 백업 세션이 마무리 코드에서 죽음(제자리 덮어쓰기) — 하드 2장 가득, 종료 메일 누락, 자료 손실 0.
@@ -3233,7 +3298,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
 | **하드 E·F 를 다시 꽂으면 `e2fsck -f` 먼저** | 09-07 21:15 에 마운트된 채 독에서 떨어져 두 하드의 저널이 끊겼다 | §11.170 |
 | G·H 를 뽑기 전에 `sudo umount` | 독은 한 USB 장치라 한쪽을 뽑으면 둘 다 떨어진다 | §11.170 |
-| **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 | §11.187 |
+| **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 (`RENE-ALL-001` …) | §11.187 · §11.188 |
+| 새 하드부터는 `--only raw` / `--only prd` 로 베이별로 | RAW 하드·PRD 하드 분리 (사용자 지시). 라벨 RENE-RAW-002 · RENE-PRD-001 부터 | §11.188 |
 | 시트의 `Storage Location` | 내가 알 수 없는 값이다 (`Disk Label` 은 이제 도구가 채운다) | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
 | NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |

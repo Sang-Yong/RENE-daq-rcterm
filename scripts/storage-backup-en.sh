@@ -66,6 +66,8 @@
 #                      (default Merged). What is left out stays in the source -
 #                      removing it is dataflow's M stage
 #     --no-skip        leave nothing out (back Merged up too)
+#     --only raw|prd   choose what to back up (default all).  raw = top-level FADC/SADC (no PRD/PNG),
+#                      prd = the PRD and PNG folders only.  For filling RAW disks and PRD disks separately (labels RENE-RAW-NNN / RENE-PRD-NNN)
 #     --no-mail        do not queue any mail
 #     --no-bwlimit     no speed limit (default 50M)
 #     --margin 10      safety margin in GB (default 2)
@@ -126,6 +128,9 @@ SKIP_LIST="${BACKUP_SKIP_LIST:-/home/frontend/sykim/backup_log/backup_skip.txt}"
 #
 #    An excluded folder stays in the source. Removing it is dataflow's job.
 SKIP_DIRS="${BACKUP_SKIP_DIRS-Merged}"
+#  * What to back up (2026-09-13, user request). raw = leave PRD/PNG out (added to SKIP_DIRS), prd = PRD/PNG only.
+#    Recorded in parts_index column 13 and the manifest header so the sheet Type reads "part·RAW" etc.
+ONLY="${BACKUP_ONLY:-all}"
 MAILQ_DIR="${BACKUP_MAILQ:-/data/MAILQ}"
 MAIL_ENABLE="${BACKUP_MAIL:-1}"
 DRYRUN=0
@@ -136,6 +141,7 @@ while [ $# -gt 0 ]; do
 		--disks)       MOUNTS_RAW=$2; shift 2 ;;
 		--skip)        SKIP_DIRS=$2; shift 2 ;;
 		--no-skip)     SKIP_DIRS=""; shift ;;
+		--only)        ONLY=$2; shift 2 ;;
 		--no-mail)     MAIL_ENABLE=0; shift ;;
 		--mailq)       MAILQ_DIR=$2; shift 2 ;;
 		--no-bwlimit)  BWLIMIT=""; shift ;;
@@ -147,6 +153,13 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown option: $1" >&2; exit 2 ;;
 	esac
 done
+
+case "$ONLY" in
+	all) ;;
+	raw) SKIP_DIRS="${SKIP_DIRS:+$SKIP_DIRS,}PRD,PNG" ;;
+	prd) ;;
+	*) echo "--only must be raw, prd or all : $ONLY" >&2; exit 2 ;;
+esac
 
 #  * Source file list. Sub-directories named in SKIP_DIRS are left out whole.
 #    find -prune never descends into them, so a large folder costs nothing.
@@ -160,6 +173,9 @@ has_backup_files() {     # run folder
 		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
 		IFS=$IFSO
 	fi
+	if [ "$ONLY" = prd ]; then
+		[ -n "$(find "$1/PRD" "$1/PNG" -type f -print -quit 2>/dev/null)" ]; return
+	fi
 	[ -n "$(find "$1" "${args[@]+"${args[@]}"}" -type f -print -quit 2>/dev/null)" ]
 }
 
@@ -169,6 +185,9 @@ list_files() {           # run from inside the run folder -> "<bytes>\t<relative
 		local IFSO=$IFS; IFS=','
 		for d in $SKIP_DIRS; do args+=(-name "$d" -type d -prune -o); done
 		IFS=$IFSO
+	fi
+	if [ "$ONLY" = prd ]; then
+		find PRD PNG -type f -printf '%s\t%p\n' 2>/dev/null | sort -t"$(printf '\t')" -k2; return
 	fi
 	find . "${args[@]+"${args[@]}"}" -type f -printf '%s\t%P\n' 2>/dev/null \
 		| sort -t"$(printf '\t')" -k2
@@ -497,6 +516,7 @@ run_pass() {
 	echo "Backing up : $SOURCE_PARENT   ->   $DEST"
 	echo "   Disk     : $(fmt_kb "$CAP")  (free $(fmt_kb "$(disk_avail_kb "$MOUNT_POINT")"))"
 	echo "   Verify   : count+bytes (must pass before anything is deleted)   speed limit: ${BWLIMIT:-none}"
+	case "$ONLY" in raw) echo "   Backing up : RAW only (top-level FADC/SADC. PRD/PNG stay -> a PRD disk takes them)" ;; prd) echo "   Backing up : PRD/PNG only (RAW stays -> a RAW disk takes it)" ;; esac
 
 	#  * Clear the plan files between passes.
 	#    A leftover list.<run> from the previous disk would be read as this pass's
@@ -525,6 +545,10 @@ run_pass() {
 		fi
 
 		SZ=$(folder_size "$F") || continue
+		#  * With --only, judge by the size of the part we back up, not the whole folder (du cache).
+		if [ "$ONLY" != all ]; then
+			SZ=$( ( cd "$F" && list_files ) | awk -F'\t' '{b+=$1} END{printf "%d", (b+1023)/1024}' )
+		fi
 
 		if [ "$SZ" -lt "$USABLE" ]; then
 			( cd "$F" && list_files ) > "$PLANDIR/sizes.$F"
@@ -747,15 +771,15 @@ run_pass() {
 		#  This index feeds the automatic sheet log (scripts/backup-sheetlog.sh).
 		if [ "$MODE" = part ]; then
 			{
-				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B"
+				echo "# run $FOLDER_NAME  part  $(date '+%F %T')  UUID=$UUID  files=$WANT_N bytes=$WANT_B  only=$ONLY"
 				echo "# $(head -1 "$PLANDIR/list.$FOLDER_NAME") ~ $(tail -1 "$PLANDIR/list.$FOLDER_NAME")"
 				cat "$PLANDIR/list.$FOLDER_NAME"
 			} >> "$DEST/$FOLDER_NAME/.part_manifest.txt" 2>/dev/null
 		fi
-		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FOLDER_NAME" "$UUID" "$(date '+%F %T')" \
 			"$WANT_N" "$WANT_B" "$(head -1 "$PLANDIR/list.$FOLDER_NAME")" \
 			"$(tail -1 "$PLANDIR/list.$FOLDER_NAME")" "$MODE" "$MOUNT_POINT" "${D_MODEL:-}" "${D_SERIAL:-}" \
-			"$(disk_cap_kb "$MOUNT_POINT")" >> "$PARTS_INDEX" 2>/dev/null
+			"$(disk_cap_kb "$MOUNT_POINT")" "$ONLY" >> "$PARTS_INDEX" 2>/dev/null
 
 		#  * Check the source once more, right before deleting.
 		#    Hours pass between building the plan and finishing the transfer, and
@@ -954,7 +978,7 @@ trap 'rm -rf "$PLANDIR"' EXIT
 SESSION_T0=$(date +%s)
 LOG_MARK=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
 echo "Data backup start, by sykim, $(date) " >> "$LOG_FILE"
-echo "[$(date)] session start disks=${DISKS[*]} bwlimit=${BWLIMIT:-none} split=$SPLIT_MODE" >> "$LOG_FILE"
+echo "[$(date)] session start disks=${DISKS[*]} bwlimit=${BWLIMIT:-none} split=$SPLIT_MODE only=$ONLY" >> "$LOG_FILE"
 
 #  * Show the state of every disk up front. Nobody should start an eight-hour
 #    job blind, and an unusable disk should be obvious before it wastes time.

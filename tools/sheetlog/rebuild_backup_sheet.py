@@ -10,8 +10,9 @@ rebuild_backup_sheet.py — 외장하드 백업 기록 시트(back_up_hdd_log)�
   ③ 기존 시트  손으로 적은 열(Also at KHU · Storage Location · Notes)을 (Run, UUID, 날짜) 로 맞춰 살린다.
                어느 갈래에서도 다시 만들 수 없는 옛 행은 그대로 옮긴다 — 행이 사라지는 일은 없다.
 
-라벨 : 물리 하드(시리얼, 없으면 UUID)마다 RENE-BK-<처음 담은 날짜 YYYYMMDD>[-A/-B]. 한 번 부여한 라벨은
-       docs/backup-disks/disks.tsv 에 남아 다시 바뀌지 않는다. 재포맷으로 UUID 가 바뀐 하드(aliases.tsv)는 새 UUID 의
+라벨 : 물리 하드(시리얼, 없으면 UUID)마다 RENE-<종류>-NNN. 종류는 그 하드가 담은 것 — RAW(최상위 FADC·SADC 만) ·
+       PRD(PRD·PNG 만) · ALL(둘 다, 나누기 전의 옛 하드). NNN 은 종류별로 처음 담은 순서. 한 번 부여한 라벨은
+       docs/backup-disks/disks.tsv 에 남아 다시 바뀌지 않는다 (사용자 지시 2026-09-13 : RENE-PRD-00? · RENE-RAW-00?). 재포맷으로 UUID 가 바뀐 하드(aliases.tsv)는 새 UUID 의
        라벨을 받고 옛 기록은 '소실' 로 표시한다.
 
 기본은 미리보기. --commit 라야 시트를 지우고 다시 쓴다 (쓰기 전 백업 TSV, 쓴 뒤 되읽어 대조).
@@ -22,7 +23,7 @@ import argparse, csv, glob, io, os, re, sys, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from append_backup_rows import (HEADER, SHEET_ID, GID, SCOPES, find_creds, read_lines, parse_index, parse_log,
-                                subrun_of, gb)
+                                subrun_of, gb, type_of)
 
 DOCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "docs", "backup-disks")
 
@@ -84,6 +85,26 @@ def parse_log_all(lines, indexed_full):
         else:
             fixed.append(ln)
     return parse_log(fixed, indexed_full)
+
+
+def run_cat(s):
+    """스캔한 런 폴더가 담은 종류 : raw(최상위 FADC/SADC 만) · prd(PRD/PNG 만) · all(둘 다)."""
+    raw = int(s["n_fadc"] or 0) + int(s["n_sadc"] or 0)
+    prd = int(s["n_prd"] or 0)                   # PNG 는 어느 쪽에도 안 센다 (2026-05 의 손 분할은 PNG 를 RAW 쪽에 뒀다)
+    if raw and not prd:
+        return "raw"
+    if prd and not raw:
+        return "prd"
+    return "all"
+
+
+def disk_cat(rows_types):
+    """하드의 종류 = 그 하드에 실린 행들의 Type 에서. 전부 RAW 면 RAW, 전부 PRD 면 PRD, 아니면 ALL."""
+    cats = {t.split("·")[1] for t in rows_types if "·" in t}
+    plain = any("·" not in t and t != "log-only" for t in rows_types)
+    if plain or len(cats) != 1:
+        return "ALL"
+    return cats.pop()
 
 
 def main():
@@ -217,7 +238,7 @@ def main():
         model = model or r.get("model", "")
         dest = f"{mount}/RENE_data_backup/{r['run']}" if mount else ""
         script = "code9" if r["src"] != "log" or r["ts"] >= "2026-09-03" else "code7/8"
-        row = ["", date, tm, r["run"], r["mode"], r["files"], gb(r["bytes"]), rng, r["first"], r["last"], left, status,
+        row = ["", date, tm, r["run"], type_of(r), r["files"], gb(r["bytes"]), rng, r["first"], r["last"], left, status,
                "", mount, r["uuid"], model, serial, cap, dest, verified, deleted, "", script, "", "; ".join(notes)]
         row = hand_merge(row, (r["run"], r["uuid"][:8], date))
         rows.append(((r["run"], r["ts"]), pk, row))
@@ -233,6 +254,10 @@ def main():
             mode = "part" if s["manifest"] != "0" else "full"
             if int(s["files"]) == 1 and int(s["bytes"]) < 4096:
                 mode = "log-only"                       # PRD/Run_DLY_THR.log 하나뿐 — 자료는 이 하드에 없다
+            else:
+                c = run_cat(s)
+                if c in ("raw", "prd"):
+                    mode = f"{mode}·{c.upper()}"
             rng = f"{s['sub_lo']}~{s['sub_hi']}" if s["sub_lo"] and s["sub_hi"] else ""
             left = "" if srcdirs is None else ("0" if run not in srcdirs else "(still on server)")
             note = f"from disk scan {d['scanned_at'][:10]} (no server record); copied {s['cfrom'][:16]} ~ {s['cto'][:16]}"
@@ -294,17 +319,18 @@ def main():
         if pk in disk_info:
             disk_info[pk]["scanned"] = d["scanned_at"]; disk_info[pk]["wwn"] = d["wwn"]
             disk_info[pk]["used"] = d["used"]; disk_info[pk]["fs_created"] = d["fs_created"]
+    #  라벨 : RENE-<종류>-NNN. 종류별 번호는 처음 담은 순서. 이미 준 라벨(정본)은 그대로, 새 하드는 그 종류의 다음 번호.
     taken = set(labels.values())
-    new_pks = [pk for pk in sorted(first_ts, key=lambda k: first_ts[k]) if pk not in labels]
-    by_date = {}
-    for pk in new_pks:
-        by_date.setdefault(first_ts[pk][:10], []).append(pk)
-    for pk in new_pks:
-        base = f"RENE-BK-{first_ts[pk][:10].replace('-', '')}"
-        if len(by_date[first_ts[pk][:10]]) == 1 and base not in taken:
-            lab = base
-        else:
-            lab = next(f"{base}-{c}" for c in "ABCDEFGHIJ" if f"{base}-{c}" not in taken)
+    pk_types = {}
+    for (run, ts), pk, row in rows:
+        if pk:
+            pk_types.setdefault(pk, []).append(row[4])
+    for pk in sorted(first_ts, key=lambda k: first_ts[k]):
+        if pk in labels:
+            continue
+        cat = disk_cat(pk_types.get(pk, []))
+        used = [int(m.group(1)) for l in taken for m in [re.match(rf"RENE-{cat}-(\d+)$", l)] if m]
+        lab = f"RENE-{cat}-{(max(used) + 1 if used else 1):03d}"
         labels[pk] = lab; taken.add(lab)
     for (run, ts), pk, row in rows:
         if pk and not row[12].strip():
@@ -320,7 +346,7 @@ def main():
     disk_lines = ["# 외장하드 목록 — 라벨 정본. rebuild_backup_sheet.py 가 갱신한다. 라벨 열은 한 번 정해지면 바뀌지 않는다.",
                   "# key(serial|uuid)\tlabel\tserial\tmodel\twwn\tuuids\tcapacity\tfirst_ts\tlast_ts\truns\tfiles\tGB\tscanned_at\tnote"]
     md = ["# 외장하드 백업 — 하드 목록과 라벨\n", "`tools/sheetlog/rebuild_backup_sheet.py` 가 만든다. 손으로 고치지 말 것 (정본은 `docs/backup-disks/disks.tsv`).\n",
-          "라벨은 **하드에 스티커로 붙이는 이름**이다 : `RENE-BK-<처음 담은 날짜>`. 시리얼은 하드에 새겨진 제조사 값(`udevadm`).\n",
+          "라벨은 **하드에 스티커로 붙이는 이름**이다 : `RENE-<종류>-NNN` (RAW = 원시 자료만 · PRD = PRD·PNG 만 · ALL = 둘 다, 나누기 전). 번호는 종류별로 처음 담은 순서. 시리얼은 하드에 새겨진 제조사 값(`udevadm`).\n",
           "| 라벨 | 시리얼 | 모델 | UUID | 처음~마지막 | 런 수 | 파일 | GB | 스캔 | 비고 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for pk in sorted(disk_info, key=lambda k: first_ts.get(k, "")):
         di = disk_info[pk]; lab = labels.get(pk, "")
