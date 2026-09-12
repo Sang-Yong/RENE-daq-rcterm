@@ -7,3 +7,6 @@
 002442	285f2fb7	PRD 8,285 (KHU has 8,548) + Merged 338 (25 zero-byte, 08-27 drop remnants)
 002443	e39bd49a	★ disk found intact 2026-09-13 (ZK20691W): part 1 of 002443 is here. The 09-05 note 'reformatted into 937a91bc' was wrong
 002443	09387574	★ disk found intact 2026-09-13 (ZK206KGB): part 2 of 002443 is here. The 09-05 note 'reformatted into 27fe8b47' was wrong
+002456	834a597b	★ second full copy — 002456 was moved again on 2026-09-12 (ZK206014 parts + Z4ZBXGAA full). This 09-02 copy (code8, 7,646 files) is a duplicate
+002443	834a597b	★ 126 FADC files sent by the 09-02 test session (CLAUDE.md 11.141) — the same subruns 0~125 were sent again to ZK20691W (part 1). Duplicate
+002442	834a597b	SADC 8,019 + PNG 8,547 + PRD 263 (09-01 code7 'full' move). FADC of this run is on ZK2060HX, PRD on ZK206L7N, Merged on ZK205ZZF

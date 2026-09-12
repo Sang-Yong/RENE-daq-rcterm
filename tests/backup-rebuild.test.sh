@@ -144,6 +144,22 @@ grep -q '시리얼 미확인' "$T/disks.tsv" && ok "시리얼 모르는 하드�
 # 라벨 안정성 : 정본에서 U-OLD1 의 라벨을 손으로 바꾼 뒤 다시 돌려도 그 라벨이 유지된다
 sed -i 's/^SN-OLD1\tRENE-ALL-001/SN-OLD1\tRENE-BK-KEEP/' "$T/disks.tsv"
 run --commit >/dev/null 2>&1
+#  UUID 로만 알던 하드(U-OLD, ALL-002)를 나중에 스캔해 시리얼을 알게 되면 라벨을 물려받는다
+cat > "$T/inv/SN-OLD_U-OLD.tsv" <<'EOF2'
+#disk	/backup_hdd	/dev/sdf1	U-OLD	ST2000DM008-2FR102	SN-OLD	0x5003	1967846088704	100000000000	2026-09-01 05:52:26	2026-09-13 00:45:00
+#cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other	layout
+002442	10	1000000000	00000	00004	FADC_002442.root.00000	SADC_002442.root.00004	2026-09-01 06:00:00	2026-09-01 06:27:19	0	5	5	0	0	0	0	run-dir
+EOF2
+cp "$T/sheet.tsv" "$T/inh.tsv"; cp "$T/disks.tsv" "$T/inhd.tsv"      # 뒤 시험에 영향 없게 사본으로
+python3 "$TOOL" --inventory "$T/inv" --index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs" --aliases "$T/aliases" --known-serials "$T/known" \
+   --disks-tsv "$T/inhd.tsv" --disks-md "$T/inh.md" --sheet-tsv "$T/inh.tsv" --backup-dir "$T/bak" --commit >/dev/null 2>&1
+chk "스캔으로 시리얼을 안 하드는 UUID 때의 라벨(ALL-002)을 물려받는다" "$(col "$T/inh.tsv" $(rowof "$T/inh.tsv" 002442 U-OL) 13)" "RENE-ALL-002"
+grep -q $'^SN-OLD\tRENE-ALL-002' "$T/inhd.tsv" && ok "  정본의 키가 시리얼로 바뀌었다" || bad "정본" "$(grep -E 'OLD' "$T/inhd.tsv")"
+grep -q $'^U-OLD\t' "$T/inhd.tsv" && bad "  옛 UUID 키가 남아 있다" || ok "  옛 UUID 키는 지워졌다"
+rm -f "$T/inv/SN-OLD_U-OLD.tsv"
+#  표에 없는 키의 라벨도 정본에 남는다 (라벨 유실 방지)
+printf 'GHOST-KEY\tRENE-ALL-099\n' >> "$T/disks.tsv"; run --commit >/dev/null 2>&1
+grep -q $'^GHOST-KEY\tRENE-ALL-099' "$T/disks.tsv" && ok "표에 안 나온 키의 라벨도 정본에 남는다" || bad "라벨 유실"
 chk "정본의 라벨이 이긴다" "$(col "$T/sheet.tsv" $(rowof "$T/sheet.tsv" 001077 U-OL) 13)" "RENE-BK-KEEP"
 L1=$(wc -c < "$T/sheet.tsv"); run --commit >/dev/null 2>&1; run --commit >/dev/null 2>&1; L3=$(wc -c < "$T/sheet.tsv")
 chk "★ 세 번 재작성해도 Notes 가 자라지 않는다 (바이트 같음)" "$L3" "$L1"

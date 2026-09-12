@@ -362,6 +362,14 @@ def main():
     for pk in sorted(first_ts, key=lambda k: first_ts[k]):
         if pk in labels:
             continue
+        #  ★ 스캔으로 시리얼을 알게 되면 물리키가 UUID 에서 시리얼로 바뀐다. 그 UUID 로 이미 준 라벨이 있으면 그것을 물려받는다 (번호 불변)
+        inherited = [labels[u] for u in disk_info.get(pk, {}).get("uuids", ()) if u in labels]
+        if inherited:
+            labels[pk] = inherited[0]
+            for u in list(labels):
+                if u in disk_info.get(pk, {}).get("uuids", ()):
+                    del labels[u]
+            continue
         cat = disk_cat(pk_types.get(pk, []))
         used = [int(m.group(1)) for l in taken for m in [re.match(rf"RENE-{cat}-(\d+)$", l)] if m]
         lab = f"RENE-{cat}-{(max(used) + 1 if used else 1):03d}"
@@ -401,6 +409,10 @@ def main():
         md.append(f"| **{lab}** | {di['serial'] or '?'} | {di['model'] or '?'} | {' '.join(u[:8] for u in sorted(di['uuids']))} | "
                   f"{first_ts.get(pk, '')[:10]} ~ {di['last_ts'][:10]} | {len(di['runs'])} | {di['files']} | {di['bytes']:.0f} | "
                   f"{di['scanned'][:10] or '-'} | {note} |")
+    #  ★ 이번 표에 안 나온 키(예 : 옛 UUID 키)도 정본에 남긴다 — 라벨이 사라지면 번호가 다시 매겨진다 (00:43 에 ALL-004 를 잃었다)
+    for k, lab in labels.items():
+        if k not in disk_info:
+            disk_lines.append("\t".join([k, lab] + [""] * 11 + ["(not in current table — kept so the label is never lost)"]))
     md.append(f"\n생성 {datetime.datetime.now():%Y-%m-%d %H:%M} · 행 {len(out)} · 하드 {len(disk_info)}")
 
     print(f"[INFO] 기록 {len(recs)} 건 · 스캔 하드 {len(inv)} · 기존 시트 {len(old_rows)} 행 (옮긴 것 {carried}) -> 새 표 {len(out)} 행 · 하드 {len(disk_info)}")
