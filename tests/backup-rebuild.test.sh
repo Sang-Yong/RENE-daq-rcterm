@@ -52,6 +52,11 @@ cat > "$T/inv/SN-P_U-P.tsv" <<'EOF2'
 #cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other
 002460	50	4000000000			PNG/a.png	PRD/PRD_002460.00049.root	2026-09-13 10:30:00	2026-09-13 11:00:00	0	0	0	49	0	1	0
 EOF2
+cat > "$T/inv/SN-M_U-M.tsv" <<'EOF2'
+#disk	/backup_hdd	/dev/sde1	U-M	ST2000DM008-2FR102	SN-M	0x5002	1967846088704	100000000000	2026-08-17 23:22:01	2026-09-13 00:30:00
+#cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other	layout
+002442	8183	1841856383639			Merged/MERGED_002442.root.00000	Merged/MERGED_002442.root.08195	2026-08-17 23:33:42	2026-08-26 16:35:48	0	0	0	0	8183	0	0	loose
+EOF2
 printf 'U-K\t/backup_hdd\n' > "$T/mounts"; printf '002456\n002500\n' > "$T/srcdirs"
 run(){ python3 "$TOOL" --inventory "$T/inv" --index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs" \
         --aliases "$T/aliases" --known-serials "$T/known" --disks-tsv "$T/disks.tsv" --disks-md "$T/disks.md" \
@@ -63,11 +68,11 @@ chk "rc=0" "$rc" "0"
 cmp -s "$T/sheet.tsv" "$T/sheet.orig" && ok "시트를 안 건드렸다" || bad "미리보기가 썼다"
 [ ! -e "$T/disks.tsv" ] && ok "라벨 정본도 미리보기에선 안 쓴다" || bad "disks.tsv 가 생겼다"
 P=$T/prev.tsv
-# 행 : 000938(log-only) 001077 001093 002442(옮김) 002443×3(U-A wiped · U-C · U-D full) 002456(U-K) 002457(U-K log full) 002460×2(U-R raw 기록 · U-P prd 스캔) 002499(U-K scan) = 12
-chk "행 수 12" "$(($(wc -l < "$P")-1))" "12"
+# 행 : 000938(log-only) 001077 001093 002442×2(옮김 · U-M merged 스캔) 002443×3(U-A wiped · U-C · U-D full) 002456(U-K) 002457(U-K log full) 002460×2(U-R raw 기록 · U-P prd 스캔) 002499(U-K scan) = 13
+chk "행 수 13" "$(($(wc -l < "$P")-1))" "13"
 grep -q $'\tMerged\t' "$P" && bad "옛 스캔의 낡은 행(Merged)을 옮겼다" || ok "옛 스캔이 만든 낡은 행은 옮기지 않는다"
-chk "정렬 (런, 시각)" "$(awk -F'\t' 'NR>1{print $4}' "$P" | tr '\n' ' ')" "000938 001077 001093 002442 002443 002443 002443 002456 002457 002460 002460 002499 "
-chk "No 가 1..12" "$(awk -F'\t' 'NR>1{print $1}' "$P" | tr '\n' ' ')" "1 2 3 4 5 6 7 8 9 10 11 12 "
+chk "정렬 (런, 시각)" "$(awk -F'\t' 'NR>1{print $4}' "$P" | tr '\n' ' ')" "000938 001077 001093 002442 002442 002443 002443 002443 002456 002457 002460 002460 002499 "
+chk "No 가 1..13" "$(awk -F'\t' 'NR>1{print $1}' "$P" | tr '\n' ' ')" "1 2 3 4 5 6 7 8 9 10 11 12 13 "
 chk "모든 행이 25 열" "$(awk -F'\t' 'NR>1{print NF}' "$P" | sort -u | tr '\n' ' ')" "25 "
 
 echo "[2] 스캔에만 있는 옛 하드 : 시각은 복사 ctime, 로그만 있는 런은 log-only, 시작 서브런이 0 이 아니면 메모"
@@ -91,6 +96,9 @@ chk "SN-C 라벨 = ALL-003 (별칭 U-A 의 09-03 이 처음, U-OLD 09-01 다음)
 chk "  U-A 행도 같은 라벨 (같은 물리 하드)" "$(col "$P" $(rowof "$P" 002443 U-A) 13)" "RENE-ALL-003"
 chk "U-R (색인 13열 raw, 09-13) -> Type full·RAW, 라벨 RENE-RAW-001" "$(col "$P" $(rowof "$P" 002460 U-R) 5)/$(col "$P" $(rowof "$P" 002460 U-R) 13)" "full·RAW/RENE-RAW-001"
 chk "U-P (스캔 : PRD·PNG 만) -> Type full·PRD, 라벨 RENE-PRD-001" "$(col "$P" $(rowof "$P" 002460 U-P) 5)/$(col "$P" $(rowof "$P" 002460 U-P) 13)" "full·PRD/RENE-PRD-001"
+chk "U-M (스캔 : Merged 만, 느슨한 배치) -> Type full·MERGED, 라벨 RENE-MERGED-001" "$(col "$P" $(rowof "$P" 002442 U-M) 5)/$(col "$P" $(rowof "$P" 002442 U-M) 13)" "full·MERGED/RENE-MERGED-001"
+col "$P" $(rowof "$P" 002442 U-M) 25 | grep -q 'loose layout' && ok "  느슨한 배치 메모" || bad "메모 없음"
+chk "  Dest Path 는 런 폴더 없이" "$(col "$P" $(rowof "$P" 002442 U-M) 19)" "/backup_hdd/RENE_data_backup"
 chk "SN-D 라벨 = ALL-004" "$(col "$P" $(rowof "$P" 002443 U-D) 13)" "RENE-ALL-004"
 
 echo "[4] 재포맷으로 소실된 기록 : WIPED 표시 + 별칭 메모 + 손 메모 보존"
@@ -127,7 +135,7 @@ chk "스캔에만 있는 런(002499) 도 실린다 : full·RAW (FADC/SADC 만), 
 echo "[8] --commit : 시트 교체 + 백업 + 라벨 정본 + 문서. 다시 돌리면 라벨이 그대로 (안정)"
 run --commit >/dev/null 2>&1; rc=$?
 chk "rc=0" "$rc" "0"
-chk "시트 행 수 12" "$(($(wc -l < "$T/sheet.tsv")-1))" "12"
+chk "시트 행 수 13" "$(($(wc -l < "$T/sheet.tsv")-1))" "13"
 ls "$T/bak"/sheet-before-rebuild-*.tsv >/dev/null 2>&1 && ok "쓰기 전 백업" || bad "백업 없음"
 chk "백업 = 옛 시트" "$(md5sum < "$T/bak"/sheet-before-rebuild-*.tsv | cut -c1-8)" "$(md5sum < "$T/sheet.orig" | cut -c1-8)"
 grep -q $'^SN-OLD1\tRENE-ALL-001' "$T/disks.tsv" && ok "라벨 정본 disks.tsv" || bad "disks.tsv" "$(cat "$T/disks.tsv")"
@@ -137,7 +145,7 @@ grep -q '시리얼 미확인' "$T/disks.tsv" && ok "시리얼 모르는 하드�
 sed -i 's/^SN-OLD1\tRENE-ALL-001/SN-OLD1\tRENE-BK-KEEP/' "$T/disks.tsv"
 run --commit >/dev/null 2>&1
 chk "정본의 라벨이 이긴다" "$(col "$T/sheet.tsv" $(rowof "$T/sheet.tsv" 001077 U-OL) 13)" "RENE-BK-KEEP"
-chk "재실행해도 행 수 같다 (멱등)" "$(($(wc -l < "$T/sheet.tsv")-1))" "12"
+chk "재실행해도 행 수 같다 (멱등)" "$(($(wc -l < "$T/sheet.tsv")-1))" "13"
 
 echo "[9] 헤더가 다르면 아무것도 안 쓴다"
 printf 'A\tB\tC\n1\t2\t3\n' > "$T/bad.tsv"
@@ -145,10 +153,17 @@ python3 "$TOOL" --inventory "$T/inv" --index "$T/index" --sheet-tsv "$T/bad.tsv"
 [ "$rc" -ne 0 ] && ok "rc≠0" || bad "헤더 검사 없음"
 chk "안 썼다" "$(wc -l < "$T/bad.tsv")" "2"
 
+echo "[9b] 시트가 비어 있으면 (지운 뒤 쓰기 실패) 옛 행을 --old-sheet-tsv 에서 살려 그대로 다시 쓴다"
+: > "$T/empty.tsv"
+python3 "$TOOL" --inventory "$T/inv" --index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs" --aliases "$T/aliases" --known-serials "$T/known" \
+   --disks-tsv "$T/disks.tsv" --disks-md "$T/disks.md" --sheet-tsv "$T/empty.tsv" --old-sheet-tsv "$T/sheet.orig" --backup-dir "$T/bak" --commit >/dev/null 2>&1; rc=$?
+chk "rc=0" "$rc" "0"
+chk "행 수 13 (빈 시트 + 옛 백업)" "$(($(wc -l < "$T/empty.tsv")-1))" "13"
+chk "  손 열(KHU) 이 백업에서 살아났다" "$(col "$T/empty.tsv" $(rowof "$T/empty.tsv" 002443 U-A) 22)" "yes (RAW 21286)"
 echo "[10] 다시 붙이기(append_backup_rows.py) 가 재작성된 표 위에 그대로 붙는다 (마지막 시각 = 최대 시각)"
 printf '002461\tU-K\t2026-09-13 13:00:00\t10\t1000000000\tFADC_002461.root.00000\tSADC_002461.root.00009\tpart\t/backup_hdd\tST2000DM008-2FR102\tZK206014\t1953514584\n' >> "$T/index"
 out=$(python3 "$DIR/tools/sheetlog/append_backup_rows.py" --index "$T/index" --sheet-tsv "$T/sheet.tsv" --commit 2>&1)
 printf '%s' "$out" | grep -q '새 행 1' && ok "새 행 1" || bad "append 결과" "$out"
-chk "  No 13 으로 이어진다" "$(tail -1 "$T/sheet.tsv" | cut -f1,4)" "$(printf '13\t002461')"
+chk "  No 14 로 이어진다" "$(tail -1 "$T/sheet.tsv" | cut -f1,4)" "$(printf '14\t002461')"
 
 echo; echo "=========================================================="; printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"; echo "=========================================================="; [ "$FAIL" -eq 0 ]

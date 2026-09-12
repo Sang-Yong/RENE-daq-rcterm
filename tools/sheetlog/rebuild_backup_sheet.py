@@ -11,7 +11,7 @@ rebuild_backup_sheet.py — 외장하드 백업 기록 시트(back_up_hdd_log)�
                어느 갈래에서도 다시 만들 수 없는 옛 행은 그대로 옮긴다 — 행이 사라지는 일은 없다.
 
 라벨 : 물리 하드(시리얼, 없으면 UUID)마다 RENE-<종류>-NNN. 종류는 그 하드가 담은 것 — RAW(최상위 FADC·SADC 만) ·
-       PRD(PRD·PNG 만) · ALL(둘 다, 나누기 전의 옛 하드). NNN 은 종류별로 처음 담은 순서. 한 번 부여한 라벨은
+       PRD(PRD·PNG 만) · MERGED(Merged 만 — 재처리 캐시) · ALL(섞임, 나누기 전의 옛 하드). NNN 은 종류별로 처음 담은 순서. 한 번 부여한 라벨은
        docs/backup-disks/disks.tsv 에 남아 다시 바뀌지 않는다 (사용자 지시 2026-09-13 : RENE-PRD-00? · RENE-RAW-00?). 재포맷으로 UUID 가 바뀐 하드(aliases.tsv)는 새 UUID 의
        라벨을 받고 옛 기록은 '소실' 로 표시한다.
 
@@ -91,10 +91,13 @@ def run_cat(s):
     """스캔한 런 폴더가 담은 종류 : raw(최상위 FADC/SADC 만) · prd(PRD/PNG 만) · all(둘 다)."""
     raw = int(s["n_fadc"] or 0) + int(s["n_sadc"] or 0)
     prd = int(s["n_prd"] or 0)                   # PNG 는 어느 쪽에도 안 센다 (2026-05 의 손 분할은 PNG 를 RAW 쪽에 뒀다)
+    mrg = int(s["n_merged"] or 0)
     if raw and not prd:
         return "raw"
     if prd and not raw:
         return "prd"
+    if mrg and not raw and not prd:
+        return "merged"                          # Merged 만 담은 하드 (08-17~27 의 002442). 물리 자료가 아닌 재처리 캐시 (§11.149)
     return "all"
 
 
@@ -120,6 +123,7 @@ def main():
     ap.add_argument("--disks-tsv", default=os.path.join(DOCS, "disks.tsv"), help="라벨 정본 (읽고 갱신)")
     ap.add_argument("--disks-md", default=os.path.join(DOCS, "..", "BACKUP-DISKS.md"))
     ap.add_argument("--sheet-tsv", default="")
+    ap.add_argument("--old-sheet-tsv", default="", help="시트가 비어 있을 때 옛 행(손 열)을 이 TSV(백업)에서 읽는다")
     ap.add_argument("--out-tsv", default="", help="미리보기 결과를 이 TSV 로")
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--creds", default="")
@@ -150,7 +154,11 @@ def main():
         cr = Credentials.from_service_account_file(creds, scopes=SCOPES)
         ws = gspread.authorize(cr).open_by_key(SHEET_ID).get_worksheet_by_id(GID)
         grid = ws.get_all_values()
-    if grid and [c.strip() for c in grid[0][:3]] != HEADER[:3]:
+    if not grid or not any(c.strip() for c in grid[0]):
+        #  비어 있다 (첫 발행 전이거나, 지운 뒤 쓰기가 실패한 상태). 손 열은 --old-sheet-tsv (마지막 백업) 에서 살린다
+        print("[WARN] 시트가 비어 있다" + (f" — 옛 행은 {a.old_sheet_tsv} 에서" if a.old_sheet_tsv else ""))
+        grid = [ln.split("\t") for ln in read_lines(a.old_sheet_tsv) if ln.strip()] if a.old_sheet_tsv else [HEADER]
+    if [c.strip() for c in grid[0][:3]] != HEADER[:3]:
         sys.exit(f"[FATAL] 헤더가 기대와 다르다 : {grid[0][:5]}")
     old_rows = [r + [""] * (len(HEADER) - len(r)) for r in grid[1:] if any(c.strip() for c in r)]
     old_by_key = {}
@@ -257,7 +265,7 @@ def main():
                 mode = "log-only"                       # PRD/Run_DLY_THR.log 하나뿐 — 자료는 이 하드에 없다
             else:
                 c = run_cat(s)
-                if c in ("raw", "prd"):
+                if c in ("raw", "prd", "merged"):
                     mode = f"{mode}·{c.upper()}"
             rng = f"{s['sub_lo']}~{s['sub_hi']}" if s["sub_lo"] and s["sub_hi"] else ""
             left = "" if srcdirs is None else ("0" if run not in srcdirs else "(still on server)")
@@ -356,7 +364,7 @@ def main():
     disk_lines = ["# 외장하드 목록 — 라벨 정본. rebuild_backup_sheet.py 가 갱신한다. 라벨 열은 한 번 정해지면 바뀌지 않는다.",
                   "# key(serial|uuid)\tlabel\tserial\tmodel\twwn\tuuids\tcapacity\tfirst_ts\tlast_ts\truns\tfiles\tGB\tscanned_at\tnote"]
     md = ["# 외장하드 백업 — 하드 목록과 라벨\n", "`tools/sheetlog/rebuild_backup_sheet.py` 가 만든다. 손으로 고치지 말 것 (정본은 `docs/backup-disks/disks.tsv`).\n",
-          "라벨은 **하드에 스티커로 붙이는 이름**이다 : `RENE-<종류>-NNN` (RAW = 원시 자료만 · PRD = PRD·PNG 만 · ALL = 둘 다, 나누기 전). 번호는 종류별로 처음 담은 순서. 시리얼은 하드에 새겨진 제조사 값(`udevadm`).\n",
+          "라벨은 **하드에 스티커로 붙이는 이름**이다 : `RENE-<종류>-NNN` (RAW = 원시 자료만 · PRD = PRD·PNG 만 · MERGED = Merged 만(재처리 캐시) · ALL = 섞임, 나누기 전). 번호는 종류별로 처음 담은 순서. 시리얼은 하드에 새겨진 제조사 값(`udevadm`).\n",
           "| 라벨 | 시리얼 | 모델 | UUID | 처음~마지막 | 런 수 | 파일 | GB | 스캔 | 비고 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for pk in sorted(disk_info, key=lambda k: first_ts.get(k, "")):
         di = disk_info[pk]; lab = labels.get(pk, "")
@@ -402,8 +410,11 @@ def main():
                 f.write("\t".join(r) + "\n")
         back = [ln.split("\t") for ln in read_lines(a.sheet_tsv) if ln.strip()][1:]
     else:
-        ws.clear()
+        #  ★ 먼저 쓰고, 남는 아랫줄만 지운다. clear() 뒤에 update() 가 실패하면 시트가 통째로 빈다 (2026-09-13 00:3x 에 겪었다)
         ws.update(range_name="A1", values=[HEADER] + out, value_input_option="RAW")
+        old_n = len(grid)
+        if old_n > len(out) + 1:
+            ws.batch_clear([f"A{len(out) + 2}:Z{old_n + 5}"])
         back = [r for r in ws.get_all_values()[1:] if any(c.strip() for c in r)]
     if len(back) != len(out) or any([c for c in b[:len(HEADER)]] + [""] * (len(HEADER) - len(b)) != o for b, o in zip(back, out)):
         sys.exit(f"[FATAL] 되읽은 표가 쓴 것과 다르다 (백업 {bak})")

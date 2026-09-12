@@ -1,0 +1,3 @@
+#disk	/backup_hdd	/dev/sdb1	ad07fc77-ca3d-4763-afcb-8ee541213a34	ST2000DM008-2FR102	ZK205ZZF	0x5000c500c8b280ae	1967846088704	1849758867456	2026-08-17 23:22:01	2026-09-13 00:34:01
+#cols	run	files	bytes	sub_lo	sub_hi	first_file	last_file	copied_from	copied_to	manifest_lines	n_fadc	n_sadc	n_prd	n_merged	n_png	n_other	layout
+002442	8183	1841856383639			Merged/.MERGED_002442.root.02419.uF4Bof	Merged/MERGED_002442.root.08195	2026-08-17 23:33:42	2026-08-26 16:35:48	0	0	0	0	8183	0	0	loose
