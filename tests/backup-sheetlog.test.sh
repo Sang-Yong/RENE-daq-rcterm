@@ -122,6 +122,15 @@ grep -q 'build=NEW' "$NOTIFY_CALLS" && ok "새 세션 NEW 판정 알림" || bad 
 : > "$T/pid"; : > "$NOTIFY_CALLS"; runcron
 grep -qE '세션 끝남' "$NOTIFY_CALLS" "$T/cron.log" && ok "세션 종료 알림" || bad "종료 알림 없음"
 grep -q 'session_pid=$' "$T/cron.state" && ok "state 에 빈 pid" || bad "state" "$(cat "$T/cron.state")"
+#  ★ 그 세션 뒤에 code= 줄이 없으면 '종료 기록 없음' 이라고 말한다 (09-12 : 09-10 의 옛 code=3 줄을 인용해 정상 종료처럼 보였다)
+grep -q '종료 기록 없음' "$NOTIFY_CALLS" && ok "★ 세션 뒤 code= 줄이 없으면 '종료 기록 없음'" || bad "옛 줄을 인용하거나 침묵" "$(cat "$NOTIFY_CALLS")"
+grep -q 'gid=219954027' "$NOTIFY_CALLS" && ok "종료 알림에 기록 시트 링크" || bad "시트 링크 없음"
+echo 333 > "$T/pid"; : > "$NOTIFY_CALLS"; runcron
+grep -q 'session_start=' "$T/cron.state" && [ -n "$(sed -n 's/^session_start=//p' "$T/cron.state")" ] && ok "세션 시작 시각을 state 에" || bad "session_start 없음" "$(cat "$T/cron.state")"
+grep -q 'gid=219954027' "$NOTIFY_CALLS" && ok "시작 알림에도 시트 링크" || bad "시트 링크 없음"
+echo "[Sun Sep 13 02:00:00 AM KST 2026] 종료 code=3 : 하드를 다 썼습니다" >> "$T/log"      # 세션(01:00) 뒤의 종료 줄
+: > "$T/pid"; : > "$NOTIFY_CALLS"; runcron
+grep -q '종료 : \[Sun Sep 13 02:00:00' "$NOTIFY_CALLS" && ok "세션 뒤의 code= 줄은 그대로 인용" || bad "인용 안 함" "$(cat "$NOTIFY_CALLS")"
 grep -q 'st -ge \\$mt' "$DIR/scripts/backup-sheetlog.sh" && ok "★ 판 판정은 세션 시작 시각 vs 파일 mtime (내용을 읽지 않는다)" || bad "내용으로 판정한다 (제자리 덮어쓰기에 오판)"
 [ ! -e "$T/../backup-sheetlog.state" ] && ok "state 는 환경변수로 준 자리에만 쓴다" || bad "state 가 엉뚱한 곳에"
 

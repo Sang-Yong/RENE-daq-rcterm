@@ -17,6 +17,9 @@
 #
 #  ★ 이 스크립트의 명령줄과 안의 명령 어디에도 백업 스크립트 이름을 넣지 말 것 —
 #    저장소 서버의 other_backup() 이 pgrep -f 로 그 이름을 찾는다 (§11.183).
+#  ★ 세션이 끝났을 때 '종료 code=' 줄은 그 세션이 시작한 뒤에 찍힌 것만 인용한다 (2026-09-12).
+#    09-11 23:39 세션이 마무리 코드에서 죽어(제자리 덮어쓰기, §11.186) code= 줄을 못 남겼는데,
+#    09-10 의 옛 줄을 그대로 인용해 '정상 종료' 처럼 읽히는 메일이 나갔다. 없으면 없다고 말한다.
 # ---------------------------------------------------------------------
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,6 +31,8 @@ LOCK=${BACKUP_SHEETLOG_LOCK:-/Data_ssd/LOG/.backup-sheetlog.lock}
 STATE=${BACKUP_SHEETLOG_STATE:-/Data_ssd/LOG/backup-sheetlog.state}
 STORE=${BACKUP_SHEETLOG_STORE:-store}
 REMOTE_DIR=${BACKUP_SHEETLOG_REMOTE_DIR:-'~/sykim/backup_log'}
+#  메일 본문에 넣는 기록 시트 (back_up_hdd_log 탭). storage-backup.sh 의 SHEET_URL 과 같은 곳
+SHEET_URL=${BACKUP_SHEET_URL:-https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0/edit?gid=219954027#gid=219954027}
 DRY=0; STATUS=0; NONOTIFY=0
 while [ $# -gt 0 ]; do
    case "$1" in
@@ -73,12 +78,23 @@ if [ "${SESS_PID:-}" != "${PREV_PID:-}" ]; then
       #    오판한다 (2026-09-12 16:39 오보). 세션이 파일보다 늦게 시작했을 때만 NEW.
       SESS_INFO=$(ssh -o ConnectTimeout=15 -o BatchMode=yes "$STORE" "f=\$(readlink /proc/$SESS_PID/fd/255); st=\$(date -d \"\$(ps -o lstart= -p $SESS_PID)\" +%s); mt=\$(stat -c %Y \$f); echo \"started \$(ps -o lstart= -p $SESS_PID) script \$f (mtime \$(date -d @\$mt '+%F %T')) build=\$( [ \$st -ge \$mt ] && echo NEW || echo OLD )\"" 2>/dev/null)
       log "백업 세션 바뀜 : pid ${PREV_PID:-없음} -> $SESS_PID  $SESS_INFO"
-      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 시작 pid $SESS_PID : $SESS_INFO" >/dev/null 2>&1
+      SESS_START=$(date -d "$(printf '%s' "$SESS_INFO" | sed -n 's/^started \(.*\) script .*/\1/p')" +%s 2>/dev/null || :)
+      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 시작 pid $SESS_PID : $SESS_INFO · 기록 시트 : $SHEET_URL" >/dev/null 2>&1
    else
-      log "백업 세션 끝남 : pid ${PREV_PID:-?} 사라짐. 마지막 : $(grep -E 'code=|backup done' "$T/log" | tail -1 | cut -c1-100)"
-      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 끝남 (pid ${PREV_PID:-?}) : $(grep -E 'code=' "$T/log" | tail -1 | cut -c1-90)" >/dev/null 2>&1
+      #  ★ 그 세션이 남긴 종료 줄인지 본다. 세션 시작보다 앞선 code= 줄은 지난 세션 것이다.
+      SESS_START=$(sed -n 's/^session_start=//p' "$STATE" 2>/dev/null)
+      END_LINE=$(grep -E 'code=' "$T/log" | tail -1)
+      END_T=$(date -d "$(printf '%s' "$END_LINE" | sed -n 's/^\[\([^]]*\)\].*/\1/p')" +%s 2>/dev/null || echo 0)
+      if [ -n "$END_LINE" ] && { [ -z "${SESS_START:-}" ] || [ "$END_T" -ge "$SESS_START" ]; }; then
+         END_MSG="종료 : $(printf '%s' "$END_LINE" | cut -c1-90)"
+      else
+         END_MSG="★ 종료 기록 없음 -- 세션이 시작한 뒤 'code=' 줄이 없다. 스크립트가 마무리(종합 메일)를 못 남기고 죽은 것. 마지막 기록 : $(tail -1 "$T/log" | cut -c1-90)"
+      fi
+      log "백업 세션 끝남 : pid ${PREV_PID:-?} 사라짐. $END_MSG"
+      [ "$NONOTIFY" -eq 1 ] || "$NOTIFY" --params "$PARAMS" backup_session --msg "저장소 백업 세션 끝남 (pid ${PREV_PID:-?}) : $END_MSG · 기록 시트 : $SHEET_URL" >/dev/null 2>&1
+      SESS_START=
    fi
-   [ "$DRY" -eq 1 ] || { grep -v '^session_pid=' "$STATE" 2>/dev/null > "$STATE.tmp"; echo "session_pid=$SESS_PID" >> "$STATE.tmp"; mv -f "$STATE.tmp" "$STATE"; }
+   [ "$DRY" -eq 1 ] || { grep -vE '^session_(pid|start)=' "$STATE" 2>/dev/null > "$STATE.tmp"; echo "session_pid=$SESS_PID" >> "$STATE.tmp"; echo "session_start=${SESS_START:-}" >> "$STATE.tmp"; mv -f "$STATE.tmp" "$STATE"; }
 fi
 
 ARGS=(--index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs")
@@ -88,7 +104,7 @@ printf '%s\n' "$out" | grep -E '^\[' | while read -r l; do log "$l"; done
 n=$(printf '%s\n' "$out" | sed -n 's/.*새 행 \([0-9]*\).*/\1/p' | head -1)
 if [ "$rc" -ne 0 ]; then log "등재 실패 rc=$rc"; exit 0; fi
 if [ "$DRY" -eq 1 ]; then exit 0; fi
-{ grep '^session_pid=' "$STATE" 2>/dev/null; printf 'last=%s rows=%s\n' "$(date '+%F %T')" "${n:-0}"; } > "$STATE.tmp" 2>/dev/null && mv -f "$STATE.tmp" "$STATE"
+{ grep -E '^session_(pid|start)=' "$STATE" 2>/dev/null; printf 'last=%s rows=%s\n' "$(date '+%F %T')" "${n:-0}"; } > "$STATE.tmp" 2>/dev/null && mv -f "$STATE.tmp" "$STATE"
 if [ "${n:-0}" -gt 0 ] && [ "$NONOTIFY" -eq 0 ]; then
    D=$(mktemp /tmp/backup-sheetlog-XXXXXX)
    printf '%s\n' "$out" > "$D"
