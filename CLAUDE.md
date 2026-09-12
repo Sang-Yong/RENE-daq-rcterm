@@ -910,8 +910,13 @@ full·RAW 323 · full·MERGED 3 · full·PRD 3 · part 17 · Notes 최대 456 �
 **스킬** `.claude/skills/RENE_daq_data_backup_management_skill/SKILL.md` — 어디에 무엇이 있나 · 라벨 규칙 · 백업 돌리기(RAW/PRD 순서) ·
 시트 · 하드 꽂고 빼기 · 배포 · 시험 · 밟았던 것 10 · 인수인계 순서. 백업/하드/시트/메일 일이면 자동으로 읽히고 `/RENE_daq_data_backup_management_skill` 로도 부른다.
 
-**시작 순서 (사용자가 chown·마운트를 마치면)** — `--dry-run` 둘 → `nohup … --disks /backup_hdd --only raw` → 끝나면(code=3 또는 done)
-`--disks /backup_hdd_2 --only prd`. 두 세션은 동시에 못 띄운다. 첫 메일에서 링크·요약을 확인한다.
+**✅ 시작 (01:50)** — 사용자가 두 하드에 `RENE_data_backup` 을 frontend 소유로 만들어 두어(마운트 루트는 root 그대로) 기동 화면이 '쓰기 가능'.
+`--dry-run` 둘 다 정상 : RAW 는 002458(FADC 854 서브런 609~1462 + SADC 1463)·002459·002460·002461… , PRD 는 002458·002459·002460·002461(부분).
+`store:/home/frontend/backup_raw_then_prd.sh` (setsid nohup) 가 **RAW 세션(베이 1, pid 856095) → 끝나면 30 초 뒤 PRD 세션(베이 2)** 을 차례로 돈다.
+로그 `~/sykim/backup_log/{code9.log, code9-prd.log, chain.log}`. 새 하드 : /backup_hdd = **Z4ZBXG5B** (UUID 97b26e2e) → RENE-RAW-003 예정,
+/backup_hdd_2 = **Z4ZBZE6T** (UUID 7bb59870) → RENE-PRD-002 예정 (라벨은 시트 재작성 때 스캔이 종류를 가려 준다).
+★ `ssh store '… setsid nohup … &'` 은 ssh 가 120 초 안에 안 돌아왔다(백그라운드가 세션을 붙든다). 다음부터는 `ssh -f` 나 `> /dev/null 2>&1 < /dev/null` 뒤 즉시 `exit`.
+02:37 의 cron(backup-sheetlog) 이 '세션 시작 … build=NEW' 메일을 보내야 한다 — 확인할 것.
 
 #### 11.188 ★★ 라벨을 RENE-<종류>-NNN 으로, 백업도 RAW 하드·PRD 하드로 나눠 담는다 (사용자 지시, 09-13 00:xx)
 
@@ -3290,7 +3295,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       ★ 2회차 세션 끝 (09-12 17:07, 마무리 코드에서 죽어 code=3 줄·종합 메일 없음, §11.186). 하드 2장 가득 (ZK206014 · Z4ZBXGAA).
+백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
+           옛 하드 26 장 전수 스캔·라벨 확정 (§11.187~188, docs/BACKUP-DISKS.md). 2회차 끝 09-12 17:07 (§11.186).
            002455~002457 완료 · 002458 1171 개 조각. 런 1,681 개 남음. 새 하드 2장 + 같은 명령이면 새 판으로 이어진다 (cron 이 build=NEW 알림)
            code9 는 이탈 감지 + 시리얼 + 시트 링크 + full 색인판 — 다음 세션부터. 시트 자동 등재 cron 37분 (§11.184).
            독 교체 검토 (§11.180)
