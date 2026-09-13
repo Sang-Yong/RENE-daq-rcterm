@@ -80,6 +80,7 @@ tools/monitor/ibd-summary.sh --dry-run
 | `docs/DATAFLOW.md` | 수집 -> 백업 -> 장기보관 데이터 이동의 구조와 실측 근거 |
 | `docs/ALARM.md` | 알람·메일·자동 USB 복구. 설정법과 알람이 울렸을 때 할 일 |
 | `.claude/skills/recovering-aborted-daq-runs/SKILL.md` | **런이 비정상 종료했을 때 무엇부터 하나.** Claude Code 가 증상을 보면 스스로 읽는다 |
+| `docs/BACKUP-MANUAL.md` | **외장하드 백업 운용 매뉴얼 (다음 사람용)** — 하드 넣기 · 띄우기 · 메일 읽기 · 빼고 라벨 붙이기 · 문제 표. 절차만 |
 | `.claude/skills/RENE_daq_data_backup_management_skill/SKILL.md` | **외장하드 백업 관리 방법론** — RAW/PRD 나눠 담기 · 라벨 · 시트 재작성 · 배포 · 밟은 함정. 백업·하드·시트 작업이면 스스로 읽는다 (§11.189) |
 | `docs/RUNSUMMARY.md` | **런 서머리 모니터링의 구조 지도** — 파일 목록(신설/수정) · 원칙 · 산출물 · 검증 · 밖에서 이어서 보는 법. 모니터링을 이어받으면 여기부터 |
 | `tools/monitor/README.md` | 모니터링 5단계(2026-09-08~) — PRD/DST 에서 livetime·이벤트 수 -> DST(2차 프로덕션) -> IBD·Li/He·fast-n(예비) -> 효율 보정 rate 추이 -> 웹 표+발행 |
