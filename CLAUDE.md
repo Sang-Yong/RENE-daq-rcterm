@@ -891,6 +891,31 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.190 ★★ 런 서머리 자동화 재점검 — 이틀 동안 조용히 막혀 있었다 (사용자 지시, 09-13 23:2x)
+
+사용자 : "백업은 원하는 대로 됐다. 이제 DAQ runsummary 자동화를 다시 점검하고 개선하자." 상태를 보니 **9-11 18:27 부터 매시 회차가
+같은 자리에서 멈추고 있었다** — `last_run=4343`, 4344·4345 완결인데 표·시트·그림이 9-11 17:55 그대로.
+
+```
+websummary.log   2026-09-13 22:27:07 [FAIL] metrics --verify 불일치 -- metrics_source=dst 라 발행을 막는다
+                 [DIFF] run 4341_nGd : metrics ibd=74 acci=26 / legacy ibd=77 acci=26        ← 옛 런 하나가 전체를 막았다
+원인             4341 의 DST 가 런이 덜 끝났을 때(1,389/1,440 서브런, livetime 83,339 s 대 86,380 s) 만들어진 캐시였다.
+                 legacy(pair_summary)는 완결 뒤 계산돼 둘이 다르다. --verify 가 표 전체의 공통 행을 보므로 옛 런의 불일치가
+                 새 런의 발행을 영원히 막고, 실패 경로에 알림이 없어 **50 회차 동안 아무도 몰랐다.**
+조치             dst-build --list 4341 --force (새 서브런 51 개, 142 s) → metrics --force → [VERIFY] 공통 80 행, 불일치 0
+```
+
+**고친 것 (commit 232419e, websummary 시험 12 → 16)**
+
+| 무엇 | 어떻게 |
+|---|---|
+| 게이트 범위 | `metrics.sh --verify-runs <이번 런>` — **이번에 싣는 런만** 막는다. `ibd-summary` 뒤로 옮겨 legacy 행이 생긴 뒤 대조한다 (그 전엔 공통 행이 0 이라 뜻이 없었다). 공통 행이 없으면 '아직 대조 불가' = 통과 |
+| 옛 런 불일치 | 전체 `--verify` 는 경고. DIFF 줄에 livetime 을 찍어 어느 쪽이 낡았는지 보이고, **DST 쪽이 짧으면 그 자리에서 `dst-build --force` + `metrics --force` 로 한 번 자가 치유**한 뒤 다시 대조. 그래도 남으면 WARN + 알림(한 번), 발행은 계속 |
+| 알림 | 새 사건 `websummary` (daq-notify, 책임자). 단계 실패 · 게이트 불일치 · webroot · 복사 실패 전부. **같은 사유로는 한 번만** (`websummary.failstate`, DONE 에서 지움. 옛 런 경고는 `.warn` 에 따로, 전체 대조가 맞으면 지움) |
+| awk 함정 | verify 의 한글 주석에 작은따옴표가 들어가 awk 가 죽었다 — §11.174 ⓐ 와 같은 것. **awk 프로그램 안 주석에 따옴표 금지** |
+
+**결과** — 23:27 회차(옛 코드지만 4341 은 이미 고쳐진 뒤)가 4344·4345 의 ibd-summary 로 넘어갔다. __RESULT__
+
 #### 11.189 ★★ 새 하드 두 장으로 RAW/PRD 백업 시작 준비 — 메일에 '담긴 것' 요약, 시트 점검, 스킬화 (사용자 지시, 09-13 01:1x)
 
 사용자 : "새 하드 두 장 ext4 로 포맷해 마운트했다. RAW/PRD 백업 시작. 시트 다시 점검. 메일에 시트 링크와 하드에 담긴 런 번호·RAW/PRD 요약을
@@ -3328,6 +3353,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.190         ★ 런 서머리 자동화 : 옛 런(4341, 덜 끝난 DST)의 대조 불일치가 이틀간 발행을 막았는데 알림이 없었다.
+                게이트는 이번 런만 · 옛 런은 경고+자가치유 · 실패는 한 번 알림 (websummary 사건)
 §11.189         ★ 메일에 '담긴 것'(런·part/full·RAW/PRD·개수·서브런) 요약 + 시트 링크. 백업 관리 스킬 신설. 새 하드 2장 RAW/PRD 시작 준비
 §11.188         ★ 라벨 RENE-<RAW|PRD|ALL>-NNN (날짜 규칙 대체) + code9 `--only raw|prd` 로 RAW 하드·PRD 하드를 따로 채운다.
                 옛 하드 두 장 더 스캔 (ZK206JXR = 001742_1 RAW · ZK206KFR = 001742_2 PRD + 18 런). 시트 818 행 · 하드 15

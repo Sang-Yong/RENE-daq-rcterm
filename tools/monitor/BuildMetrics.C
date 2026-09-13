@@ -92,6 +92,22 @@ struct MetRow {                 // 열 순서는 WriteTsv 와 같아야 한다
 //  DST 를 읽는다. psd 는 sing 과 같은 길이(schema 1 이면 전부 -1),
 //  sats 는 schema 1 이면 비어 있다. 둘 다 '없음' 을 값으로 남겨 두어
 //  뒤에서 -1 / 비어 있음 으로 구분해 쓴다.
+//  DST 의 T_Info.live_s 만 읽는다 (파일을 통째로 안 읽는다). 없으면 -1.
+//  ★ 2026-09-13 : 표에 행이 있어도 DST 가 그 뒤에 다시 만들어졌으면(런이 덜 끝났을 때 만든 캐시 → 완결 뒤 재생성)
+//    행이 낡은 것이다. run 4341 이 그렇게 이틀 동안 legacy 와 어긋나 발행을 막았다. live_s 가 다르면 다시 계산한다.
+static double DstLiveOnly(const TString &path) {
+   if (gSystem->AccessPathName(path)) return -1;
+   TFile *f = TFile::Open(path, "READ");
+   if (!f || f->IsZombie()) { if (f) f->Close(); return -1; }
+   TTree *ti = (TTree *)f->Get("T_Info");
+   double live = -1;
+   if (ti && ti->GetEntries() > 0) {
+      Double_t l = -1; ti->SetBranchAddress("live_s", &l); ti->GetEntry(0); live = l;
+   }
+   f->Close();
+   return live;
+}
+
 static bool LoadDst(const TString &dst, std::vector<S1S2_Candidate> &sing,
                     std::vector<Float_t> &psd, std::vector<ReneSat> &sats,
                     std::vector<ReneMuon> &mu, double &liveS, int &nSubrun,
@@ -386,9 +402,17 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          SetChannel(ch);
          if (!rows.count(RowKey(run, ChannelTag(ch).Data()))) haveAll = false;
       }
-      if (!force && haveAll) { nSkip += 2; continue; }
-
       TString dst = out + TString::Format("dst/DST_%s.root", ReneRunStr(run).Data());
+      bool stale = false;
+      if (!force && haveAll) {
+         double rowLive = -1;
+         for (Channel ch : chans) { SetChannel(ch); auto it = rows.find(RowKey(run, ChannelTag(ch).Data())); if (it != rows.end()) { rowLive = it->second.liveS; break; } }
+         double dstLive = DstLiveOnly(dst);
+         if (dstLive >= 0 && rowLive >= 0 && std::fabs(dstLive - rowLive) > 0.5) {
+            stale = true;
+            printf("  [REDO] run %d : DST 가 표의 행보다 새롭다 (live %.1f s -> %.1f s). 다시 계산한다\n", run, rowLive, dstLive);
+         } else { nSkip += 2; continue; }
+      }
       std::vector<S1S2_Candidate> sing; std::vector<Float_t> psd;
       std::vector<ReneSat> sats; std::vector<ReneMuon> mu;
       double liveS = 0; int nSubrun = 0, dstSchema = 1;
@@ -472,7 +496,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          SetChannel(ch);
          std::string tag = ChannelTag(ch).Data();
          std::string key = RowKey(run, tag);
-         if (!force && rows.count(key)) { nSkip++; continue; }
+         if (!force && !stale && rows.count(key)) { nSkip++; continue; }
 
          PairWindows w2 = CurrentPairWindows();
          double s2LoMev = S2_E_MIN_MEV, s2HiMev = S2_E_MAX_MEV;
