@@ -56,8 +56,11 @@ RON=$(sed -n 's/.*on=\([0-9]*\).*/\1/p' "$T/cnt.txt"); ROFF=$(sed -n 's/.*off=\(
 DON=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); DOFF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$7} END{print s+0}' "$TSV")
 [ "$DON" = "$RON" ] && [ "$DOFF" = "$ROFF" ] && ok "★ 날짜별 IBD/우발 합 = 런별 PairAndCountW (on $RON, off $ROFF)" || bad "쌍 개수 불일치" "daily on=$DON off=$DOFF / run on=$RON off=$ROFF"
 #  ③ 산출물
-N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/40_*.png 2>/dev/null | wc -l)
-[ "$N" -eq 9 ] && ok "그림 32~40 아홉 장" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
+N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-2]_*.png 2>/dev/null | wc -l)
+[ "$N" -eq 21 ] && ok "그림 32~52 스물한 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
+head -5 "$TSV" | grep -q $'\tn_psd_rej\tfn_mode\tn_mu_rej$' && ok "표 머리에 n_psd_rej · fn_mode · n_mu_rej 열" || bad "표 머리" "$(grep '^#date' "$TSV")"
+FM=$(awk -F'\t' '!/^#/ {print $(NF-1)}' "$TSV" | sort -u | tr '\n' ' ')
+[ "$FM" = "0 " ] && ok "기본은 fn_mode 0 (사이드밴드) · PSD 컷 끔" || bad "fn_mode 열 '$FM'"
 [ -s "$T/out/daily_spectra.root" ] && ok "daily_spectra.root" || bad "스펙트럼 파일 없음"
 #  ④ 픽스처의 뮤온 상관 쌍(런당 500) 은 Li/He 적합이 잡아 빼고, 시간 무관 쌍(런당 1000, on-window 라 우발로는 안 빠진다) 이 남는다.
 #     -> Li/He 합 ≈ 1000, 배경 뺀 prompt 적분 ≈ 2000 (±10 %)
@@ -65,4 +68,22 @@ LI=$(echo "$OUT" | grep -E '\[SPEC\] n-Gd' | sed -n 's/.*Li\/He \([0-9.]*\).*/\1
 INT=$(echo "$OUT" | grep -E '\[SPEC\] n-Gd' | sed -n 's/.*prompt after \([0-9.]*\).*/\1/p')
 awk -v x="$LI" 'BEGIN{exit !(x > 900 && x < 1100)}' && ok "날짜별 Li/He 적합 합 ≈ 1000 ($LI)" || bad "Li/He $LI" "$(echo "$OUT" | grep SPEC)"
 awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 적분 ≈ 2000 ($INT)" || bad "prompt 적분 $INT" "$(echo "$OUT" | grep SPEC)"
+#  ⑤ 추가 컷 · 대안 규격화 (2026-09-14) : monitorcuts 키 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev 가 그대로 넘어가고,
+#     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
+DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
+echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0)" || bad "dry-run 인자" "$DRY"
+printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
+OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
+[ "$RC2" -eq 0 ] && ok "PSD 컷 + 꼬리 규격화 rc=0" || bad "rc=$RC2" "$(echo "$OUT2" | grep -E 'rror|FATAL' | head -3)"
+echo "$OUT2" | grep -qE '^\[FN  \] n-Gd : sideband [0-9.]+  used [0-9.]+  \(flat, normalized to the 8.5-12 MeV tail' && ok "[FN] 줄 : 꼬리 규격화 문구" || bad "[FN] 줄" "$(echo "$OUT2" | grep FN)"
+FM=$(awk -F'\t' '!/^#/ {print $(NF-1)}' "$TSV" | sort -u | tr '\n' ' ')
+[ "$FM" = "1 " ] && ok "fn_mode 열 = 1" || bad "fn_mode 열 '$FM'"
+NR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$(NF-2)+$NF} END{print s+0}' "$TSV")
+awk -v x="$NR" 'BEGIN{exit !(x >= 0 && x < 2998)}' && ok "PSD·뮤온 veto 로 버린 on 쌍 수가 표에 있다 ($NR, 합성 자료라 뜻은 없다)" || bad "n_psd_rej+n_mu_rej $NR"
+MR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$NF} END{print s+0}' "$TSV")
+[ "$MR" -gt 0 ] && ok "뮤온 veto 300 µs 가 실제로 쌍을 버린다 ($MR)" || bad "n_mu_rej $MR"
+LV=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%d", s}' "$TSV")
+awk -v a="$LV" -v b="$SUM" 'BEGIN{exit !(a < b)}' && ok "늘린 veto 만큼 라이브타임이 준다 ($LV < $SUM)" || bad "라이브타임 보정" "$LV vs $SUM"
+DON2=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV")
+[ "$((DON2 + NR))" = "$RON" ] && ok "★ on 쌍 = 남은 것 + PSD·뮤온 veto 로 버린 것 ($DON2 + $NR = $RON)" || bad "컷 회계" "on $DON2 + rej $NR != $RON"
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]

@@ -9,7 +9,8 @@
 //          <OutDir>/dst/DST_<run>.root  (dst-build.sh 산출물. 없는 런은 건너뛴다)
 //   출력   <OutDir>/daily_summary.tsv    날짜·채널마다 한 줄 : 라이브타임 · 런 수 · IBD · 우발 · 후보 · rate[/day] · fast-n · Li/He
 //          <OutDir>/daily_spectra.root   스펙트럼 히스토그램 전부
-//          <OutDir>/32..40_*.png         (ReneTrendPlot 규칙 : 채널별 쪽 · 선형축 · 번호 이름)
+//          <OutDir>/32..52_*.png         (32~36 날짜 추이 · 37~40 스펙트럼 전/후 · 41~44 배경 성분별 · 45~48 신호창 분해
+//                                         · 49~50 prompt PSD · 51~52 샤워링 뮤온 뒤 dt 와 Li/He 적합)
 //
 //   ---- 날짜에 어떻게 붙이나 ----
 //   * 사건 시각 = 런 시작 epoch + t_us·1e-6  (DST 의 t_us 는 런 안에서 이어지는 시각).  날짜는 이 PC 의 지역시(KST) 자정 기준.
@@ -22,12 +23,26 @@
 //              prompt 스펙트럼 모양은 신호창 안에서 평평, delayed 모양은 사이드밴드 쌍의 delayed 그대로
 //   * ⁹Li/⁸He : 날짜마다 직전 샤워링 뮤온까지의 dt 를 Daya Bay Eq.2 로 적합 (표본 lihe_min_cand 미만이면 lowstat=0)
 //              스펙트럼 모양은 '직전 샤워링 뮤온 뒤 3τ 안의 쌍' 에서 '직후(역방향) 3τ 안의 쌍' 을 뺀 초과분
+//   ---- 추가 컷 · 대안 규격화 (2026-09-14, 사용자 : "배경 컷이 더 있어야 한다. 신호 스펙트럼이 이상하다") ----
+//   * psdCutNsig > 0 : prompt 의 p_psd = (꼬리비율 − m_γ(E)) / σ_γ(E) 가 이 값을 넘는 쌍을 버린다 (NEOS §4.3.2.2 의 기각.
+//     m_γ·σ_γ 는 그 런의 clean single 을 에너지 밴드 6 개로 나눠 잰다 — BuildMetrics 와 같은 밴드). on/off 쌍에 똑같이 걸어
+//     우발 추정이 어긋나지 않게 한다. γ 수용은 3σ 에서 99.9 % 라 효율 보정은 하지 않는다. 버린 쌍의 스펙트럼을 41~44 에 그린다.
+//   * muVetoUs > 0 : prompt 가 **어느 veto 뮤온이든** 그 뒤 muVetoUs 안이면 쌍을 버린다 (DST 의 150 µs after-muon 컷을 늘리는 것).
+//     라이브타임은 그 런의 뮤온율로 exp(−R_μ·(muVetoUs−150 µs)) 만큼 줄여 센다. showerVetoMs > 0 은 샤워링 뮤온 뒤 ms 단위 veto
+//     (Li/He 를 직접 자른다. 적합 창 아래끝은 그 값 이상으로 올린다). 버린 쌍의 스펙트럼을 41~44 에 그린다 —
+//     그 모양이 '신호' 와 같으면 신호가 뮤온 유발 배경이라는 뜻이다.
+//   * fnNormMode = 1 : fast-n 평평한 높이를 사이드밴드(12~50 MeV, 실측 93 % 포화 = 에너지가 잘린 사건) 가 아니라
+//     **신호창 안의 고에너지 꼬리** [fnNormLoMev, S1 상한] 의 우발 뺀 on-window 쌍 수로 정한다. IBD prompt 는 ~8 MeV 에서
+//     끝나므로 그 위는 fast-n (+ Li/He 조금) 뿐이다. 사이드밴드 값은 대조용으로 범례에 남긴다.
 //   ★예비 표기는 metrics 와 같다 — fast-n · Li/He 는 분석팀 검증 전까지 물리로 읽지 말 것.
 #include <TCanvas.h>
 #include <TFile.h>
 #include <TH1D.h>
+#include <TF1.h>
 #include <TLegend.h>
+#include <TLine.h>
 #include <TPad.h>
+#include <THStack.h>
 #include <TStyle.h>
 #include <TString.h>
 #include <TSystem.h>
@@ -80,7 +95,7 @@ struct DayAcc {
    std::string day; double dayStart = 0;
    double live = 0; std::set<int> runs; int nsub = 0;
    long long nOn = 0, nOff = 0, nSide = 0;           // multiplicity 통과 쌍 : on · off · 사이드밴드(on)
-   long long nShower = 0;
+   long long nShower = 0, nPsdRej = 0, nMuRej = 0;   // 샤워링 뮤온 수 · PSD 로 버린 on 쌍 · 뮤온 veto 로 버린 on 쌍
    std::vector<double> dtPrev;                       // on 쌍의 직전 샤워링 뮤온까지 dt [s]  (Li/He 적합 표본)
    std::vector<double> dtNext;                       // 역방향 (대조)
    double nLihe = -1, eLihe = -1; std::string liheStat = "-";
@@ -119,10 +134,60 @@ static void DrawSpectrum(const TString &dir, const char *file, const char *title
    c->Print(dir + file + ".png");
 }
 
+struct BgComp { TH1D *h; std::string label; int color; };
+
+//  배경 성분별 스펙트럼 : 성분마다 다른 색, 범례에 적분. 선형축 + 로그 inset. side(0~50 MeV) 가 있으면 x 축을 50 까지 늘려 같이 그린다
+static void DrawBgComponents(const TString &dir, const char *file, const char *title, std::vector<BgComp> comps,
+                             TH1D *side, const char *sideLabel) {
+   TCanvas *c = new TCanvas(Form("c_%s", file), title, 1400, 700);
+   c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+   double xhi = side ? side->GetXaxis()->GetXmax() : comps[0].h->GetXaxis()->GetXmax();
+   //  축 범위는 '빼는' 성분(앞 셋)으로 잡는다 — multiplicity 기각분은 스무 배 커서 같이 재면 나머지가 납작해진다. 넘치는 것은 inset(로그) 에서 본다
+   double ymax = 0; for (size_t i = 0; i < comps.size() && i < 3; ++i) ymax = std::max(ymax, comps[i].h->GetMaximum());
+   for (size_t i = 3; i < comps.size(); ++i) if (comps[i].label.find("not subtracted") == std::string::npos) ymax = std::max(ymax, comps[i].h->GetMaximum());
+   //  사이드밴드(회색 점선)는 포화 사건이 30 MeV 한 빈에 몰려 축을 잡아먹는다 — 축 범위에 넣지 않는다 (inset 에서 본다)
+   TH1D *frame = new TH1D(Form("frame_%s", file), Form("%s;Energy [MeV];Events / bin", title), 10, 0, xhi);
+   frame->SetStats(0); frame->SetMinimum(0); frame->SetMaximum(ymax * 1.25 + 1); frame->GetXaxis()->SetTitleSize(0.045); frame->GetYaxis()->SetTitleSize(0.045);
+   frame->Draw();
+   TLegend *leg = new TLegend(0.30, 0.56, 0.95, 0.88); leg->SetBorderSize(0); leg->SetFillStyle(1001); leg->SetFillColor(kWhite); leg->SetTextSize(0.021);
+   for (auto &cp : comps) { cp.h->SetStats(0); cp.h->SetLineColor(cp.color); cp.h->SetLineWidth(2); cp.h->Draw("HIST SAME"); leg->AddEntry(cp.h, Form("%s : N = %.1f", cp.label.c_str(), cp.h->Integral()), "l"); }
+   if (side) { side->SetStats(0); side->SetLineColor(kGray + 2); side->SetLineWidth(2); side->SetLineStyle(2); side->Draw("HIST SAME"); leg->AddEntry(side, Form("%s : N = %.0f", sideLabel, side->Integral()), "l"); }
+   leg->Draw();
+   TPad *pd = new TPad(Form("ins_%s", file), "", 0.57, 0.15, 0.95, 0.55);
+   pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
+   double ymaxAll = ymax; for (auto &cp : comps) ymaxAll = std::max(ymaxAll, cp.h->GetMaximum());
+   TH1D *f2 = (TH1D *)frame->Clone(Form("%s_ins", frame->GetName())); f2->SetTitle(";;log scale"); f2->SetMinimum(0.5); f2->SetMaximum(ymaxAll * 3 + 2);
+   f2->GetXaxis()->SetLabelSize(0.07); f2->GetYaxis()->SetLabelSize(0.07); f2->GetYaxis()->SetTitleSize(0.07); f2->GetYaxis()->SetTitleOffset(1.0); f2->Draw();
+   for (auto &cp : comps) { TH1D *h2 = (TH1D *)cp.h->Clone(Form("%s_ins", cp.h->GetName())); h2->Draw("HIST SAME"); }
+   if (side) { TH1D *s2 = (TH1D *)side->Clone(Form("%s_ins", side->GetName())); s2->Draw("HIST SAME"); }
+   c->cd(); c->Print(dir + file + ".png");
+}
+
+//  신호창 분해 : 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음). 선형축
+static void DrawDecomposition(const TString &dir, const char *file, const char *title, TH1D *hAll, TH1D *hSig, std::vector<BgComp> comps) {
+   TCanvas *c = new TCanvas(Form("c_%s", file), title, 1400, 700);
+   c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+   THStack *st = new THStack(Form("st_%s", file), Form("%s;Energy [MeV];Events / %.2f MeV", title, hAll->GetBinWidth(1)));
+   TH1D *sig = (TH1D *)hSig->Clone(Form("%s_stack", hSig->GetName()));
+   for (int b = 1; b <= sig->GetNbinsX(); ++b) if (sig->GetBinContent(b) < 0) sig->SetBinContent(b, 0);
+   sig->SetFillColorAlpha(kRed + 1, 0.35); sig->SetLineColor(kRed + 1); st->Add(sig);
+   for (auto &cp : comps) { TH1D *h2 = (TH1D *)cp.h->Clone(Form("%s_stack", cp.h->GetName())); h2->SetFillColorAlpha(cp.color, 0.35); h2->SetLineColor(cp.color); st->Add(h2); }
+   st->Draw("HIST"); st->SetMaximum(hAll->GetMaximum() * 1.25);
+   st->GetXaxis()->SetTitleSize(0.045); st->GetYaxis()->SetTitleSize(0.045); st->GetYaxis()->SetTitleOffset(1.1);
+   TH1D *all = (TH1D *)hAll->Clone(Form("%s_pts", hAll->GetName())); all->SetStats(0); all->SetMarkerStyle(20); all->SetMarkerSize(0.9); all->SetLineColor(kBlack); all->Draw("E SAME");
+   TLegend *leg = new TLegend(0.58, 0.55, 0.95, 0.88); leg->SetBorderSize(0); leg->SetFillStyle(1001); leg->SetFillColor(kWhite); leg->SetTextSize(0.030);
+   leg->AddEntry(all, Form("all pairs (on-window)  N = %.0f", hAll->Integral()), "lp");
+   leg->AddEntry(sig, Form("signal (after subtraction)  N = %.0f", hSig->Integral()), "f");
+   for (size_t i = 0; i < comps.size(); ++i) leg->AddEntry(st->GetHists()->At((int)i + 1), Form("%s  N = %.1f", comps[i].label.c_str(), comps[i].h->Integral()), "f");
+   leg->Draw();
+   c->Print(dir + file + ".png");
+}
+
 // ---------------------------------------------------------------------------
 void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe = 20000, double liheFitLoS = 0.002,
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
-                double liheLiFrac = 1.0) {
+                double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
+                double muVetoUs = 0, double showerVetoMs = 0) {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -145,7 +210,30 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       }
       hDside[k] = new TH1D(Form("delayed_%s_sideband", fileTag[k]), "", nbE, eLo, eHi); hDside[k]->SetDirectory(nullptr);
    }
+   TH1D *hPside[2], *hPrej[2][2], *hDrej[2][2];          // 사이드밴드 prompt(0~50 MeV) · multiplicity 기각 쌍 (on/off)
+   for (int k = 0; k < 2; ++k) {
+      hPside[k] = new TH1D(Form("prompt_%s_sideband", fileTag[k]), "", 100, 0, 50); hPside[k]->SetDirectory(nullptr);
+      for (int o = 0; o < 2; ++o) {
+         hPrej[k][o] = new TH1D(Form("prompt_%s_multrej_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPrej[k][o]->SetDirectory(nullptr);
+         hDrej[k][o] = new TH1D(Form("delayed_%s_multrej_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hDrej[k][o]->SetDirectory(nullptr);
+      }
+   }
+   TH1D *hPsd[2][2], *hPpsdRej[2][2], *hDpsdRej[2][2], *hDtPrev[2], *hDtNext[2];   // p_psd(on/off) · PSD 로 버린 쌍 · 샤워 뒤 dt
+   TH1D *hPmuRej[2][2], *hDmuRej[2][2];                                          // 뮤온 veto 로 버린 쌍 (on/off)
+   for (int k = 0; k < 2; ++k) {
+      for (int o = 0; o < 2; ++o) {
+         hPsd[k][o] = new TH1D(Form("psd_%s_%s", fileTag[k], o ? "off" : "on"), "", 90, -6, 12); hPsd[k][o]->SetDirectory(nullptr);
+         hPpsdRej[k][o] = new TH1D(Form("prompt_%s_psdrej_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPpsdRej[k][o]->SetDirectory(nullptr);
+         hDpsdRej[k][o] = new TH1D(Form("delayed_%s_psdrej_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hDpsdRej[k][o]->SetDirectory(nullptr);
+         hPmuRej[k][o] = new TH1D(Form("prompt_%s_muveto_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPmuRej[k][o]->SetDirectory(nullptr);
+         hDmuRej[k][o] = new TH1D(Form("delayed_%s_muveto_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hDmuRej[k][o]->SetDirectory(nullptr);
+      }
+      hDtPrev[k] = new TH1D(Form("dt_prev_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtPrev[k]->SetDirectory(nullptr);
+      hDtNext[k] = new TH1D(Form("dt_next_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtNext[k]->SetDirectory(nullptr);
+   }
    double acciScale[2] = {1, 1}, fnScale[2] = {0, 0};    // fnScale = 신호창 폭 / 사이드밴드 폭
+   long long nPsdRejTot[2] = {0, 0}, nMuRejTot[2] = {0, 0}; double liveTot[2] = {0, 0}, showerTot[2] = {0, 0};
+   const double liheFitLoUse = std::max(liheFitLoS, showerVetoMs * 1e-3);   // 샤워 veto 를 걸면 그 아래는 비어 있다
 
    int nRunUsed = 0, nRunNoDst = 0, nRunSrc = 0;
    for (const auto &kv : meta) {
@@ -160,12 +248,36 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       if (!DailyLoadDst(dst, sing, psd, sats, mu, liveS, nSubrun, schema)) { nRunNoDst++; continue; }
       nRunUsed++;
       std::vector<double> showers = DailyShowerTimes(mu, muShowerNpe);
+      std::vector<double> muT;                                    // 모든 veto 뮤온 시각 (muVetoUs > 0 일 때만)
+      if (muVetoUs > 0) { muT.reserve(mu.size()); for (const auto &x : mu) muT.push_back(x.t_us); std::sort(muT.begin(), muT.end()); }
+      const double rMuAll = liveS > 0 ? mu.size() / liveS : 0, rShower = liveS > 0 ? showers.size() / liveS : 0;
+      double liveFac = 1.0;                                       // 늘린 veto 의 추가 데드타임 (DST 의 150 µs 는 이미 빠져 있다고 본다)
+      if (muVetoUs > 150) liveFac *= std::exp(-rMuAll * (muVetoUs - 150) * 1e-6);
+      if (showerVetoMs > 0) liveFac *= std::exp(-rShower * showerVetoMs * 1e-3);
       //  single ∪ 포화 (fast-n 사이드밴드용, BuildMetrics 와 같다)
       std::vector<S1S2_Candidate> all = sing;
       for (const auto &x : sats) if (x.pe > LOWER_LIMIT) all.push_back({-1, x.sub, x.t_us, (double)x.pe});
       std::sort(all.begin(), all.end());
       const double subLen = (m.span > 0 ? m.span : m.live) / m.nsub;
-      const double liveSub = liveS / std::max(1, nSubrun);
+      const double liveSub = liveS * liveFac / std::max(1, nSubrun);
+      //  PSD γ-band : 에너지 밴드별 clean single 꼬리비율의 평균·RMS (BuildMetrics 와 같은 밴드). 밴드에 100 개 미만이면 못 쓴다
+      static const double kBand[] = {0.6, 1.2, 2.0, 3.0, 4.5, 6.0, 12.0}; const int nB = 6;
+      double bm[6] = {0}, bs[6] = {0}; bool bok[6] = {false};
+      {
+         double S1[6] = {0}, S2[6] = {0}; long long N[6] = {0};
+         for (size_t i = 0; i < sing.size(); ++i) {
+            if (i >= psd.size() || psd[i] < 0) continue;
+            double mev = NpeToMeV(sing[i]._pe_sum);
+            for (int b = 0; b < nB; ++b) if (mev >= kBand[b] && mev < kBand[b + 1]) { S1[b] += psd[i]; S2[b] += (double)psd[i] * psd[i]; N[b]++; break; }
+         }
+         for (int b = 0; b < nB; ++b) if (N[b] >= 100) { bm[b] = S1[b] / N[b]; double v = S2[b] / N[b] - bm[b] * bm[b]; if (v > 0) { bs[b] = std::sqrt(v); bok[b] = true; } }
+      }
+      auto pPsd = [&](long long i1) -> double {          // p_psd. 없으면 -99
+         if (i1 < 0 || i1 >= (long long)psd.size() || psd[i1] < 0) return -99;
+         double mev = NpeToMeV(sing[i1]._pe_sum);
+         for (int b = 0; b < nB; ++b) if (mev >= kBand[b] && mev < kBand[b + 1]) return bok[b] ? (psd[i1] - bm[b]) / bs[b] : -99;
+         return -99;
+      };
 
       for (int k = 0; k < 2; ++k) {
          SetChannel(chans[k]);
@@ -183,26 +295,52 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          //  쌍
          std::vector<PairRec> pairs = PairListW(sing, w);
          for (const auto &p : pairs) {
-            if (!p.mult) continue;
+            double e1 = NpeToMeV(p.e1), e2 = NpeToMeV(p.e2); const int o = p.off ? 1 : 0;
+            if (!p.mult) { hPrej[k][o]->Fill(e1); hDrej[k][o]->Fill(e2); continue; }
             std::string d = DayOf(m.es + p.t1_us * 1e-6); DayAcc &a = acc[k][d]; a.day = d;
-            double e1 = NpeToMeV(p.e1), e2 = NpeToMeV(p.e2);
+            if (muVetoUs > 0 || showerVetoMs > 0) {
+               bool rej = false;
+               if (muVetoUs > 0) { auto it = std::lower_bound(muT.begin(), muT.end(), p.t1_us); if (it != muT.begin() && p.t1_us - *(it - 1) < muVetoUs) rej = true; }
+               if (!rej && showerVetoMs > 0) { double dps = DailyDtShower(p.t1_us, showers, false); if (dps >= 0 && dps < showerVetoMs * 1e-3) rej = true; }
+               if (rej) { hPmuRej[k][o]->Fill(e1); hDmuRej[k][o]->Fill(e2); if (!p.off) a.nMuRej++; continue; }
+            }
+            double pp = pPsd(p.i1);
+            if (pp > -50) hPsd[k][o]->Fill(std::max(-5.99, std::min(11.99, pp)));
+            if (psdCutNsig > 0 && pp > psdCutNsig) { hPpsdRej[k][o]->Fill(e1); hDpsdRej[k][o]->Fill(e2); if (!p.off) a.nPsdRej++; continue; }
             if (p.off) { a.nOff++; hP[k][1]->Fill(e1); hD[k][1]->Fill(e2); continue; }
             a.nOn++; hP[k][0]->Fill(e1); hD[k][0]->Fill(e2);
             double dp = DailyDtShower(p.t1_us, showers, false), dn = DailyDtShower(p.t1_us, showers, true);
-            if (dp >= 0) { a.dtPrev.push_back(dp); if (dp < 3 * kDailyTauLiS) { hPli[k][0]->Fill(e1); hDli[k][0]->Fill(e2); } }
-            if (dn >= 0) { a.dtNext.push_back(dn); if (dn < 3 * kDailyTauLiS) { hPli[k][1]->Fill(e1); hDli[k][1]->Fill(e2); } }
+            if (dp >= 0) { a.dtPrev.push_back(dp); hDtPrev[k]->Fill(dp); if (dp < 3 * kDailyTauLiS) { hPli[k][0]->Fill(e1); hDli[k][0]->Fill(e2); } }
+            if (dn >= 0) { a.dtNext.push_back(dn); hDtNext[k]->Fill(dn); if (dn < 3 * kDailyTauLiS) { hPli[k][1]->Fill(e1); hDli[k][1]->Fill(e2); } }
          }
          std::vector<PairRec> side = PairListW(all, wf);
          for (const auto &p : side) {
             if (!p.mult || p.off) continue;
             std::string d = DayOf(m.es + p.t1_us * 1e-6); acc[k][d].day = d; acc[k][d].nSide++;
-            hDside[k]->Fill(NpeToMeV(p.e2));
+            hDside[k]->Fill(NpeToMeV(p.e2)); hPside[k]->Fill(NpeToMeV(p.e1));
          }
       }
       printf("  [RUN ] %06d : singles %zu  showers %zu  live %.0f s  (%s)\n", m.run, sing.size(), showers.size(), liveS, DayOf(m.es).c_str());
    }
    printf("[INFO] 런 %d 개 사용 · DST 없음 %d · 선원 런 제외 %d\n", nRunUsed, nRunNoDst, nRunSrc);
    if (nRunUsed == 0) { printf("[FATAL] 쓸 런이 없다\n"); return; }
+
+   //  ---- fast-n 규격화 (채널 전체) : 사이드밴드 0차 외삽, 또는 신호창 고에너지 꼬리 ----
+   double nFnSide[2] = {0, 0}, nFnUse[2] = {0, 0}; std::string fnHow[2];
+   for (int k = 0; k < 2; ++k) {
+      SetChannel(chans[k]); PairWindows w = CurrentPairWindows();
+      double s1lo = NpeToMeV(w.s1lo), s1hi = NpeToMeV(w.s1hi);
+      long long nSideAll = 0; for (auto &kv : acc[k]) { nSideAll += kv.second.nSide; liveTot[k] += kv.second.live; showerTot[k] += kv.second.nShower; nPsdRejTot[k] += kv.second.nPsdRej; nMuRejTot[k] += kv.second.nMuRej; }
+      nFnSide[k] = nSideAll * fnScale[k];
+      int bS1 = hP[k][0]->FindBin(s1lo), bS2 = hP[k][0]->FindBin(std::min(s1hi, eHi - 1e-6)); int nbS = std::max(1, bS2 - bS1 + 1);
+      if (fnNormMode == 1) {
+         int bT1 = hP[k][0]->FindBin(std::max(fnNormLoMev, s1lo)), bT2 = bS2; int nbT = std::max(1, bT2 - bT1 + 1);
+         double tail = hP[k][0]->Integral(bT1, bT2) - acciScale[k] * hP[k][1]->Integral(bT1, bT2);
+         nFnUse[k] = std::max(0.0, tail) / nbT * nbS;
+         fnHow[k] = TString::Format("flat, normalized to the %.1f-%.0f MeV tail of the on-window prompt (acc. subtracted)", std::max(fnNormLoMev, s1lo), s1hi).Data();
+      } else { nFnUse[k] = nFnSide[k]; fnHow[k] = "flat, sideband 0th-order extrapolation"; }
+      printf("[FN  ] %s : sideband %.1f  used %.1f  (%s)  psd-rejected on-pairs %lld  muon-veto-rejected on-pairs %lld\n", chanName[k], nFnSide[k], nFnUse[k], fnHow[k].c_str(), nPsdRejTot[k], nMuRejTot[k]);
+   }
 
    //  ---- 날짜별 Li/He 적합 + 표 ----
    double nLiheTot[2] = {0, 0};
@@ -212,7 +350,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
            "# 날짜는 이 PC 의 지역시 자정 기준. live_s 는 서브런을 등분해 날짜에 나눠 붙인 값. rate 는 [/day] = 후보/live.\n"
            "# ★예비 : fast-n(0차 외삽) · Li/He(Daya Bay Eq.2, 표본 " << liheMinCand << " 미만이면 lowstat) 는 분석팀 검증 전.\n"
            "#date\ttag\tlive_s\tn_run\tn_subrun\tn_ibd\tn_ibd_acci\tacci_scaled\tn_cand\tcand_err\trate_per_day\trate_err"
-           "\tn_fn_side\tfn_flat\tn_shower\tn_lihe\te_lihe\tlihe_stat\truns\n";
+           "\tn_fn_side\tfn_flat\tn_shower\tn_lihe\te_lihe\tlihe_stat\truns\tn_psd_rej\tfn_mode\tn_mu_rej\n";
       for (int k = 0; k < 2; ++k) {
          SetChannel(chans[k]); std::string tag = ChannelTag(chans[k]).Data();
          for (auto &kv : acc[k]) {
@@ -228,7 +366,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                TH1D h(Form("hdt_%s_%s", fileTag[k], a.day.c_str()), "", 200, 0, liheFitHiS); h.SetDirectory(nullptr);
                for (double x : a.dtPrev) h.Fill(x);
                double nL, eL;
-               if (DailyFitLiHe(&h, Form("flihe_%s_%s", fileTag[k], a.day.c_str()), liheFitLoS, liheFitHiS, rMu, liheLiFrac, nL, eL)) {
+               if (DailyFitLiHe(&h, Form("flihe_%s_%s", fileTag[k], a.day.c_str()), liheFitLoUse, liheFitHiS, rMu, liheLiFrac, nL, eL)) {
                   a.nLihe = nL; a.eLihe = eL; a.liheStat = "ok"; nLiheTot[k] += nL;
                } else a.liheStat = "nofit";
             }
@@ -236,8 +374,10 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             o << a.day << '\t' << tag << '\t' << TString::Format("%.1f", a.live) << '\t' << a.runs.size() << '\t' << a.nsub << '\t'
               << a.nOn << '\t' << a.nOff << '\t' << TString::Format("%.2f", nAcci) << '\t' << TString::Format("%.2f", nCand) << '\t'
               << TString::Format("%.2f", err) << '\t' << TString::Format("%.2f", day > 0 ? nCand / day : 0) << '\t'
-              << TString::Format("%.2f", day > 0 ? err / day : 0) << '\t' << a.nSide << '\t' << TString::Format("%.2f", a.nSide * fnScale[k]) << '\t'
-              << a.nShower << '\t' << TString::Format("%.2f", a.nLihe) << '\t' << TString::Format("%.2f", a.eLihe) << '\t' << a.liheStat << '\t' << runs << '\n';
+              << TString::Format("%.2f", day > 0 ? err / day : 0) << '\t' << a.nSide << '\t'
+              << TString::Format("%.2f", fnNormMode == 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k]) << '\t'
+              << a.nShower << '\t' << TString::Format("%.2f", a.nLihe) << '\t' << TString::Format("%.2f", a.eLihe) << '\t' << a.liheStat << '\t' << runs
+              << '\t' << a.nPsdRej << '\t' << fnNormMode << '\t' << a.nMuRej << '\n';
          }
       }
    }
@@ -276,8 +416,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
    for (int k = 0; k < 2; ++k) {
       SetChannel(chans[k]); PairWindows w = CurrentPairWindows();
       double s1lo = NpeToMeV(w.s1lo), s1hi = NpeToMeV(w.s1hi);
-      long long nSideAll = 0; for (auto &kv : acc[k]) nSideAll += kv.second.nSide;
-      double nFn = nSideAll * fnScale[k];
+      double nFn = nFnUse[k];
       double nLi = nLiheTot[k];
       //  prompt : on − scale·off − fast-n(신호창 안 평평) − Li/He(초과분 템플릿을 n_lihe 로 규격화)
       TH1D *pAll = (TH1D *)hP[k][0]->Clone(Form("prompt_%s_all", fileTag[k]));
@@ -301,17 +440,123 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       if (nLi > 0 && dLi->Integral() > 0) { dLi->Scale(nLi / dLi->Integral()); dSub->Add(dLi, -1); }
       std::vector<std::pair<std::string, double>> parts = {
          {"accidental (off-window #times window ratio)", acciScale[k] * hP[k][1]->Integral()},
-         {"fast-n (sideband, flat)  [prelim]", nFn},
+         {fnNormMode == 1 ? "fast-n (flat, tail-normalized)  [prelim]" : "fast-n (sideband, flat)  [prelim]", nFn},
          {"^{9}Li/^{8}He (daily fits)  [prelim]", nLi}};
       DrawSpectrum(out, Form("%02d_spectrum_prompt_%s", 37 + 2 * k, fileTag[k]),
                    Form("Prompt energy spectrum of all IBD pairs, %s (all days)", chanName[k]), pAll, pSub, parts);
       DrawSpectrum(out, Form("%02d_spectrum_delayed_%s", 38 + 2 * k, fileTag[k]),
                    Form("Delayed energy spectrum of all IBD pairs, %s (all days)", chanName[k]), dAll, dSub, parts);
+      //  ---- 배경 성분별 스펙트럼 (41~44) 와 신호창 분해 (45~48) ----
+      TH1D *pAcc = (TH1D *)hP[k][1]->Clone(Form("prompt_%s_accidental_scaled", fileTag[k])); pAcc->Scale(acciScale[k]);
+      TH1D *dAcc = (TH1D *)hD[k][1]->Clone(Form("delayed_%s_accidental_scaled", fileTag[k])); dAcc->Scale(acciScale[k]);
+      TH1D *pRej = (TH1D *)hPrej[k][0]->Clone(Form("prompt_%s_multrej_excess", fileTag[k])); pRej->Add(hPrej[k][1], -acciScale[k]);
+      TH1D *dRej = (TH1D *)hDrej[k][0]->Clone(Form("delayed_%s_multrej_excess", fileTag[k])); dRej->Add(hDrej[k][1], -acciScale[k]);
+      for (TH1D *h : {pRej, dRej}) for (int b = 1; b <= h->GetNbinsX(); ++b) if (h->GetBinContent(b) < 0) h->SetBinContent(b, 0);
+      TH1D *pSideFull = (TH1D *)hPside[k]->Clone(Form("prompt_%s_sideband_raw", fileTag[k]));
+      TH1D *pPsdRej = (TH1D *)hPpsdRej[k][0]->Clone(Form("prompt_%s_psdrej_excess", fileTag[k])); pPsdRej->Add(hPpsdRej[k][1], -acciScale[k]);
+      TH1D *dPsdRej = (TH1D *)hDpsdRej[k][0]->Clone(Form("delayed_%s_psdrej_excess", fileTag[k])); dPsdRej->Add(hDpsdRej[k][1], -acciScale[k]);
+      for (TH1D *h : {pPsdRej, dPsdRej}) for (int b = 1; b <= h->GetNbinsX(); ++b) if (h->GetBinContent(b) < 0) h->SetBinContent(b, 0);
+      std::vector<BgComp> pc = {{pAcc, "accidental (off-window #times ratio)", (int)kBlue + 1},
+                                {pFn,  TString::Format("fast-n (%s)  [prelim]", fnHow[k].c_str()).Data(), (int)kGreen + 2},
+                                {pLi,  "^{9}Li/^{8}He template (after-shower excess), scaled to fits  [prelim]", (int)kMagenta + 1},
+                                {pRej, "multiplicity-rejected excess (multi-n indicator; not subtracted, may clip)", (int)kOrange + 7}};
+      std::vector<BgComp> dc = {{dAcc, "accidental (off-window #times ratio)", (int)kBlue + 1},
+                                {dFn,  "fast-n (sideband pairs' delayed shape, scaled)  [prelim]", (int)kGreen + 2},
+                                {dLi,  "^{9}Li/^{8}He template, scaled to fits  [prelim]", (int)kMagenta + 1},
+                                {dRej, "multiplicity-rejected excess (not subtracted, may clip)", (int)kOrange + 7}};
+      if (psdCutNsig > 0) {
+         pc.push_back({pPsdRej, TString::Format("PSD n-like prompt rejected (p_{psd} > %.1f), on #minus acc", psdCutNsig).Data(), (int)kCyan + 2});
+         dc.push_back({dPsdRej, TString::Format("PSD n-like prompt rejected (p_{psd} > %.1f), on #minus acc", psdCutNsig).Data(), (int)kCyan + 2});
+      }
+      TH1D *pMuRej = (TH1D *)hPmuRej[k][0]->Clone(Form("prompt_%s_muveto_excess", fileTag[k])); pMuRej->Add(hPmuRej[k][1], -acciScale[k]);
+      TH1D *dMuRej = (TH1D *)hDmuRej[k][0]->Clone(Form("delayed_%s_muveto_excess", fileTag[k])); dMuRej->Add(hDmuRej[k][1], -acciScale[k]);
+      for (TH1D *h : {pMuRej, dMuRej}) for (int b = 1; b <= h->GetNbinsX(); ++b) if (h->GetBinContent(b) < 0) h->SetBinContent(b, 0);
+      if (muVetoUs > 0 || showerVetoMs > 0) {
+         std::string lab = TString::Format("muon-veto rejected (%s%s), on #minus acc", muVetoUs > 0 ? TString::Format("< %.0f #mus after any veto muon", muVetoUs).Data() : "",
+                                           showerVetoMs > 0 ? TString::Format("%s< %.0f ms after shower", muVetoUs > 0 ? ", " : "", showerVetoMs).Data() : "").Data();
+         pc.push_back({pMuRej, lab, (int)kRed + 2}); dc.push_back({dMuRej, lab, (int)kRed + 2});
+      }
+      DrawBgComponents(out, Form("%02d_bgspec_prompt_%s", 41 + 2 * k, fileTag[k]),
+                       Form("Background components, prompt energy, %s (all days)", chanName[k]), pc,
+                       pSideFull, TString::Format("sideband pairs' raw prompt %.0f-%.0f MeV (saturated = pinned at 30; flat extrap. %.1f)", fnELoMev, fnEHiMev, nFnSide[k]).Data());
+      DrawBgComponents(out, Form("%02d_bgspec_delayed_%s", 42 + 2 * k, fileTag[k]),
+                       Form("Background components, delayed energy, %s (all days)", chanName[k]), dc, nullptr, "");
+      //  49~50 prompt PSD : on(검정) 대 off(파랑, 우발 비율로 규격화 = γ 참조). 컷 선
+      {
+         TCanvas *c = new TCanvas(Form("c_psd_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+         TH1D *on = (TH1D *)hPsd[k][0]->Clone(Form("psd_%s_on_draw", fileTag[k])); TH1D *of = (TH1D *)hPsd[k][1]->Clone(Form("psd_%s_off_draw", fileTag[k]));
+         of->Scale(acciScale[k]);
+         on->SetTitle(Form("Prompt PSD of IBD pairs, %s : p_{psd} = (tail ratio #minus m_{#gamma}(E)) / #sigma_{#gamma}(E);p_{psd} [#sigma];Pairs / 0.2", chanName[k]));
+         on->SetLineColor(kBlack); on->SetLineWidth(2); of->SetLineColor(kBlue + 1); of->SetLineWidth(2); of->SetLineStyle(2);
+         on->SetStats(0); on->SetMinimum(0); on->SetMaximum(std::max(on->GetMaximum(), of->GetMaximum()) * 1.25 + 1);
+         on->GetXaxis()->SetTitleSize(0.045); on->GetYaxis()->SetTitleSize(0.045);
+         on->Draw("HIST"); of->Draw("HIST SAME");
+         TLegend *lg = new TLegend(0.55, 0.62, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.030);
+         lg->AddEntry(on, Form("on-window pairs  N = %.0f", on->Integral()), "l");
+         lg->AddEntry(of, Form("off-window (accidental, scaled)  N = %.1f  = #gamma reference", of->Integral()), "l");
+         double fracOn = on->Integral() > 0 ? on->Integral(on->FindBin(3.0), on->GetNbinsX()) / on->Integral() : 0;
+         double fracOf = of->Integral() > 0 ? of->Integral(of->FindBin(3.0), of->GetNbinsX()) / of->Integral() : 0;
+         lg->AddEntry((TObject *)nullptr, Form("p_{psd} > 3 : on %.1f %%, off %.1f %%   (recoil-like excess = fast-n indicator)", 100 * fracOn, 100 * fracOf), "");
+         if (psdCutNsig > 0) { TLine *ln = new TLine(psdCutNsig, 0, psdCutNsig, on->GetMaximum() / 1.25); ln->SetLineColor(kRed + 1); ln->SetLineWidth(2); ln->Draw(); lg->AddEntry(ln, Form("cut : reject p_{psd} > %.1f  (rejected on-pairs %lld)", psdCutNsig, nPsdRejTot[k]), "l"); }
+         else lg->AddEntry((TObject *)nullptr, "cut : off (daily_psd_nsig <= 0)", "");
+         lg->Draw();
+         TPad *pd = new TPad(Form("ins_psd_%s", fileTag[k]), "", 0.57, 0.16, 0.95, 0.58);
+         pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
+         TH1D *on2 = (TH1D *)on->Clone(Form("%s_ins", on->GetName())); TH1D *of2 = (TH1D *)of->Clone(Form("%s_ins", of->GetName()));
+         on2->SetTitle(";;log scale"); on2->SetMinimum(0.5); on2->SetMaximum(on->GetMaximum() * 3);
+         on2->GetXaxis()->SetLabelSize(0.07); on2->GetYaxis()->SetLabelSize(0.07); on2->GetYaxis()->SetTitleSize(0.07); on2->GetYaxis()->SetTitleOffset(1.0);
+         on2->Draw("HIST"); of2->Draw("HIST SAME"); c->cd();
+         c->Print(out + Form("%02d_bgspec_psd_%s.png", 49 + k, fileTag[k]));
+      }
+      //  51~52 샤워링 뮤온 뒤 dt (Li/He 의 근거) : 직전(검정) · 직후(회색, 역방향 대조) · 전체 합 적합(빨강)
+      {
+         TCanvas *c = new TCanvas(Form("c_dt_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+         TH1D *hp = (TH1D *)hDtPrev[k]->Clone(Form("dt_prev_%s_draw", fileTag[k])); TH1D *hn = (TH1D *)hDtNext[k]->Clone(Form("dt_next_%s_draw", fileTag[k]));
+         hp->SetTitle(Form("Time since previous showering muon (> %.0f NPE), on-window pairs, %s;#Deltat_{#mu} [s];Pairs / %.3f s", muShowerNpe, chanName[k], hp->GetBinWidth(1)));
+         hp->SetLineColor(kBlack); hp->SetLineWidth(2); hn->SetLineColor(kGray + 2); hn->SetLineWidth(2); hn->SetLineStyle(2);
+         hp->SetStats(0); hp->SetMinimum(0); hp->SetMaximum(std::max(hp->GetMaximum(), hn->GetMaximum()) * 1.25 + 1);
+         hp->GetXaxis()->SetTitleSize(0.045); hp->GetYaxis()->SetTitleSize(0.045);
+         hp->Draw("HIST"); hn->Draw("HIST SAME");
+         double rMu = liveTot[k] > 0 ? showerTot[k] / liveTot[k] : 0; double nL = 0, eL = 0; bool fitOk = false;
+         if (rMu > 0 && hp->GetEntries() >= liheMinCand) fitOk = DailyFitLiHe(hp, Form("flihe_all_%s", fileTag[k]), liheFitLoUse, liheFitHiS, rMu, liheLiFrac, nL, eL);
+         TLegend *lg = new TLegend(0.45, 0.60, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.030);
+         lg->AddEntry(hp, Form("#Deltat to previous shower  N = %.0f", hp->Integral()), "l");
+         lg->AddEntry(hn, Form("#Deltat to next shower (reverse control)  N = %.0f", hn->Integral()), "l");
+         if (fitOk) {
+            TF1 *f = (TF1 *)hp->GetListOfFunctions()->FindObject(Form("flihe_all_%s", fileTag[k]));
+            TF1 *fd = new TF1(Form("flihe_draw_%s", fileTag[k]), "[3]*([0]*([4]*[5]*exp(-[5]*x)+(1-[4])*[6]*exp(-[6]*x)) + [1]*[2]*exp(-[2]*x))", liheFitLoUse, liheFitHiS);
+            fd->SetParameters(nL, 0, rMu, hp->GetBinWidth(1), liheLiFrac, 1.0 / kDailyTauLiS, 1.0 / kDailyTauHeS);
+            //  우발항 크기 : 적합에서 되읽는다 (DailyFitLiHe 는 N_LiHe 만 돌려주므로 총량에서 뺀다)
+            double nUnc = std::max(0.0, hp->Integral() - nL); fd->SetParameter(1, nUnc);
+            fd->SetLineColor(kRed + 1); fd->SetLineWidth(2); fd->Draw("SAME");
+            lg->AddEntry(fd, Form("Daya Bay Eq.2 fit on the sum : N_{LiHe} = %.1f #pm %.1f  (R_{#mu} = %.3f Hz, 1/R_{#mu} = %.2f s, #tau_{Li} = %.3f s)", nL, eL, rMu, rMu > 0 ? 1 / rMu : 0, kDailyTauLiS), "l");
+            (void)f;
+         } else lg->AddEntry((TObject *)nullptr, "fit : not done (no showers or too few pairs)", "");
+         lg->AddEntry((TObject *)nullptr, Form("sum of daily fits used for subtraction : %.1f  [prelim]", nLiheTot[k]), "");
+         lg->Draw();
+         TPad *pd = new TPad(Form("ins_dt_%s", fileTag[k]), "", 0.57, 0.16, 0.95, 0.56);
+         pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
+         TH1D *hp2 = (TH1D *)hp->Clone(Form("%s_ins", hp->GetName())); TH1D *hn2 = (TH1D *)hn->Clone(Form("%s_ins", hn->GetName()));
+         hp2->SetTitle(";;log scale"); hp2->SetMinimum(0.5); hp2->SetMaximum(hp->GetMaximum() * 3);
+         hp2->GetXaxis()->SetLabelSize(0.07); hp2->GetYaxis()->SetLabelSize(0.07); hp2->GetYaxis()->SetTitleSize(0.07); hp2->GetYaxis()->SetTitleOffset(1.0);
+         hp2->Draw("HIST"); hn2->Draw("HIST SAME"); c->cd();
+         c->Print(out + Form("%02d_bgspec_lihe_dt_%s.png", 51 + k, fileTag[k]));
+      }
+      DrawDecomposition(out, Form("%02d_decomp_prompt_%s", 45 + 2 * k, fileTag[k]),
+                        Form("Prompt spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
+                        pAll, pSub, {{pAcc, "accidental", (int)kBlue + 1}, {pFn, "fast-n [prelim]", (int)kGreen + 2}, {pLi, "Li/He [prelim]", (int)kMagenta + 1}});
+      DrawDecomposition(out, Form("%02d_decomp_delayed_%s", 46 + 2 * k, fileTag[k]),
+                        Form("Delayed spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
+                        dAll, dSub, {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}, {dLi, "Li/He [prelim]", (int)kMagenta + 1}});
       fs->cd();
-      for (TH1D *h : {pAll, pSub, pFn, pLi, dAll, dSub, dFn, dLi, hP[k][0], hP[k][1], hD[k][0], hD[k][1], hDside[k]}) h->Write();
+      for (TH1D *h : {pAll, pSub, pFn, pLi, dAll, dSub, dFn, dLi, hP[k][0], hP[k][1], hD[k][0], hD[k][1], hDside[k],
+                      pAcc, dAcc, pRej, dRej, pSideFull, hPrej[k][0], hPrej[k][1], hDrej[k][0], hDrej[k][1],
+                      hPsd[k][0], hPsd[k][1], pPsdRej, dPsdRej, hDtPrev[k], hDtNext[k], pMuRej, dMuRej}) h->Write();
       printf("  [SPEC] %s : on %.0f  off·scale %.1f  fast-n %.1f  Li/He %.1f  -> prompt after %.1f, delayed after %.1f\n",
              chanName[k], pAll->Integral(), acciScale[k] * hP[k][1]->Integral(), nFn, nLi, pSub->Integral(), dSub->Integral());
    }
    fs->Close();
-   printf("[SAVED] %sdaily_spectra.root + %s32..40_*.png\n", out.Data(), out.Data());
+   printf("[SAVED] %sdaily_spectra.root + %s32..52_*.png\n", out.Data(), out.Data());
 }

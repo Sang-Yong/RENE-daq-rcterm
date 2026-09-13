@@ -42,3 +42,17 @@ psd_nsig      = 3.0     # NEOS 는 p_psd > 3.5 를 기각. 여기서는 분리�
 #   그 함수라(AnalysisCondition.h : S2_MIN_NPE = MeVToNpe(6)), 's2_lo_mev = 6'
 #   은 기본 창을 정확히 되살린다. 적용된 실효값은 metrics_summary.tsv 의 컷
 #   열에 MeV 로 적히므로, 나중에 표만 보고도 어떤 컷의 결과인지 알 수 있다.
+
+# ---- 날짜 기준 단계(daily.sh → BuildDaily.C) 만의 손잡이 (2026-09-14) ----
+#   metrics.sh 는 이 키들을 읽지 않는다. 런별 지표는 그대로다.
+daily_psd_nsig = -1     # > 0 이면 prompt 의 p_psd = (꼬리비율 − m_γ(E))/σ_γ(E) 가 이 값을 넘는 쌍을 버린다 (on/off 같이).
+                        #   γ 수용 3σ 에서 99.9 %. -1 = 끔. 그림 49/50 이 on/off 의 p_psd 분포와 컷 선을 보여 준다
+fn_norm_mode   = 0      # fast-n 의 평평한 높이를 무엇으로 정하나.
+                        #   0 = 사이드밴드 [fn_e_lo, fn_e_hi] 의 0차 외삽 (BuildMetrics 와 같다. ★ 사이드밴드는 실측 93 % 가
+                        #       포화 사건이라 에너지가 잘려 있고, 새는 뮤온이 섞여 신호창으로 평평하게 외삽하면 과대 추정된다)
+                        #   1 = 신호창 안 고에너지 꼬리 [fn_norm_lo_mev, S1 상한] 의 우발 뺀 on-window 쌍 수로 규격화.
+                        #       IBD prompt 는 ~8 MeV 에서 끝나므로 그 위는 fast-n (+ Li/He 조금) 뿐이다
+fn_norm_lo_mev = 8.5
+mu_veto_us     = 0      # > 150 이면 prompt 가 어느 veto 뮤온이든 그 뒤 이 µs 안일 때 쌍을 버린다 (DST 의 150 µs 를 늘리는 것).
+                        #   라이브타임을 exp(−R_μ·(값−150 µs)) 로 줄여 센다. R_μ ≈ 0.8 kHz 라 300 µs 면 12 % 를 더 잃는다
+shower_veto_ms = 0      # > 0 이면 샤워링 뮤온(mu_shower_npe) 뒤 이 ms 안의 쌍을 버린다 (⁹Li/⁸He 직접 제거. Li/He 적합 창 아래끝도 이 값으로)

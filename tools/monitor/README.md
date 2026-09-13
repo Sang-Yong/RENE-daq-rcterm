@@ -624,6 +624,24 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 29~31 | `29_veto_rate.png` · `30_veto_panels.png` · `31_veto_panel1_pmts.png` | VETO (4v) |
 | 32~36 | `32_daily_livetime.png` · `33/34_daily_candidates_<ch>.png` · `35/36_daily_rate_<ch>.png` | **날짜 기준** (4d, `daily.sh`) : 날짜별 라이브타임 · 후보 수 · rate |
 | 37~40 | `37/39_spectrum_prompt_<ch>.png` · `38/40_spectrum_delayed_<ch>.png` | **전체 사건 에너지 스펙트럼** — 배경 빼기 전(검정) / 우발·fast-n·Li/He 를 뺀 뒤(빨강) |
+| 41~44 | `41/43_bgspec_prompt_<ch>.png` · `42/44_bgspec_delayed_<ch>.png` | **배경 성분별 에너지 스펙트럼** (전체 양) — 우발(파랑) · fast-n(초록) · Li/He 템플릿(자홍) · multiplicity 로 걸러낸 초과분(주황) · PSD 로 버린 것(청록, 컷을 켰을 때). prompt 쪽은 사이드밴드 쌍의 원 prompt(0~50 MeV, 회색 점선)도 같이 |
+| 45~48 | `45/47_decomp_prompt_<ch>.png` · `46/48_decomp_delayed_<ch>.png` | **신호창 분해** — 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음) |
+| 49~50 | `49/50_bgspec_psd_<ch>.png` | prompt 의 **p_psd** 분포 : on(검정) 대 off(파랑 = γ 참조). p_psd > 3 비율과 컷 선(`daily_psd_nsig`) |
+| 51~52 | `51/52_bgspec_lihe_dt_<ch>.png` | 직전 샤워링 뮤온까지의 **Δt** (검정) · 직후(회색, 역방향 대조) · 전체 합의 Daya Bay Eq.2 적합(빨강). Li/He 빼기의 근거 |
+
+**배경을 어떻게 고르나 (4d, 날짜 기준. 런별 BuildMetrics 와 같은 정의)** — 컷 값은 `/home/ojk/analysis3/essential/AnalysisCondition.h` 가 정본이고
+DST 단계(`dst-build.sh`)의 muon veto(SADC 패널 위/아래 동시) · after-muon 150 µs · 포화 제거는 이미 걸린 뒤다. 그 위에 :
+
+```
+쌍 만들기   prompt 1.2–12 MeV, delayed n-Gd 6–10 / n-H 1.87–2.59 MeV, Δt n-Gd [1,100] / n-H [2,400] µs (dt 안에서 가장 가까운 prompt 하나)
+multiplicity  prompt 앞 200(600) µs · delayed 뒤 400(1000) µs 에 1.2 MeV 넘는 single 이 없고, dt 창 안에 다른 single 이 없을 것  (괄호 = n-H)
+우발        off-window [1000, 1000+dtMax] µs 쌍 × (dtMax−dtMin)/dtMax.  스펙트럼 모양도 그 쌍 그대로
+fast-n      기본(fn_norm_mode 0) 사이드밴드 prompt 12–50 MeV(single ∪ 포화) 쌍 × 신호창 폭/사이드밴드 폭, 신호창 안에서 평평
+            ★ 사이드밴드는 93 % 가 포화 사건이라 에너지가 잘려 있고 새는 뮤온이 섞인다 → 신호창으로 평평하게 외삽하면 과대 추정
+            fn_norm_mode 1 : 신호창 고에너지 꼬리 [fn_norm_lo_mev(8.5), 12] 의 우발 뺀 on 쌍 수로 평평한 높이를 정한다
+Li/He       직전 샤워링 뮤온(target > mu_shower_npe=20000 NPE)까지 Δt 를 날짜마다 Daya Bay Eq.2 로 적합, 스펙트럼 모양은 '직전 3τ 안 쌍 − 직후 3τ 안 쌍'
+PSD 컷      daily_psd_nsig > 0 이면 prompt 의 p_psd > nsig 인 쌍을 버린다 (on/off 같이. γ 수용 99.9 % @3σ)
+```
 
 **2026-09-14 부터의 그림 규칙 (사용자 지시)** — `tools/monitor/ReneTrendPlot.h` 한 곳에서 그린다. ① n-Gd 와 n-H 는 같은 캔버스에 두지 않는다.
 ② 축은 언제나 선형. 값이 열 배 넘게 벌어지는 쪽에는 같은 그림 안에 **로그축 inset** 을 넣는다 — 점·범례가 없는 구석을 골라서(네 구석의 점 수를 세어 가장 빈 곳).
