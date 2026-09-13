@@ -72,7 +72,7 @@ awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 �
 #  ⑤ 추가 컷 · 대안 규격화 (2026-09-14) : monitorcuts 키 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev 가 그대로 넘어가고,
 #     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
 DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
-echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0)" || bad "dry-run 인자" "$DRY"
+echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst")' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst)" || bad "dry-run 인자" "$DRY"
 cp "$TSV" "$T/daily_default.tsv"
 printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
 OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
