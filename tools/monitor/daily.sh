@@ -15,6 +15,7 @@
 #      fn_norm_lo_mev   (기본 8.5)
 #      mu_veto_us       (기본 0 = 끔)   prompt 가 어느 veto 뮤온이든 그 뒤 이 µs 안이면 버린다 (DST 의 150 µs 를 늘리는 것. 라이브타임 보정)
 #      shower_veto_ms   (기본 0 = 끔)   샤워링 뮤온 뒤 이 ms 안이면 버린다 (Li/He 직접 제거. 적합 창 아래끝을 그 값으로 올린다)
+#      daily_iso_pre_us / daily_iso_post_us  (기본 -1 = 분석 코드 값 200/400, n-H 600/1000)  multiplicity 창을 바꾼다
 #      dst_subdir       (기본 dst)     읽을 DST 폴더. dst_m2 = 강한 veto(dst-build.sh --muon-mode 2). 런별 파이프라인은 dst/ 그대로
 #   ★ 라이브타임은 DST 의 벽시계 합에 exp(−R_μ·veto_us) 를 곱해 after-muon 데드타임을 뺀다 (4d 만. 패널 AND 에서 −12 %)
 # ---------------------------------------------------------------------
@@ -40,11 +41,12 @@ MU=$(getp mu_shower_npe 20000); LLO=$(getp lihe_fit_lo_s 0.002); LHI=$(getp lihe
 FLO=$(getp fn_e_lo_mev 12.0); FHI=$(getp fn_e_hi_mev 50.0); LFR=$(getp lihe_li_frac 1.0)
 PSDC=$(getp daily_psd_nsig -1); FNM=$(getp fn_norm_mode 0); FNLO=$(getp fn_norm_lo_mev 8.5)
 MUV=$(getp mu_veto_us 0); SHV=$(getp shower_veto_ms 0); DSTSUB=$(getp dst_subdir dst)
+ISOPRE=$(getp daily_iso_pre_us -1); ISOPOST=$(getp daily_iso_post_us -1)
 [ -d "$OUT" ] || { echo "출력 디렉터리가 없다 : $OUT (/scratch 마운트 확인)"; exit 1; }
 [ -r "$OUT/run_summary.tsv" ] || { echo "run_summary.tsv 가 없다 (run-summary.sh 먼저)"; exit 1; }
 command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh
 command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
-ARGS="\"$OUT/\", $MU, $LLO, $LHI, $LMIN, $FLO, $FHI, $LFR, $PSDC, $FNM, $FNLO, $MUV, $SHV, \"$DSTSUB\""
+ARGS="\"$OUT/\", $MU, $LLO, $LHI, $LMIN, $FLO, $FHI, $LFR, $PSDC, $FNM, $FNLO, $MUV, $SHV, \"$DSTSUB\", $ISOPRE, $ISOPOST"
 echo "날짜별 : $OUT/daily_summary.tsv · daily_spectra.root · 32..52_*.png   (컷 $CUTS · psd_nsig $PSDC · fn_norm $FNM/$FNLO · mu_veto ${MUV}us · shower_veto ${SHV}ms · dst $DSTSUB)"
 if [ "$DRY" = 1 ]; then echo "(dry-run) root -l -b -q '$DIR/BuildDaily.C+($ARGS)'"; exit 0; fi
 root -l -b -q "$DIR/BuildDaily.C+($ARGS)"

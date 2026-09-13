@@ -32,6 +32,8 @@
 //     라이브타임은 그 런의 뮤온율로 exp(−R_μ·(muVetoUs−150 µs)) 만큼 줄여 센다. showerVetoMs > 0 은 샤워링 뮤온 뒤 ms 단위 veto
 //     (Li/He 를 직접 자른다. 적합 창 아래끝은 그 값 이상으로 올린다). 버린 쌍의 스펙트럼을 41~44 에 그린다 —
 //     그 모양이 '신호' 와 같으면 신호가 뮤온 유발 배경이라는 뜻이다.
+//   * isoPreUs / isoPostUs > 0 : multiplicity 창을 이 값으로 바꾼다 (기본 −1 = AnalysisCondition.h 의 200/400 · n-H 600/1000).
+//     다중중성자 가족(2.2 · 8.5 MeV 봉우리)을 더 잡으려면 n-H 포획 시간(~200 µs)을 여러 번 덮게 늘린다. 손실은 single 율 × 창 폭.
 //   * dstSub : DST 폴더 이름. "dst" = 분석 코드의 패널 AND veto, "dst_m2" = 강한 veto(PMT 하나라도 트리거 또는 S_ADC > 50)로
 //     dst-build.sh --muon-mode 2 가 만든 것. 런별 파이프라인은 언제나 dst/ 를 쓴다.
 //   * 라이브타임 : DST 의 live_s 는 서브런 벽시계 합이라 after-muon 데드타임이 안 빠져 있다. 여기서 exp(−R_μ·veto_us) 를 곱한다
@@ -192,7 +194,8 @@ static void DrawDecomposition(const TString &dir, const char *file, const char *
 void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe = 20000, double liheFitLoS = 0.002,
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
-                double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst") {
+                double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst",
+                double isoPreUs = -1, double isoPostUs = -1) {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -291,6 +294,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       for (int k = 0; k < 2; ++k) {
          SetChannel(chans[k]);
          PairWindows w = CurrentPairWindows();
+         if (isoPreUs > 0) w.isoPre = isoPreUs; if (isoPostUs > 0) w.isoPost = isoPostUs;
          acciScale[k] = (w.dtMax > 0) ? (w.dtMax - w.dtMin) / w.dtMax : 1.0;
          PairWindows wf = w; wf.s1lo = MeVToNpe(fnELoMev); wf.s1hi = MeVToNpe(fnEHiMev);
          double sigW = NpeToMeV(w.s1hi) - NpeToMeV(w.s1lo), sideW = fnEHiMev - fnELoMev;
