@@ -368,6 +368,13 @@ else
    fi
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
 
+   #  날짜 기준 계산 + 스펙트럼 (daily_summary.tsv · 32~40_*.png, 2026-09-14). 런별 표와 별개. 발행을 막지 않는다 (WARN 만) --
+   #  전 런을 다시 세므로 10 분대가 든다. 실패해도 런별 표·시트는 그대로 나간다.
+   log "[RUN ] daily"
+   nice -n 15 ionice -c2 -n7 "$MON/daily.sh" >>"$LOG" 2>&1
+   drc=$?
+   if [ $drc -ne 0 ]; then log "[WARN] daily 실패 (exit=$drc) -- 날짜별 표·스펙트럼은 이번 회차에 갱신되지 않는다"; else log "[OK  ] daily"; fi
+
    #  VETO 패널 반응·veto 계수율 (veto_summary.tsv + 29~31_veto_*.png). 발행을 막지 않는다.
    log "[RUN ] veto-summary"
    nice -n 15 ionice -c2 -n7 "$MON/veto-summary.sh" --list "$NEWLIST" >>"$LOG" 2>&1

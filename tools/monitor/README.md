@@ -34,6 +34,7 @@ CLAUDE.md §11.12 — 스토리지 링크는 §11.115 이후 10G 라 지금은 �
 | 4v (신설 2026-09-09) | `veto-summary.sh` | `tools/psd/VetoHistoryScan.C` | PRD 서브런 표본 4개 | VETO 패널 AND 비율·veto Hz → `veto_summary.tsv` + `veto_*.png` 3장. 증분(런당 한 번). 표의 Panels 열 |
 | (과도기) | `ibd-summary.sh` | `BuildPairSummary.C` (+`RenePrdSingles.h`, `RenePairing.h`) | PRD | 페어링해서 IBD 후보 수·R_LL → `pair_summary.{txt,tsv}` — 교차검증용 + 4단계 입력, 유지 |
 | 4 (개편) | `rate-trend.sh` | `BuildRateTrend.C` | pair_summary | 효율 보정 + 시간축 추이 그림 11종 → `rate_trend.{pdf,tsv}`, `*.png` |
+| 4d (신설 2026-09-14) | `daily.sh` | `BuildDaily.C` + `ReneDailyCore.h` | run_summary · runtype · dst/ 전부 | **날짜 기준** : 서브런을 등분해 날짜별 라이브타임을 먼저 구하고, 쌍을 prompt 시각의 날짜로 세어 daily_summary.tsv (후보·우발·fast-n·Li/He 날짜별 적합·rate[/day]) + 전체 사건 prompt/delayed 스펙트럼(배경 뺀 것과 함께). 런별 표와 별개. 매번 전 런(10 분대) |
 | 4b (신설) | `bg-trend.sh` | `BuildBgTrend.C` | metrics_summary | 배경 지표 추이 6종 (accidental 교차검증 · fast-n · Li/He+역방향 대조 · PSD · n-like · 다중중성자) → `bg_trend.{pdf}`, `bg_trend_*.png` |
 | 5 (신설) | `websummary.sh` | `gen-runclass.sh` + `gen-summary-html.sh` + `publish_google.py` | 위 전부 + `runcatalog.db` | 런당 1줄 표(Type 열 포함) + 그림 + 구글사이트 발행. cron 매시 27분 |
 | legacy 자동화 | `monitor-all.sh` | — | — | 1·(과도기)·4 만 순서대로 수동/구식 자동화. 운영 cron 은 5단계(`websummary.sh`)가 갖는다(★ 아직 미설치 — 배포 대기, CLAUDE.md §11.142 참조) |
@@ -621,6 +622,8 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 17 | `17_evt_coinc.png` | VETO+Target coincidence rate [Hz] |
 | 18~28 | `18_bg_accidental_nGd.png` … `28_bg_multrej_nH.png` | 배경 지표 추이 (4b). accidental · fast-n · Li/He · psd · psd_nlike · multrej, 채널별 |
 | 29~31 | `29_veto_rate.png` · `30_veto_panels.png` · `31_veto_panel1_pmts.png` | VETO (4v) |
+| 32~36 | `32_daily_livetime.png` · `33/34_daily_candidates_<ch>.png` · `35/36_daily_rate_<ch>.png` | **날짜 기준** (4d, `daily.sh`) : 날짜별 라이브타임 · 후보 수 · rate |
+| 37~40 | `37/39_spectrum_prompt_<ch>.png` · `38/40_spectrum_delayed_<ch>.png` | **전체 사건 에너지 스펙트럼** — 배경 빼기 전(검정) / 우발·fast-n·Li/He 를 뺀 뒤(빨강) |
 
 **2026-09-14 부터의 그림 규칙 (사용자 지시)** — `tools/monitor/ReneTrendPlot.h` 한 곳에서 그린다. ① n-Gd 와 n-H 는 같은 캔버스에 두지 않는다.
 ② 축은 언제나 선형. 값이 열 배 넘게 벌어지는 쪽에는 같은 그림 안에 **로그축 inset** 을 넣는다 — 점·범례가 없는 구석을 골라서(네 구석의 점 수를 세어 가장 빈 곳).

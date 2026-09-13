@@ -891,6 +891,30 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.192 ★★ 날짜 기준 신호 계산 + 전체 사건 스펙트럼 — 새 단계 4d `daily.sh` (사용자 지시, 09-14 01:3x ~ 02:4x)
+
+사용자 : "신호 분석 코드를 전면 개선. IBD 후보는 런별이 아니라 날짜별로. 기존 방식은 그대로 두고 측정 기준을 날짜로 — 라이브타임을 먼저
+구하고 모든 런 자료를 시간에 대한 사건 수로 다시 계산. 최종 확인 그림은 누적 개수가 아니라 전체 사건 에너지 스펙트럼 : prompt · delayed
+두 캔버스, 각각 배경 빼기 전과 모든 배경을 뺀 뒤를 함께."
+
+**런별 파이프라인(BuildMetrics · RenePairing)은 한 줄도 안 건드렸다.** 별도 단계를 붙였다 (commit 아래).
+
+| 파일 | 하는 일 |
+|---|---|
+| `tools/monitor/ReneDailyCore.h` | `PairListW` — RenePairing.h 의 PairAndCountW 와 **같은 루프**로 쌍을 세는 대신 모은다(prompt 시각·NPE, delayed NPE, on/off, multiplicity). LoadDst·ShowerTimes·FitLiHe 사본 |
+| `tools/monitor/BuildDaily.C` | 런마다 DST 를 읽어 ① 라이브타임을 서브런 등분으로 날짜에 붙이고(서브런 중간 시각 기준, 지역시 자정) ② 쌍을 prompt 시각의 날짜로 센다 ③ 날짜마다 우발(off-window × 창 비율) · fast-n(사이드밴드 0차) · Li/He(직전 샤워링 뮤온 dt 를 Daya Bay Eq.2 로 날짜별 적합, 표본 50 미만 lowstat) ④ 전 기간 prompt/delayed 스펙트럼 : on − 우발(off 모양) − fast-n(prompt 는 신호창 안 평평, delayed 는 사이드밴드 쌍의 delayed 모양) − Li/He(직전 3τ 안 쌍 − 직후 3τ 안 쌍의 초과분 템플릿을 적합값으로 규격화) |
+| `tools/monitor/daily.sh` | 래퍼. monitorcuts.params 의 같은 키. 매번 전 런 (실측 43 런 12 분) |
+| `websummary.sh` | rate-trend 뒤 `daily` 단계. **발행을 막지 않는다** (WARN 만) |
+| `tests/monitor-daily.test.sh` | 합성 DST 두 런(자정에 걸침) 10 건 : 라이브타임 분배 · **날짜별 IBD/우발 합 = PairAndCountW 값(쌍 단위 판본의 동치)** · 그림 9 장 · Li/He 적합 ≈ 심은 값 · 배경 뺀 적분 |
+
+**산출물** `daily_summary.tsv`(날짜·채널 : live_s · n_run · n_ibd · n_ibd_acci · n_cand±err · rate[/day] · n_fn_side · fn_flat · n_shower · n_lihe±e · lihe_stat · runs) ·
+`daily_spectra.root` · 그림 32 라이브타임/일 · 33/34 후보/일 · 35/36 rate · 37/38 prompt·delayed n-Gd · 39/40 n-H.
+
+**실자료 (43 런, 41 일, 09-14 02:3x)** — n-Gd : 하루 라이브 86,380 s, 후보 45~70 /day (rate 그림 35). 스펙트럼 : on 3,182 쌍 − 우발 931.6 − fast-n 921.4 −
+Li/He 119.0 → **1,210**. n-H : on 2,411,303 − 우발 2,210,455 − fast-n 16,859 − Li/He 3,464 → 180,524. **★예비** — fast-n 평평 외삽·Li/He 템플릿은 분석팀 검증 전.
+delayed n-Gd 의 6.0~6.4 MeV 는 우발·fast-n 모양을 빼면 음수라 0 으로 보인다 — 빼는 모양이 거친 탓이며 실제 결손이 아니다.
+**근사 둘** : 라이브타임을 서브런 등분으로 나눈다(하루 경계 오차 ≤ 1 분) · 사건 시각 = 런 시작 epoch + t_us.
+
 #### 11.191 ★★ 추이 그림 전면 수정 — 채널별 쪽 · 선형축 + 로그 inset · 번호 붙은 파일 이름 (사용자 지시, 09-14 00:xx)
 
 사용자 : "런 서머리 그림 코드를 전부 고쳐라. nGd·nH 를 같은 캔버스에 그리지 말고, 기본은 선형축이되 로그에서만 보이는 값은 선형 그림 안에
@@ -3378,6 +3402,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.192         ★ 날짜 기준 신호 계산 + 전체 사건 prompt/delayed 스펙트럼(배경 전/후) — 새 단계 daily.sh (BuildDaily.C). 런별은 그대로. 그림 32~40
 §11.191         ★ 추이 그림 전면 수정 — 채널별 쪽 · 선형축 + 빈 구석 로그 inset · 파일 01~31 번호순 (ReneTrendPlot.h). 드라이브 그림 교체는 사용자 업로드 대기
 §11.190         ★ 런 서머리 자동화 : 옛 런(4341, 덜 끝난 DST)의 대조 불일치가 이틀간 발행을 막았는데 알림이 없었다.
                 게이트는 이번 런만 · 옛 런은 경고+자가치유 · 실패는 한 번 알림 (websummary 사건)
@@ -3463,7 +3488,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | G·H 를 뽑기 전에 `sudo umount` | 독은 한 USB 장치라 한쪽을 뽑으면 둘 다 떨어진다 | §11.170 |
 | **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 (`RENE-ALL-001` …) | §11.187 · §11.188 |
 | 새 하드부터는 `--only raw` / `--only prd` 로 베이별로 | RAW 하드·PRD 하드 분리 (사용자 지시). 라벨 RENE-RAW-002 · RENE-PRD-001 부터 | §11.188 |
-| 새 그림 31 장(zip)을 드라이브 `RENE_DAQ` 밑 새 폴더에 올리기 → `--init` | 그림 이름이 바뀌어 드라이브의 옛 20 장과 안 맞는다. 서비스 계정은 못 올린다 | §11.191 |
+| 새 그림 40 장(zip, 01~40)을 드라이브 `RENE_DAQ` 밑 새 폴더에 올리기 → `--init` | 그림 이름이 바뀌어 드라이브의 옛 20 장과 안 맞는다. 서비스 계정은 못 올린다 | §11.191 |
 | 시트의 `Storage Location` | 내가 알 수 없는 값이다 (`Disk Label` 은 이제 도구가 채운다) | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
 | NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |

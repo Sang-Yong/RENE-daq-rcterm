@@ -28,6 +28,7 @@
    (과도기) ibd-summary.sh  pair_summary.tsv         legacy 페어링 (PRD 재독). 3 의 교차검증 기준 + 4 의 입력
    4  rate-trend.sh         01..17_*.png 17 장       효율 보정 rate · 시간축 추이 (채널별 쪽, 선형축 + 로그 inset)
    4b bg-trend.sh           18..28_bg_*.png 11 장    배경 지표 추이 (채널별 쪽)
+   4d daily.sh              daily_summary.tsv + 32..40_*.png   날짜 기준 라이브타임·후보·rate + 전체 사건 prompt/delayed 스펙트럼(배경 빼기 전/후). 런별 표와 별개
    5  websummary.sh         summary.html + 시트/드라이브    완결 게이트 → 1~4b 순서 실행 → 표 → 발행
                             (gen-runclass.sh · gen-summary-html.sh · publish_google.py)
 ```
