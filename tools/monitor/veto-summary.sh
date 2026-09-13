@@ -13,7 +13,7 @@
 #     tools/psd/veto-history.sh 는 손으로 돌리는 도구였고 부를 때마다 범위 전체를
 #     다시 훑었다. 여기서는 런마다 서브런 표본(10·100·600·1200)의 트리거 비트를
 #     한 번만 읽어 $OUT/veto/thr_history.tsv 에 **누적**하고, 그것을 런당 1행으로
-#     모아 $OUT/veto_summary.tsv 를 다시 만든 뒤 추이 그림 veto_*.png 를 그린다.
+#     모아 $OUT/veto_summary.tsv 를 다시 만든 뒤 추이 그림 29~31_veto_*.png 를 그린다.
 #     표(gen-summary-html.sh)는 veto_summary.tsv 의 패널 % 로 '살아 있는 패널 수' 를,
 #     run_summary.tsv 의 종류별 이벤트 수로 FADC/VETO 계수율을 낸다.
 #
@@ -91,7 +91,7 @@ if [ -z "${todo// /}" ]; then
    [ "$DRY" -eq 1 ] && exit 0
 else
    echo "[veto] 잴 런 : $todo"
-   [ "$DRY" -eq 1 ] && { echo "[DRY] 서브런 $SUBS -> $H ; 표 $V ; 그림 $OUT/veto_*.png"; exit 0; }
+   [ "$DRY" -eq 1 ] && { echo "[DRY] 서브런 $SUBS -> $H ; 표 $V ; 그림 $OUT/29..31_veto_*.png"; exit 0; }
    for r in $todo; do
       if [ "$FORCE" -eq 1 ]; then grep -v "^$r	" "$H" > "$H.tmp" 2>/dev/null && mv -f "$H.tmp" "$H"; fi
       if scan_run "$r"; then echo "  run $r : $(grep -c "^$r	" "$H") 서브런"; else echo "  run $r : ★ 실패 (건너뜀)"; fi

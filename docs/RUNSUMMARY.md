@@ -26,8 +26,8 @@
    2  dst-build.sh ────┼──> dst/DST_<런>.root         ★ 2차 프로덕션. 뮤온 · 클린싱글(+psd) · 포화 사건
    3  metrics.sh ──────┘    metrics_summary.tsv      IBD · accidental · fast-n · Li/He · PSD · 다중중성자 (42 열)
    (과도기) ibd-summary.sh  pair_summary.tsv         legacy 페어링 (PRD 재독). 3 의 교차검증 기준 + 4 의 입력
-   4  rate-trend.sh         rate_trend_*.png 11 장   효율 보정 rate · 시간축 추이
-   4b bg-trend.sh           bg_trend_*.png 6 장      배경 지표 추이
+   4  rate-trend.sh         01..17_*.png 17 장       효율 보정 rate · 시간축 추이 (채널별 쪽, 선형축 + 로그 inset)
+   4b bg-trend.sh           18..28_bg_*.png 11 장    배경 지표 추이 (채널별 쪽)
    5  websummary.sh         summary.html + 시트/드라이브    완결 게이트 → 1~4b 순서 실행 → 표 → 발행
                             (gen-runclass.sh · gen-summary-html.sh · publish_google.py)
 ```
@@ -122,8 +122,8 @@ dst/DST_<런>.root      41 개 · 14 GB     2 단계 (스키마 2, 4280~4332 완
 cache/                 19 GB            2 단계 서브런 캐시 (재생 가능)
 metrics_summary.tsv    83 행 (# schema 2, 42 열)    3 단계 — 40 런 × n-Gd/n-H
 pair_summary.tsv       85 행     legacy
-rate_trend.tsv + rate_trend_*.png 11 장    4 단계
-bg_trend.pdf + bg_trend_*.png 6 장         4b
+rate_trend.tsv + 01..17_*.png 17 장        4 단계
+bg_trend.pdf + 18..28_bg_*.png 11 장       4b
 runclass.tsv 54 행 · summary.html (53 행)  5 단계 로컬 생성물
 web/                   532 KB    summary.html(legacy 출처, 26 런) · summary_dst.html(DST 출처, 53 행) · png 17 장
 psd/                   2.9 GB   psdscan/psdana_*.root · psd_summary(_gd).tsv · thr_history.tsv · veto_history.tsv · 그림

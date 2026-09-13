@@ -10,7 +10,7 @@
 //            <OutDir>/run_summary.tsv    livetime·DAQ 시작 시각(x축)
 //  쓰는 것 : <OutDir>/rate_trend.tsv     한 줄 = 런 × 채널
 //            <OutDir>/rate_trend.pdf     여러 쪽
-//            <OutDir>/rate_trend_<이름>.png  쪽마다 하나 (화면에 띄우기 좋다)
+//            <OutDir>/NN_rate_<이름>_<채널>.png · NN_evt_<종류>.png  쪽마다 하나, 번호순 (01~17)
 //
 //  x축은 언제나 '그 런의 DAQ 시작 시각'이다. 런이 하나 끝날 때마다 오른쪽
 //  끝에 점이 하나 붙는다. 지우고 다시 그리는 게 아니라 표가 누적되므로,
@@ -71,6 +71,7 @@
 #include <vector>
 
 #include RENE_COND_HEADER
+#include "ReneTrendPlot.h"      // 채널별 쪽 · 선형축 + 로그 inset · 번호 붙은 파일 이름 (2026-09-14)
 
 // ---------------------------------------------------------------------------
 struct TrendRow {
@@ -145,61 +146,11 @@ static std::map<int, std::pair<double, int>> LoadRllCache(const TString &p) {
 }
 
 // ---------------------------------------------------------------------------
-//  그림 한 장. x 는 언제나 시각이라 축 설정을 한 곳에 모은다.
-static void StyleTimeAxis(TMultiGraph *mg) {
-   TAxis *ax = mg->GetXaxis();
-   ax->SetTimeDisplay(1);
-   ax->SetTimeOffset(0, "gmt");
-   ax->SetTimeFormat("%y/%m/%d");
-   ax->SetNdivisions(507);
-   ax->SetTitleSize(0.045); ax->SetLabelSize(0.038);
-   ax->SetTitleOffset(1.5); ax->CenterTitle();
-   mg->GetYaxis()->SetTitleSize(0.045);
-   mg->GetYaxis()->SetLabelSize(0.040);
-   mg->GetYaxis()->SetTitleOffset(1.15);
-   mg->GetYaxis()->CenterTitle();
-}
-
-struct Series {
-   std::vector<double> x, y, ey;
-   std::string label;
-   int color = kBlack, marker = 20;
-};
-
-static void DrawPage(const TString &pdf, const TString &pngBase, const char *pngName,
-                     const char *title, const char *ytitle,
-                     std::vector<Series> &ss, const char *pdfMode,
-                     bool logy = false, int &pageNo = *(new int(0))) {
-   TCanvas *c = new TCanvas(Form("cTrend_%s", pngName), title, 1400, 700);
-   c->SetLeftMargin(0.11); c->SetBottomMargin(0.15); c->SetRightMargin(0.04);
-   c->SetGridx(); c->SetGridy();
-   if (logy) c->SetLogy();
-
-   TMultiGraph *mg = new TMultiGraph();
-   TLegend *leg = new TLegend(0.72, 0.74, 0.95, 0.90);
-   leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.035);
-
-   bool any = false;
-   for (auto &s : ss) {
-      if (s.x.empty()) continue;
-      TGraphErrors *g = new TGraphErrors((int)s.x.size(), s.x.data(), s.y.data(),
-                                         nullptr, s.ey.empty() ? nullptr : s.ey.data());
-      g->SetMarkerStyle(s.marker); g->SetMarkerSize(1.1);
-      g->SetMarkerColor(s.color);  g->SetLineColor(s.color); g->SetLineWidth(2);
-      mg->Add(g, "LP");
-      leg->AddEntry(g, s.label.c_str(), "lp");
-      any = true;
-   }
-   if (!any) { delete c; return; }
-
-   mg->SetTitle(Form("%s;DAQ start [YY/MM/DD];%s", title, ytitle));
-   mg->Draw("A");
-   StyleTimeAxis(mg);
-   if (ss.size() > 1) leg->Draw();
-   c->Print(pdf + pdfMode);
-   c->Print(pngBase + pngName + ".png");
-   pageNo++;
-}
+//  그림은 ReneTrendPlot.h 의 DrawTrendPage 가 그린다. 여기서는 계열만 만든다.
+using Series = TrendSeries;
+static const char *ChanName(const char *tag) { return std::string(tag) == "_nH" ? "n-H" : "n-Gd"; }
+static int         ChanColor(const char *tag) { return std::string(tag) == "_nH" ? kBlue + 1 : kRed + 1; }
+static int         ChanMarker(const char *tag) { return std::string(tag) == "_nH" ? 21 : 20; }
 
 // ---------------------------------------------------------------------------
 void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1.0) {
@@ -341,73 +292,68 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
    auto fRll     = [](const TrendRow &r, double) { return r.rll; };
 
    TString pdf = out + "rate_trend.pdf";
-   TString png = out + "rate_trend_";
-   int page = 0;
+   int page = 0; bool opened = false;
+   //  쪽 하나. 첫 쪽이 PDF 를 열고("("), 마지막은 아래에서 "]" 로 닫는다.
+   auto draw = [&](const char *file, const char *title, const char *yt, std::vector<Series> ss, bool logInset) {
+      TrendPageOpt o; o.logInset = logInset;
+      if (DrawTrendPage(pdf, out, file, title, yt, ss, opened ? "" : "(", o)) { opened = true; page++; }
+   };
+   const char *tags[2] = {"_nGd", "_nH"};
+   const char *fileTag[2] = {"nGd", "nH"};
 
-   {  // 1) 후보 수 (이벤트 수)
-      std::vector<Series> s{series("_nGd", kRed + 1, 20, fCand, fCandE),
-                            series("_nH",  kBlue + 1, 21, fCand, fCandE)};
-      //  두 채널의 크기가 100배쯤 달라서 선형축이면 n-Gd 이 바닥에 깔려 안 보인다
-      DrawPage(pdf, png, "candidates", "IBD candidates per run (accidental subtracted)",
-               "Candidates", s, "(", true, page);
+   //  ★ 채널은 쪽을 나눈다 (사용자 지시 2026-09-14). 두 채널의 크기가 100배쯤 달라 한 캔버스에 두면 한쪽이 바닥에 깔린다.
+   //    축은 선형이고, 값이 열 배 넘게 벌어지는 쪽에는 로그축 inset 이 붙는다 (빈 구석에).
+   for (int k = 0; k < 2; ++k) {                       // 01~02 후보 수
+      std::vector<Series> s{series(tags[k], ChanColor(tags[k]), ChanMarker(tags[k]), fCand, fCandE)};
+      s[0].label = ChanName(tags[k]);
+      draw(Form("%02d_rate_candidates_%s", 1 + k, fileTag[k]),
+           Form("IBD candidates per run, %s (accidental subtracted)", ChanName(tags[k])), "Candidates", s, true);
    }
-   {  // 2) 보정 전 rate
-      std::vector<Series> s{series("_nGd", kRed + 1, 20, fRaw, fRawE),
-                            series("_nH",  kBlue + 1, 21, fRaw, fRawE)};
-      DrawPage(pdf, png, "rate_raw", "Candidate rate (no efficiency correction)",
-               "Rate [/day]", s, "", true, page);
+   for (int k = 0; k < 2; ++k) {                       // 03~04 보정 전 rate
+      std::vector<Series> s{series(tags[k], ChanColor(tags[k]), ChanMarker(tags[k]), fRaw, fRawE)};
+      s[0].label = ChanName(tags[k]);
+      draw(Form("%02d_rate_raw_%s", 3 + k, fileTag[k]),
+           Form("Candidate rate, %s (no efficiency correction)", ChanName(tags[k])), "Rate [/day]", s, true);
    }
-   {  // 3) 효율 보정 rate  ★핵심
-      std::vector<Series> s{series("_nGd", kRed + 1, 20, fCorr, fCorrE),
-                            series("_nH",  kBlue + 1, 21, fCorr, fCorrE)};
-      DrawPage(pdf, png, "rate_corrected",
-               "Candidate rate corrected for #varepsilon_{T} #times #varepsilon_{iso}",
-               "Rate [/day]", s, "", true, page);
+   for (int k = 0; k < 2; ++k) {                       // 05~06 효율 보정 rate  ★핵심
+      std::vector<Series> s{series(tags[k], ChanColor(tags[k]), ChanMarker(tags[k]), fCorr, fCorrE)};
+      s[0].label = ChanName(tags[k]);
+      draw(Form("%02d_rate_corrected_%s", 5 + k, fileTag[k]),
+           Form("Candidate rate corrected for #varepsilon_{T} #times #varepsilon_{iso}, %s", ChanName(tags[k])),
+           "Rate [/day]", s, true);
    }
-   {  // 4) 효율
-      std::vector<Series> s{series("_nGd", kRed + 1, 20, fEpsIso, fZero),
-                            series("_nH",  kBlue + 1, 21, fEpsIso, fZero),
-                            series("_nGd", kRed + 1, 24, fEpsTot, fZero),
-                            series("_nH",  kBlue + 1, 25, fEpsTot, fZero)};
-      s[0].label = "#varepsilon_{iso} nGd"; s[1].label = "#varepsilon_{iso} nH";
-      s[2].label = "#varepsilon_{tot} nGd"; s[3].label = "#varepsilon_{tot} nH";
-      DrawPage(pdf, png, "efficiency", "Efficiencies used for the correction",
-               "Efficiency", s, "", false, page);
+   for (int k = 0; k < 2; ++k) {                       // 07~08 효율 (iso · tot)
+      std::vector<Series> s{series(tags[k], ChanColor(tags[k]), 20, fEpsIso, fZero),
+                            series(tags[k], ChanColor(tags[k]), 24, fEpsTot, fZero)};
+      s[0].label = "#varepsilon_{iso}"; s[1].label = "#varepsilon_{tot}";
+      draw(Form("%02d_rate_efficiency_%s", 7 + k, fileTag[k]),
+           Form("Efficiencies used for the correction, %s", ChanName(tags[k])), "Efficiency", s, false);
    }
-   {  // 5) 우발
-      std::vector<Series> s{series("_nGd", kRed + 1, 20, fAcci, fZero),
-                            series("_nH",  kBlue + 1, 21, fAcci, fZero)};
-      DrawPage(pdf, png, "accidental", "Accidental (window-scaled) per day",
-               "Accidental [/day]", s, "", true, page);
+   for (int k = 0; k < 2; ++k) {                       // 09~10 우발
+      std::vector<Series> s{series(tags[k], ChanColor(tags[k]), ChanMarker(tags[k]), fAcci, fZero)};
+      s[0].label = ChanName(tags[k]);
+      draw(Form("%02d_rate_accidental_%s", 9 + k, fileTag[k]),
+           Form("Accidental (window-scaled) per day, %s", ChanName(tags[k])), "Accidental [/day]", s, true);
    }
-   {  // 6) R_LL -- eps_iso 가 흔들리면 여기가 원인이다
+   {                                                   // 11 R_LL -- eps_iso 가 흔들리면 여기가 원인이다
       std::vector<Series> s{series("_nGd", kBlack, 20, fRll, fZero)};
       s[0].label = "R_{LL} (>1.2 MeV singles)";
-      DrawPage(pdf, png, "rll", "Singles rate above 1.2 MeV (drives #varepsilon_{iso})",
-               "R_{LL} [Hz]", s, "", false, page);
+      draw("11_rate_rll", "Singles rate above 1.2 MeV (drives #varepsilon_{iso})", "R_{LL} [Hz]", s, false);
    }
-   {  // 7) 누적 후보 수
-      std::vector<Series> s;
-      for (const char *tg : {"_nGd", "_nH"}) {
-         Series q; q.label = tg;
-         q.color = (std::string(tg) == "_nH") ? kBlue + 1 : kRed + 1;
-         q.marker = (std::string(tg) == "_nH") ? 21 : 20;
-         double acc = 0;
-         for (const auto &r : use) {
-            if (r.tag != tg) continue;
-            acc += r.nCand();
-            q.x.push_back(r.epoch); q.y.push_back(acc); q.ey.push_back(0);
-         }
-         s.push_back(q);
+   for (int k = 0; k < 2; ++k) {                       // 12~13 누적 후보 수
+      Series q; q.label = ChanName(tags[k]); q.color = ChanColor(tags[k]); q.marker = ChanMarker(tags[k]);
+      double acc = 0;
+      for (const auto &r : use) {
+         if (r.tag != tags[k]) continue;
+         acc += r.nCand();
+         q.add(r.epoch, acc, 0);
       }
-      //  ★ 8~11번(타입별 rate) 이 이 뒤에 이어 붙으므로 여기서는 더 이상
-      //  PDF 스트림을 닫지 않는다. 실측 : ")" 로 닫은 뒤 빈 pdfMode 로
-      //  또 Print 하면 새 단일쪽 PDF 로 통째로 덮어써 앞의 7쪽이 사라진다.
-      DrawPage(pdf, png, "cumulative", "Cumulative IBD candidates",
-               "#Sigma candidates", s, "", false, page);
+      std::vector<Series> s{q};
+      draw(Form("%02d_rate_cumulative_%s", 12 + k, fileTag[k]),
+           Form("Cumulative IBD candidates, %s", ChanName(tags[k])), "#Sigma candidates", s, false);
    }
-   {  // 8~11) DAQ 이벤트 rate (런당 점 하나. 표의 타입별 수와 같은 자료)
-      const char *nm[4] = {"evt_total", "evt_target", "evt_veto", "evt_coinc"};
+   {                                                   // 14~17 DAQ 이벤트 rate (런당 점 하나. 표의 타입별 수와 같은 자료)
+      const char *nm[4] = {"14_evt_total", "15_evt_target", "16_evt_veto", "17_evt_coinc"};
       const char *tt[4] = {"Total trigger rate", "Target only (FADC) rate",
                            "VETO only (SADC) rate", "VETO+Target coincidence rate"};
       const int   cl[4] = {kBlack, kRed + 1, kBlue + 1, kGreen + 2};
@@ -416,30 +362,19 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
          for (auto &kv : typeRate) {
             auto ie = epoch.find(kv.first);
             if (ie == epoch.end()) continue;
-            s.x.push_back(ie->second); s.y.push_back(kv.second[k]);
+            s.x.push_back(ie->second); s.y.push_back(kv.second[k]); s.ey.push_back(0);
          }
          std::vector<Series> v{s};
-         //  ★ 여기서는 안 닫는다 -- typeRate 가 비면(run_summary.tsv 가
-         //  없거나 live_s>0 인 행이 하나도 없거나 epoch 와 안 겹치면) 넷 다
-         //  DrawPage 의 "any 없으면 안 그린다" 로 조용히 반환해 버리므로,
-         //  마지막 쪽 하나에 마감을 맡기면 그 경우 PDF 가 영영 안 닫힌다
-         //  (리뷰에서 지적됨). 마감은 아래 블록에서 무조건 한다.
-         DrawPage(pdf, png, nm[k], tt[k], "Rate [Hz]", v, "", false, page);
+         draw(nm[k], tt[k], "Rate [Hz]", v, false);
       }
    }
-   {  // ★ PDF 마감 -- page 1(candidates) 이 이미 열어 둔 파일을 여기서
-      // 무조건 닫는다. 8~11 번이 전부 비어 아무 쪽도 안 찍혔더라도 이 블록은
-      // 데이터에 기대지 않고 항상 실행되므로 파일이 열린 채로 남지 않는다.
-      // "]" 는 그리지 않고 스트림만 닫는 모드다(실측 확인) -- 정상 경로
-      // (11쪽) 에는 빈 쪽을 보태지 않고, 8~11 번이 하나도 안 찍힌 경로에도
-      // 유효한 PDF 를 남긴다.
-      TCanvas *cClose = new TCanvas("cTrendClose", "close rate_trend.pdf", 1400, 700);
-      cClose->Print(pdf + "]");
-      delete cClose;
+   {  // ★ PDF 마감 -- 첫 쪽이 열어 둔 파일을 여기서 무조건 닫는다. "]" 는 그리지 않고 스트림만 닫는 모드다.
+      //  (쪽이 하나도 안 찍혔으면 열린 적이 없으니 닫지 않는다)
+      if (opened) { TCanvas *cClose = new TCanvas("cTrendClose", "close rate_trend.pdf", 1400, 700); cClose->Print(pdf + "]"); delete cClose; }
    }
 
    printf("[SAVED] %s  (%d 쪽)\n", pdf.Data(), page);
-   printf("[SAVED] %srate_trend_*.png\n", out.Data());
+   printf("[SAVED] %s01..17_*.png  (채널별 쪽, 선형축 + 로그 inset)\n", out.Data());
    printf("[SAVED] %srate_trend.tsv\n", out.Data());
    printf("[NOTE ] eps_E 는 %.3f 로 고정했다. 봉우리 fit 이 필요해 자동으로 못 구한다.\n", epsE);
 }

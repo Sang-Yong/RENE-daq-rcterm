@@ -21,8 +21,8 @@ H='#run\ttag\tsrc\tlive_s\tn_paired\tn_paired_acci\tn_ibd\tn_ibd_acci\tn_single\
      printf '%s\t_nH\t%s\t3500\t80073\t69961\t62601\t58894\t7601557\t88.0\t60\t68654229\t54030\t-1\t-1\tlowstat\t5\t1.4\t1.0\t0.95\t-1\t-1\t0.625\t69000.5\t120.0\t0.401\t0.078\t50\t2\t400\t1000\t1.87\t2.59\t600\t1000\t20000\t12\t50\t0.002\t10\t1\t3\n' "$r" "$src"
   done; } > "$T/a/metrics_summary.tsv"
 OUT=$(RUNSUM_OUT="$T/a" "$DIR/tools/monitor/bg-trend.sh" 2>&1); RC=$?
-N=$(ls "$T/a"/bg_trend_*.png 2>/dev/null | wc -l)
-CHK_A=$([ "$RC" -eq 0 ] && [ "$N" -eq 6 ] && [ -s "$T/a/bg_trend.pdf" ] && echo 1 || echo 0)
+N=$(ls "$T/a"/[0-9][0-9]_bg_*.png 2>/dev/null | wc -l)   # 2026-09-14 채널별 11 쪽 중 n-H fast-n(-1) 은 안 나온다 -> 10
+CHK_A=$([ "$RC" -eq 0 ] && [ "$N" -eq 10 ] && [ -s "$T/a/bg_trend.pdf" ] && echo 1 || echo 0)
 [ "$CHK_A" = 1 ] || { echo "[a] rc=$RC png=$N"; echo "$OUT" | tail -8; }
 #  선원 런이 빠졌는가 -- '선원 없는 런 행 4' (3 런 x 2 태그 - AmBe 2 행)
 echo "$OUT" | grep -q '선원 없는 런 행 4' && CHK_SRC=1 || { CHK_SRC=0; echo "$OUT" | grep '행'; }

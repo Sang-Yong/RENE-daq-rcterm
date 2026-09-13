@@ -60,7 +60,7 @@ fi
 command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
 [ -w "$OUT" ] || { echo "출력 디렉터리에 쓸 수 없다 : $OUT"; exit 1; }
 
-echo "출력  : $OUT/rate_trend.{pdf,tsv} + rate_trend_*.png"
+echo "출력  : $OUT/rate_trend.{pdf,tsv} + 01..17_*.png (채널별 쪽)"
 echo "eps_E : $EPSE  (1.0 이면 에너지창 효율은 보정에서 빠진 것이다)"
 
 root -l -b -q "$MACRO+(\"$OUT/\", $EPSE)"

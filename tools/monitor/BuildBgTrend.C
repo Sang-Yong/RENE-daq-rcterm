@@ -5,7 +5,7 @@
 //  읽는 것 : <OutDir>/metrics_summary.tsv   (BuildMetrics.C, # schema 2)
 //            <OutDir>/run_summary.tsv       epoch_start(x축)
 //  쓰는 것 : <OutDir>/bg_trend.pdf          여러 쪽
-//            <OutDir>/bg_trend_<이름>.png   쪽마다 하나
+//            <OutDir>/NN_bg_<이름>_<채널>.png   쪽마다 하나, 번호순 (18~28)
 //
 //  쪽                       무엇
 //   accidental   off-window(창 배율 보정) 대 rate-곱 R_S1·R_S2·T -- 둘이 같은 양이라
@@ -36,11 +36,8 @@
 #include <string>
 #include <vector>
 
-struct BgSeries {
-   std::string label; int color = kBlack, marker = 20;
-   std::vector<double> x, y, ey;
-   void add(double xx, double yy, double e = 0) { x.push_back(xx); y.push_back(yy); ey.push_back(e); }
-};
+#include "ReneTrendPlot.h"      // 채널별 쪽 · 선형축 + 로그 inset · 번호 붙은 파일 이름 (2026-09-14)
+
 
 static std::map<std::string, int> ReadHeader(const std::string &line) {
    std::map<std::string, int> idx;
@@ -50,38 +47,7 @@ static std::map<std::string, int> ReadHeader(const std::string &line) {
    return idx;
 }
 
-static bool DrawBgPage(const TString &pdf, const TString &pngBase, const char *name,
-                       const char *title, const char *ytitle,
-                       std::vector<BgSeries> &ss, const char *pdfMode, bool logy = false) {
-   TCanvas *c = new TCanvas(Form("cBg_%s", name), title, 1400, 700);
-   c->SetLeftMargin(0.11); c->SetBottomMargin(0.15); c->SetRightMargin(0.04);
-   c->SetGridx(); c->SetGridy();
-   if (logy) c->SetLogy();
-   TMultiGraph *mg = new TMultiGraph();
-   TLegend *leg = new TLegend(0.66, 0.74, 0.95, 0.90);
-   leg->SetBorderSize(0); leg->SetFillStyle(0); leg->SetTextSize(0.033);
-   bool any = false;
-   for (auto &s : ss) {
-      if (s.x.empty()) continue;
-      TGraphErrors *g = new TGraphErrors((int)s.x.size(), s.x.data(), s.y.data(), nullptr, s.ey.data());
-      g->SetMarkerStyle(s.marker); g->SetMarkerSize(1.1);
-      g->SetMarkerColor(s.color);  g->SetLineColor(s.color); g->SetLineWidth(2);
-      mg->Add(g, "LP");
-      leg->AddEntry(g, s.label.c_str(), "lp");
-      any = true;
-   }
-   if (!any) { delete c; return false; }
-   mg->SetTitle(Form("%s;DAQ start [YY/MM/DD];%s", title, ytitle));
-   mg->Draw("A");
-   TAxis *ax = mg->GetXaxis();
-   ax->SetTimeDisplay(1); ax->SetTimeFormat("%y/%m/%d"); ax->SetTimeOffset(0, "gmt");
-   ax->SetLabelSize(0.04); ax->SetNdivisions(508);
-   mg->GetYaxis()->SetTitleOffset(1.0);
-   if (ss.size() > 1) leg->Draw();
-   c->Print(pdf + pdfMode);
-   c->Print(pngBase + name + ".png");
-   return true;
-}
+using BgSeries = TrendSeries;
 
 void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
    gStyle->SetOptStat(0);
@@ -127,14 +93,16 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
       return r.f[it->second];
    };
 
-   BgSeries accOffGd{"n-Gd off-window", kBlue+1, 20}, accRpGd{"n-Gd R_{S1}R_{S2}T", kBlue+1, 24};
-   BgSeries accOffH{"n-H off-window", kRed+1, 21},  accRpH{"n-H R_{S1}R_{S2}T", kRed+1, 25};
-   BgSeries fnGd{"n-Gd", kBlue+1, 20}, fnH{"n-H", kRed+1, 21};
-   BgSeries liGd{"n-Gd", kBlue+1, 20}, liH{"n-H", kRed+1, 21};
-   BgSeries liGdR{"n-Gd reversed (control)", kBlue+1, 24}, liHR{"n-H reversed (control)", kRed+1, 25};
-   BgSeries psdM{"#gamma-band mean #pm RMS", kBlack, 20};
-   BgSeries nlGd{"n-Gd", kBlue+1, 20}, nlH{"n-H", kRed+1, 21};
-   BgSeries mrGd{"n-Gd", kBlue+1, 20}, mrH{"n-H", kRed+1, 21};
+   auto mk = [](const char *lab, int col, int mk) { BgSeries s; s.label = lab; s.color = col; s.marker = mk; return s; };
+   const int cGd = kRed + 1, cH = kBlue + 1;             // rate 그림과 같은 색 : n-Gd 빨강 · n-H 파랑
+   BgSeries accOffGd = mk("off-window", cGd, 20), accRpGd = mk("R_{S1}R_{S2}T", cGd, 24);
+   BgSeries accOffH  = mk("off-window", cH, 21),  accRpH  = mk("R_{S1}R_{S2}T", cH, 25);
+   BgSeries fnGd = mk("n-Gd", cGd, 20), fnH = mk("n-H", cH, 21);
+   BgSeries liGd = mk("n-Gd", cGd, 20), liH = mk("n-H", cH, 21);
+   BgSeries liGdR = mk("reversed (control)", cGd, 24), liHR = mk("reversed (control)", cH, 25);
+   BgSeries psdM = mk("#gamma-band mean #pm RMS", kBlack, 20);
+   BgSeries nlGd = mk("n-Gd", cGd, 20), nlH = mk("n-H", cH, 21);
+   BgSeries mrGd = mk("n-Gd", cGd, 20), mrH = mk("n-H", cH, 21);
 
    int nUsed = 0;
    for (const auto &r : rows) {
@@ -166,29 +134,39 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
    }
    printf("[INFO] metrics 행 %zu, 선원 없는 런 행 %d\n", rows.size(), nUsed);
 
-   TString pdf = out + "bg_trend.pdf", png = out + "bg_trend_";
+   TString pdf = out + "bg_trend.pdf";
    int nPage = 0; bool opened = false;
-   auto page = [&](const char *name, const char *title, const char *yt,
-                   std::vector<BgSeries> ss, bool logy) {
-      bool ok = DrawBgPage(pdf, png, name, title, yt, ss, opened ? "" : "(", logy);
-      if (ok) { opened = true; nPage++; }
+   auto page = [&](const char *file, const char *title, const char *yt, std::vector<BgSeries> ss, bool logInset) {
+      TrendPageOpt o; o.logInset = logInset;
+      if (DrawTrendPage(pdf, out, file, title, yt, ss, opened ? "" : "(", o)) { opened = true; nPage++; }
    };
-   page("accidental", "Accidental per day : off-window vs rate product (before multiplicity)",
-        "Accidental [/day]", {accOffGd, accRpGd, accOffH, accRpH}, true);
-   page("fastn", "Fast-neutron estimate per day (sideband extrapolation, T_Sat included)  [preliminary]",
-        "fast-n [/day]", {fnGd, fnH}, false);
-   page("lihe", "^{9}Li/^{8}He fit per day (Daya Bay Eq.2) vs time-reversed control  [preliminary]",
-        "Li/He [/day]", {liGd, liGdR, liH, liHR}, false);
-   page("psd", "PSD tail fraction, 1-3 MeV singles (#gamma-band)  -- pulse-shape stability",
+   //  ★ 채널은 쪽을 나눈다 (사용자 지시 2026-09-14). 번호는 rate 그림(01~17)에 이어 18 부터.
+   page("18_bg_accidental_nGd", "Accidental per day, n-Gd : off-window vs rate product (before multiplicity)",
+        "Accidental [/day]", {accOffGd, accRpGd}, true);
+   page("19_bg_accidental_nH",  "Accidental per day, n-H : off-window vs rate product (before multiplicity)",
+        "Accidental [/day]", {accOffH, accRpH}, true);
+   page("20_bg_fastn_nGd", "Fast-neutron estimate per day, n-Gd (sideband extrapolation, T_Sat included)  [preliminary]",
+        "fast-n [/day]", {fnGd}, false);
+   page("21_bg_fastn_nH",  "Fast-neutron estimate per day, n-H (sideband extrapolation, T_Sat included)  [preliminary]",
+        "fast-n [/day]", {fnH}, false);
+   page("22_bg_lihe_nGd", "^{9}Li/^{8}He fit per day, n-Gd (Daya Bay Eq.2) vs time-reversed control  [preliminary]",
+        "Li/He [/day]", {liGd, liGdR}, false);
+   page("23_bg_lihe_nH",  "^{9}Li/^{8}He fit per day, n-H (Daya Bay Eq.2) vs time-reversed control  [preliminary]",
+        "Li/He [/day]", {liH, liHR}, false);
+   page("24_bg_psd", "PSD tail fraction, 1-3 MeV singles (#gamma-band)  -- pulse-shape stability",
         "tail / total", {psdM}, false);
-   page("psd_nlike", "IBD prompts beyond #gamma-band + n#sigma  [preliminary]",
-        "n-like fraction [%]", {nlGd, nlH}, false);
-   page("multrej", "Multiplicity-rejected excess per day (multi-neutron indicator)",
-        "excess [/day]", {mrGd, mrH}, false);
+   page("25_bg_psd_nlike_nGd", "IBD prompts beyond #gamma-band + n#sigma, n-Gd  [preliminary]",
+        "n-like fraction [%]", {nlGd}, false);
+   page("26_bg_psd_nlike_nH",  "IBD prompts beyond #gamma-band + n#sigma, n-H  [preliminary]",
+        "n-like fraction [%]", {nlH}, false);
+   page("27_bg_multrej_nGd", "Multiplicity-rejected excess per day, n-Gd (multi-neutron indicator)",
+        "excess [/day]", {mrGd}, false);
+   page("28_bg_multrej_nH",  "Multiplicity-rejected excess per day, n-H (multi-neutron indicator)",
+        "excess [/day]", {mrH}, false);
    if (opened) {
       //  마지막 쪽을 닫는다 -- 빈 캔버스로 ')' 만 찍는다
       TCanvas cEnd("cBgEnd", "", 10, 10); cEnd.Print(pdf + ")");
-      printf("[SAVED] %s (%d 쪽) + %s*.png\n", pdf.Data(), nPage, png.Data());
+      printf("[SAVED] %s (%d 쪽) + %s18..28_bg_*.png\n", pdf.Data(), nPage, out.Data());
    } else {
       printf("[INFO] 그릴 행이 없다 (metrics_summary 에 선원 없는 완결 런이 없다)\n");
    }

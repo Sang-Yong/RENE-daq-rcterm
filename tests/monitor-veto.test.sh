@@ -21,7 +21,7 @@ done >> "$out"
 S
 cat > "$T/plot.sh" <<'S'
 #!/usr/bin/env bash
-: > "$2/veto_panel_trend.png"; echo "[SAVED] fake"
+: > "$2/30_veto_panels.png"; echo "[SAVED] fake"
 S
 chmod +x "$T/scan.sh" "$T/plot.sh"
 export SCANLOG=$T/scanlog; : > "$SCANLOG"
@@ -37,7 +37,7 @@ check "thr_history 8 줄"     '[ "$(grep -vc "^#" "$T/out/veto/thr_history.tsv")
 check "veto_summary 2 행"    '[ "$(grep -vc "^#" "$T/out/veto_summary.tsv")" = 2 ]'
 check "veto Hz 4340=500"     'grep -P "^4340\t" "$T/out/veto_summary.tsv" | cut -f6 | grep -q "^500.0"'
 check "epoch 는 run_summary"  'grep -P "^4340\t" "$T/out/veto_summary.tsv" | cut -f2 | grep -q 1757400000'
-check "그림 호출"             '[ -e "$T/out/veto_panel_trend.png" ]'
+check "그림 호출"             '[ -e "$T/out/30_veto_panels.png" ]'
 
 echo "[2] 다시 돌리면 아무것도 안 잰다 (증분)"
 : > "$SCANLOG"; run --missing >/dev/null 2>&1

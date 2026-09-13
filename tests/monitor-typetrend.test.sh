@@ -70,10 +70,14 @@ RC=$?
 # ------------------------------------------------------------------ 판정 ----
 #  기존 7종 + 새 4종. 하나라도 없거나 5KB 이하이면(빈 그림) 실패다.
 FAIL=0
-OLD7="candidates rate_raw rate_corrected efficiency accidental rll cumulative"
-NEW4="evt_total evt_target evt_veto evt_coinc"
+#  2026-09-14 : 채널별 쪽 + 번호 이름. 픽스처는 _nGd 행뿐이라 n-Gd 쪽 6 장 + R_LL 이 나오고, n-H 쪽은 자료가 없어 안 나와야 한다
+OLD7="01_rate_candidates_nGd 03_rate_raw_nGd 05_rate_corrected_nGd 07_rate_efficiency_nGd 09_rate_accidental_nGd 11_rate_rll 12_rate_cumulative_nGd"
+for nm in 02_rate_candidates_nH 04_rate_raw_nH 06_rate_corrected_nH 08_rate_efficiency_nH 10_rate_accidental_nH 13_rate_cumulative_nH; do
+   [ ! -e "$T/out/${nm}.png" ] || { echo "FAIL: 자료 없는 n-H 쪽이 나왔다 ($nm)"; FAIL=1; }
+done
+NEW4="14_evt_total 15_evt_target 16_evt_veto 17_evt_coinc"
 for nm in $OLD7 $NEW4; do
-   f="$T/out/rate_trend_${nm}.png"
+   f="$T/out/${nm}.png"
    if [ ! -e "$f" ]; then
       echo "FAIL: 없음 $f"; FAIL=1; continue
    fi
@@ -182,8 +186,8 @@ fi
 #  나오는 게 정상이다(기존 페이지들의 "자료 없으면 안 그린다" 관례와 같다).
 #  나왔다면 픽스처가 의도한 조건(typeRate 빈 상태)을 못 만든 것이라 이
 #  시험이 뭘 확인했는지가 불확실해진다.
-for nm in evt_total evt_target evt_veto evt_coinc; do
-   [ ! -e "$T/out2/rate_trend_${nm}.png" ] || {
+for nm in 14_evt_total 15_evt_target 16_evt_veto 17_evt_coinc; do
+   [ ! -e "$T/out2/${nm}.png" ] || {
       echo "FAIL: 퇴화 경로인데 ${nm}.png 가 나왔다 (픽스처가 typeRate 를 못 비웠다)"
       FAIL2=1
    }

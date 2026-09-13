@@ -608,17 +608,23 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 
 | 쪽 | PNG | 내용 |
 |---|---|---|
-| 1 | `rate_trend_candidates.png` | 런당 IBD 후보 수 (우발 뺀 값) |
-| 2 | `rate_trend_rate_raw.png` | 보정 전 rate [/day] |
-| 3 | `rate_trend_rate_corrected.png` | **효율 보정 rate [/day]** ← 핵심 |
-| 4 | `rate_trend_efficiency.png` | ε_iso, ε_tot 추이 |
-| 5 | `rate_trend_accidental.png` | 우발 [/day] |
-| 6 | `rate_trend_rll.png` | R_LL — ε_iso 가 흔들리면 여기가 원인이다 |
-| 7 | `rate_trend_cumulative.png` | 누적 후보 수 |
-| 8 (신설) | `rate_trend_evt_total.png` | 전체 트리거 rate [Hz] (`n_type1+2+3`, 런당 점 하나) |
-| 9 (신설) | `rate_trend_evt_target.png` | Target only(FADC) rate [Hz] |
-| 10 (신설) | `rate_trend_evt_veto.png` | VETO only(SADC) rate [Hz] |
-| 11 (신설) | `rate_trend_evt_coinc.png` | VETO+Target coincidence rate [Hz] |
+| 01·02 | `01_rate_candidates_nGd.png` · `02_…_nH.png` | 런당 IBD 후보 수 (우발 뺀 값). 채널별 쪽, 로그 inset |
+| 03·04 | `03_rate_raw_nGd.png` · `04_…_nH.png` | 보정 전 rate [/day] |
+| 05·06 | `05_rate_corrected_nGd.png` · `06_…_nH.png` | **효율 보정 rate [/day]** ← 핵심 |
+| 07·08 | `07_rate_efficiency_nGd.png` · `08_…_nH.png` | ε_iso, ε_tot 추이 |
+| 09·10 | `09_rate_accidental_nGd.png` · `10_…_nH.png` | 우발 [/day] |
+| 11 | `11_rate_rll.png` | R_LL — ε_iso 가 흔들리면 여기가 원인이다 |
+| 12·13 | `12_rate_cumulative_nGd.png` · `13_…_nH.png` | 누적 후보 수 |
+| 14 | `14_evt_total.png` | 전체 트리거 rate [Hz] (`n_type1+2+3`, 런당 점 하나) |
+| 15 | `15_evt_target.png` | Target only(FADC) rate [Hz] |
+| 16 | `16_evt_veto.png` | VETO only(SADC) rate [Hz] |
+| 17 | `17_evt_coinc.png` | VETO+Target coincidence rate [Hz] |
+| 18~28 | `18_bg_accidental_nGd.png` … `28_bg_multrej_nH.png` | 배경 지표 추이 (4b). accidental · fast-n · Li/He · psd · psd_nlike · multrej, 채널별 |
+| 29~31 | `29_veto_rate.png` · `30_veto_panels.png` · `31_veto_panel1_pmts.png` | VETO (4v) |
+
+**2026-09-14 부터의 그림 규칙 (사용자 지시)** — `tools/monitor/ReneTrendPlot.h` 한 곳에서 그린다. ① n-Gd 와 n-H 는 같은 캔버스에 두지 않는다.
+② 축은 언제나 선형. 값이 열 배 넘게 벌어지는 쪽에는 같은 그림 안에 **로그축 inset** 을 넣는다 — 점·범례가 없는 구석을 골라서(네 구석의 점 수를 세어 가장 빈 곳).
+③ 범례는 불투명 흰 바탕, 그 다음 빈 구석. ④ 파일 이름은 `NN_<묶음>_<양>[_<채널>].png` 로 웹에 번호순으로 올린다.
 
 두 채널의 크기가 100배쯤 달라서 후보 수·rate 쪽은 **로그축**이다. 선형축이면
 n-Gd 이 바닥에 깔려 보이지 않는다.
@@ -691,7 +697,7 @@ CLAUDE.md §11.142 참조) — `monitor-all.sh` 는 legacy 3단계(1·과도기�
   -> ibd-summary.sh -> rate-trend.sh
   -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9 — 실패해도 WARN 뿐,
      type='-' 로 계속) -> gen-summary-html.sh
-  -> rate_trend_*.png 11개 + summary.html 을 webroot 로 rsync 복사
+  -> NN_*.png 31개 + summary.html 을 webroot 로 rsync 복사
   -> publish_google.py (publish=1 일 때만)
 ```
 
@@ -907,7 +913,7 @@ veto-summary.sh [--list a,b] [--missing] [--force] [--dry-run]
    런마다 서브런 10·100·600·1200 의 트리거 비트만 읽는다 (런당 몇 초)
    -> $OUT/veto/thr_history.tsv 에 누적  (서브런당 1 줄, 80 열)
    -> $OUT/veto_summary.tsv       (런당 1 줄. tools/psd 의 veto_history.tsv 와 같은 스키마)
-   -> $OUT/veto_*.png             (VetoHistoryPlot.C -- 1 % 이상 반응한 패널만 동적으로 그린다)
+   -> $OUT/29..31_veto_*.png       (VetoHistoryPlot.C -- 1 % 이상 반응한 패널만 동적으로 그린다)
 ```
 
 **표(`gen-summary-html.sh`)에 넉 열이 늘었다 (16 → 20).** V+T 다음 :

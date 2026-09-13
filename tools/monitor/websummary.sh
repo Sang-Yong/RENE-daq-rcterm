@@ -24,7 +24,7 @@
 #      -> bg-trend.sh   (실패해도 WARN 뿐)
 #      -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9. 실패해도 WARN 뿐 --
 #         type='-' 로 계속) -> gen-summary-html.sh
-#      -> rate_trend_*.png 11개 + bg_trend_*.png 6개 + veto_*.png 3개 + summary.html 을 webroot 로 rsync 복사
+#      -> NN_*.png 31개 (01~17 rate/evt · 18~28 bg · 29~31 veto, 채널별 쪽) + summary.html 을 webroot 로 rsync 복사
 #
 #  ★ 부팅 실패 런 (2026-09-09, §11.173 개선 4) -- FADC 파일이 min_subruns(기본 2)개
 #      미만인 런은 표에 싣지 않고 건너뛴다(게이트도 막지 않는다). run 4335 처럼
@@ -296,7 +296,7 @@ if [ "$DRY" -eq 1 ]; then
       log "[DRY]   bg-trend.sh   (실패해도 WARN 뿐)"
       log "[DRY]   gen-runclass.sh $TSVDIR $TSVDIR/runclass.tsv  (실패해도 WARN 뿐, type='-' 로 계속)"
       log "[DRY]   gen-summary-html.sh $TSVDIR $TSVDIR/summary.html $METRICS_SOURCE $REFRESH_S"
-      log "[DRY]   rsync rate_trend_*.png + bg_trend_*.png + veto_*.png + summary.html -> $WEBROOT"
+      log "[DRY]   rsync [0-9][0-9]_*.png + summary.html -> $WEBROOT"
       if [ "$PUBLISH" = 1 ]; then log "[DRY]   publish_google.py --params $PARAMS"
       else                        log "[DRY]   (publish=0 이므로 로컬 생성까지만)"
       fi
@@ -368,7 +368,7 @@ else
    fi
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
 
-   #  VETO 패널 반응·veto 계수율 (veto_summary.tsv + veto_*.png). 발행을 막지 않는다.
+   #  VETO 패널 반응·veto 계수율 (veto_summary.tsv + 29~31_veto_*.png). 발행을 막지 않는다.
    log "[RUN ] veto-summary"
    nice -n 15 ionice -c2 -n7 "$MON/veto-summary.sh" --list "$NEWLIST" >>"$LOG" 2>&1
    vsrc=$?
@@ -376,7 +376,7 @@ else
    else                     log "[OK  ] veto-summary"
    fi
 
-   #  배경 지표 추이(bg_trend_*.png, 배경 레시피 v2). 발행을 막지 않는다 --
+   #  배경 지표 추이(18~28_bg_*.png, 배경 레시피 v2). 발행을 막지 않는다 --
    #  metrics_summary 가 schema 2 가 아니면 [SKIP] 을 찍고 0 으로 나온다.
    log "[RUN ] bg-trend"
    nice -n 15 ionice -c2 -n7 "$MON/bg-trend.sh" >>"$LOG" 2>&1
@@ -409,7 +409,7 @@ else
    if [ ! -r "$TSVDIR/summary.html" ]; then
       log "[FAIL] $TSVDIR/summary.html 이 없다"; notify_fail "nohtml" "런 서머리 발행이 막혔다 : $TSVDIR/summary.html 이 없다"; exit 1
    fi
-   pngs=("$TSVDIR"/rate_trend_*.png "$TSVDIR"/bg_trend_*.png "$TSVDIR"/veto_*.png)
+   pngs=("$TSVDIR"/[0-9][0-9]_*.png)          # 2026-09-14 : 번호 붙은 이름 (01~31). 옛 rate_trend_*/bg_trend_*/veto_* 는 안 실린다
    pngs=($(for f in "${pngs[@]}"; do [ -e "$f" ] && echo "$f"; done))
    nice -n 15 ionice -c2 -n7 rsync -a "${pngs[@]}" "$TSVDIR/summary.html" "$WEBROOT/" >>"$LOG" 2>&1
    rc=$?

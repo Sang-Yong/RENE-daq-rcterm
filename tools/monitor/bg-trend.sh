@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bg-trend.sh - 배경 지표(metrics_summary.tsv schema 2)의 시간축 추이 그림.
-#   사용 : bg-trend.sh            그린다 (bg_trend.pdf + bg_trend_*.png)
+#   사용 : bg-trend.sh            그린다 (bg_trend.pdf + 18..28_bg_*.png, 채널별 쪽)
 #          bg-trend.sh --show     무엇이 만들어졌는지 본다
 #   환경 : RUNSUM_OUT (기본 /scratch/RunSummary)
 #   metrics_summary.tsv 가 없거나 schema 2 가 아니면 [SKIP] 을 찍고 exit 0 --
