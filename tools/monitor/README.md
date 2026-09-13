@@ -630,6 +630,7 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 51~52 | `51/52_bgspec_lihe_dt_<ch>.png` | 직전 샤워링 뮤온까지의 **Δt** (검정) · 직후(회색, 역방향 대조) · 전체 합의 Daya Bay Eq.2 적합(빨강). Li/He 빼기의 근거 |
 | 53~54 | `53/54_bgspec_multiplicity_<ch>.png` | 쌍마다 multiplicity 창 안 **다른 single 수 n_extra** 의 분포 (on · off · 초과분). 다중중성자 가족이 포아송이면 n_extra=0 에 남는 몫 ≈ N(1)²/(2N(2)) — 남는 '신호' 와 비교 |
 | 55~56 | `55/56_bgspec_shape_<ch>.png` | 남는 '신호' 의 prompt 모양(빨강) 대 n_extra=1 · ≥2 가족의 prompt 모양(같은 면적으로). 같으면 신호가 그 가족의 꼬리다 |
+| 57~58 | `57/58_bgspec_dt_<ch>.png` | prompt–delayed **Δt** (on · off · prompt < 3 MeV) 와 exp(−t/τ) + 평평 적합. 평평 × 창 = 우발 추정의 독립 대조, exp 적분 = 상관 쌍 수 |
 
 **배경을 어떻게 고르나 (4d, 날짜 기준. 런별 BuildMetrics 와 같은 정의)** — 컷 값은 `/home/ojk/analysis3/essential/AnalysisCondition.h` 가 정본이고
 DST 단계(`dst-build.sh`)의 muon veto(SADC 패널 위/아래 동시) · after-muon 150 µs · 포화 제거는 이미 걸린 뒤다. 그 위에 :

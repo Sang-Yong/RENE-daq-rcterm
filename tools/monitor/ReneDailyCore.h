@@ -23,6 +23,7 @@ static const double kDailyTauHeS = 0.172;    // ⁸He
 //  쌍 하나. RenePairing.h::PairAndCountW 가 세는 것을 그대로 남긴다.
 struct PairRec {
    double t1_us = 0, e1 = 0, e2 = 0;   // prompt 시각·NPE, delayed NPE
+   double dt_us = 0;                   // delayed − prompt [µs]
    bool   off = false;                 // off-window(우발) 쌍인가
    bool   mult = false;                // multiplicity 통과 (= IBD / IBD_Acci 로 세어지는 것)
    long long i1 = -1;                  // prompt single 의 ev 색인 (psd 를 찾아가기 위해. 병합 목록에서는 뜻이 없다)
@@ -68,7 +69,7 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
          const S1S2_Candidate &prev = (i1 > 0) ? ev[i1 - 1] : s1;
          const S1S2_Candidate &next = (i2 + 1 < nEv) ? ev[i2 + 1] : s2;
          double vetoExtra = (double)(wEnd - i1) - ((i2 <= wEnd) ? 1.0 : 0.0);
-         PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = false; p.i1 = i1;
+         PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = false; p.i1 = i1; p.dt_us = dt;
          p.mult = passMult(prev._pe_sum, prev._t_us, s1._t_us, next._pe_sum, next._t_us, s2._t_us, vetoExtra);
          p.nExtra = countExtra(i1, i2, wEnd);
          out.push_back(p);
@@ -89,7 +90,7 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
          const S1S2_Candidate &prev = ev[i - 1];
          const S1S2_Candidate &next = (j + 1 < nEv) ? ev[j + 1] : ev[j];
          double vetoExtra = (double)(wEnd - i) - ((j <= wEnd) ? 1.0 : 0.0);
-         PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = true; p.i1 = i;
+         PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = true; p.i1 = i; p.dt_us = dt - w.dtAcci;
          p.mult = passMult(prev._pe_sum, prev._t_us, s1._t_us, next._pe_sum, next._t_us, s2._t_us, vetoExtra);
          p.nExtra = countExtra(i, j, wEnd);
          out.push_back(p);

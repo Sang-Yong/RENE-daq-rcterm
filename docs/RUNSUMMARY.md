@@ -30,7 +30,7 @@
    4b bg-trend.sh           18..28_bg_*.png 11 장    배경 지표 추이 (채널별 쪽)
    4d daily.sh              daily_summary.tsv + 32..56_*.png   날짜 기준 라이브타임·후보·rate + 전체 사건 prompt/delayed 스펙트럼(배경 빼기 전/후)
                             + 배경 성분별 스펙트럼(41~44) · 신호창 분해(45~48) · prompt PSD(49/50) · 샤워 뒤 Δt 와 Li/He 적합(51/52)
-                            · 다중도 분포 + 포아송 외삽(53/54) · 신호 대 다중중성자 모양(55/56). 런별 표와 별개
+                            · 다중도 분포 + 포아송 외삽(53/54) · 신호 대 다중중성자 모양(55/56) · Δt 적합(57/58). 런별 표와 별개
                             손잡이 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev · mu_veto_us · shower_veto_ms · dst_subdir (config/monitorcuts.params)
                             dst_subdir = dst_m2 면 강한 veto DST(dst-build.sh --muon-mode 2, websummary 가 새 런마다 같이 만든다)
    5  websummary.sh         summary.html + 시트/드라이브    완결 게이트 → 1~4b 순서 실행 → 표 → 발행

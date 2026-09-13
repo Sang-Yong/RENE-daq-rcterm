@@ -7,7 +7,7 @@
 #
 #   입력은 run_summary.tsv · runtype.tsv · dst/DST_<run>.root (dst-build.sh 가 만든 것 전부). 매번 전 런을 다시 센다 —
 #   날짜 하나가 여러 런에 걸치고 런이 여러 날에 걸치므로 증분이 뜻이 없다. 실측 : 40 여 런에 10 분대.
-#   출력 : daily_summary.tsv · daily_spectra.root · 32..52_*.png  (32 라이브타임 · 33/34 후보/일 · 35/36 rate · 37~40 스펙트럼 전/후
+#   출력 : daily_summary.tsv · daily_spectra.root · 32..58_*.png  (32 라이브타임 · 33/34 후보/일 · 35/36 rate · 37~40 스펙트럼 전/후
 #          · 41~44 배경 성분별 스펙트럼 · 45~48 신호창 분해 · 49/50 prompt PSD · 51/52 샤워링 뮤온 뒤 dt + Li/He 적합)
 #   컷은 metrics.sh 와 같은 monitorcuts.params 키를 읽는다 (mu_shower_npe · lihe_* · fn_e_*_mev). 이 단계만의 키 :
 #      daily_psd_nsig   (기본 -1 = 끔)  prompt 의 p_psd 가 이 값을 넘는 쌍을 버린다 (on/off 같이)
@@ -47,6 +47,6 @@ ISOPRE=$(getp daily_iso_pre_us -1); ISOPOST=$(getp daily_iso_post_us -1)
 command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh
 command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
 ARGS="\"$OUT/\", $MU, $LLO, $LHI, $LMIN, $FLO, $FHI, $LFR, $PSDC, $FNM, $FNLO, $MUV, $SHV, \"$DSTSUB\", $ISOPRE, $ISOPOST"
-echo "날짜별 : $OUT/daily_summary.tsv · daily_spectra.root · 32..52_*.png   (컷 $CUTS · psd_nsig $PSDC · fn_norm $FNM/$FNLO · mu_veto ${MUV}us · shower_veto ${SHV}ms · dst $DSTSUB)"
+echo "날짜별 : $OUT/daily_summary.tsv · daily_spectra.root · 32..58_*.png   (컷 $CUTS · psd_nsig $PSDC · fn_norm $FNM/$FNLO · mu_veto ${MUV}us · shower_veto ${SHV}ms · dst $DSTSUB)"
 if [ "$DRY" = 1 ]; then echo "(dry-run) root -l -b -q '$DIR/BuildDaily.C+($ARGS)'"; exit 0; fi
 root -l -b -q "$DIR/BuildDaily.C+($ARGS)"

@@ -11,7 +11,8 @@
 //          <OutDir>/daily_spectra.root   스펙트럼 히스토그램 전부
 //          <OutDir>/32..52_*.png         (32~36 날짜 추이 · 37~40 스펙트럼 전/후 · 41~44 배경 성분별 · 45~48 신호창 분해
 //                                         · 49~50 prompt PSD · 51~52 샤워링 뮤온 뒤 dt 와 Li/He 적합
-//                                         · 53~54 다중도 분포 + 포아송 외삽 · 55~56 남는 신호 대 다중중성자 가족의 prompt 모양)
+//                                         · 53~54 다중도 분포 + 포아송 외삽 · 55~56 남는 신호 대 다중중성자 가족의 prompt 모양
+//                                         · 57~58 prompt–delayed Δt 와 exp+평평 적합 = 우발 추정의 독립 대조)
 //
 //   ---- 날짜에 어떻게 붙이나 ----
 //   * 사건 시각 = 런 시작 epoch + t_us·1e-6  (DST 의 t_us 는 런 안에서 이어지는 시각).  날짜는 이 PC 의 지역시(KST) 자정 기준.
@@ -229,6 +230,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
    TH1D *hPsd[2][2], *hPpsdRej[2][2], *hDpsdRej[2][2], *hDtPrev[2], *hDtNext[2];   // p_psd(on/off) · PSD 로 버린 쌍 · 샤워 뒤 dt
    TH1D *hPmuRej[2][2], *hDmuRej[2][2];                                          // 뮤온 veto 로 버린 쌍 (on/off)
    TH1D *hNx[2][2], *hPnx1[2][2], *hPnx2[2][2];                                   // 다중도(창 안 다른 single 수) 분포 · nExtra=1 / >=2 의 prompt (on/off)
+   TH1D *hDt[2][2], *hDtLo[2][2];                                                // prompt–delayed Δt (multiplicity 통과, on/off) · prompt < 3 MeV 만
    for (int k = 0; k < 2; ++k) {
       for (int o = 0; o < 2; ++o) {
          hPsd[k][o] = new TH1D(Form("psd_%s_%s", fileTag[k], o ? "off" : "on"), "", 90, -6, 12); hPsd[k][o]->SetDirectory(nullptr);
@@ -239,6 +241,9 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          hNx[k][o] = new TH1D(Form("nextra_%s_%s", fileTag[k], o ? "off" : "on"), "", 12, -0.5, 11.5); hNx[k][o]->SetDirectory(nullptr);
          hPnx1[k][o] = new TH1D(Form("prompt_%s_nextra1_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPnx1[k][o]->SetDirectory(nullptr);
          hPnx2[k][o] = new TH1D(Form("prompt_%s_nextra2p_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPnx2[k][o]->SetDirectory(nullptr);
+         { SetChannel(chans[k]); PairWindows wd = CurrentPairWindows();
+           hDt[k][o] = new TH1D(Form("dt_%s_%s", fileTag[k], o ? "off" : "on"), "", 50, 0, wd.dtMax); hDt[k][o]->SetDirectory(nullptr);
+           hDtLo[k][o] = new TH1D(Form("dt_%s_elo_%s", fileTag[k], o ? "off" : "on"), "", 50, 0, wd.dtMax); hDtLo[k][o]->SetDirectory(nullptr); }
       }
       hDtPrev[k] = new TH1D(Form("dt_prev_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtPrev[k]->SetDirectory(nullptr);
       hDtNext[k] = new TH1D(Form("dt_next_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtNext[k]->SetDirectory(nullptr);
@@ -322,6 +327,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             double pp = pPsd(p.i1);
             if (pp > -50) hPsd[k][o]->Fill(std::max(-5.99, std::min(11.99, pp)));
             if (psdCutNsig > 0 && pp > psdCutNsig) { hPpsdRej[k][o]->Fill(e1); hDpsdRej[k][o]->Fill(e2); if (!p.off) a.nPsdRej++; continue; }
+            hDt[k][o]->Fill(p.dt_us); if (e1 < 3.0) hDtLo[k][o]->Fill(p.dt_us);
             if (p.off) { a.nOff++; hP[k][1]->Fill(e1); hD[k][1]->Fill(e2); continue; }
             a.nOn++; hP[k][0]->Fill(e1); hD[k][0]->Fill(e2);
             double dp = DailyDtShower(p.t1_us, showers, false), dn = DailyDtShower(p.t1_us, showers, true);
@@ -623,14 +629,44 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          c->Print(out + Form("%02d_bgspec_shape_%s.png", 55 + k, fileTag[k]));
          x1->SetDirectory(fs); x2->SetDirectory(fs); s1n->SetDirectory(fs);
       }
+      //  57~58 prompt–delayed Δt : 상관 쌍은 exp(−t/τ) (n-Gd τ≈28 µs · n-H ≈200 µs), 우발은 평평. 적합의 평평 항 × 창 = 우발 추정의 독립 대조,
+      //  exp 항의 적분 = 상관 쌍 수(IBD + fast-n + 다중중성자 + Li/He). off-window 의 Δt (파랑) 는 평평해야 한다
+      {
+         TCanvas *c = new TCanvas(Form("c_dt_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+         TH1D *on = (TH1D *)hDt[k][0]->Clone(Form("dt_%s_on_draw", fileTag[k])); TH1D *of = (TH1D *)hDt[k][1]->Clone(Form("dt_%s_off_draw", fileTag[k])); of->Scale(acciScale[k]);
+         TH1D *lo = (TH1D *)hDtLo[k][0]->Clone(Form("dt_%s_elo_draw", fileTag[k])); TH1D *loOf = (TH1D *)hDtLo[k][1]->Clone(Form("dt_%s_elo_off_draw", fileTag[k])); loOf->Scale(acciScale[k]);
+         on->SetTitle(Form("Prompt#minusdelayed #Deltat of IBD pairs (multiplicity passed), %s;#Deltat [#mus];Pairs / %.0f #mus", chanName[k], on->GetBinWidth(1)));
+         on->SetStats(0); on->SetLineColor(kBlack); on->SetLineWidth(2); of->SetLineColor(kBlue + 1); of->SetLineWidth(2); of->SetLineStyle(2);
+         lo->SetLineColor(kRed + 1); lo->SetLineWidth(2); loOf->SetLineColor(kRed - 7); loOf->SetLineWidth(2); loOf->SetLineStyle(2);
+         on->SetMinimum(0); on->SetMaximum(on->GetMaximum() * 1.35 + 1); on->GetXaxis()->SetTitleSize(0.045); on->GetYaxis()->SetTitleSize(0.045);
+         on->Draw("HIST"); of->Draw("HIST SAME"); lo->Draw("HIST SAME"); loOf->Draw("HIST SAME");
+         TLegend *lg = new TLegend(0.36, 0.55, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.026);
+         lg->AddEntry(on, Form("on-window pairs  N = %.0f", on->Integral()), "l");
+         lg->AddEntry(of, Form("off-window (accidental, scaled to the window)  N = %.1f", of->Integral()), "l");
+         lg->AddEntry(lo, Form("on-window, prompt < 3 MeV  N = %.0f", lo->Integral()), "l");
+         lg->AddEntry(loOf, Form("off-window, prompt < 3 MeV (scaled)  N = %.1f", loOf->Integral()), "l");
+         for (int which = 0; which < 2; ++which) {
+            TH1D *h = which ? lo : on; double bw = h->GetBinWidth(1);
+            TF1 *f = new TF1(Form("fdt_%s_%d", fileTag[k], which), "[0] + [1]*exp(-x/[2])", w.dtMin, w.dtMax);
+            f->SetParameters(h->GetBinContent(h->GetNbinsX()), h->GetBinContent(1), k == 0 ? 28.0 : 200.0); f->SetParLimits(2, 1, 5 * (k == 0 ? 28.0 : 200.0)); f->SetParLimits(0, 0, 1e9); f->SetParLimits(1, 0, 1e9);
+            int rc = h->Fit(f, "QRN0"); f->SetLineColor(which ? kRed + 1 : kBlack); f->SetLineWidth(2); f->SetLineStyle(which ? 1 : 9); f->Draw("SAME");
+            double nCorr = f->GetParameter(1) * f->GetParameter(2) * (std::exp(-w.dtMin / f->GetParameter(2)) - std::exp(-w.dtMax / f->GetParameter(2))) / bw;
+            double nFlat = f->GetParameter(0) * (w.dtMax - w.dtMin) / bw;
+            lg->AddEntry(f, Form("fit %s : flat + exp, #tau = %.1f #mus, correlated = %.0f, flat#times window = %.0f%s", which ? "(prompt < 3 MeV)" : "(all)", f->GetParameter(2), nCorr, nFlat, rc ? " [fit failed]" : ""), "l");
+            printf("  [DT  ] %s %s : tau %.1f us  corr %.0f  flat %.0f  (acc estimate %.1f)\n", chanName[k], which ? "E<3" : "all", f->GetParameter(2), nCorr, nFlat, which ? loOf->Integral() : of->Integral());
+         }
+         lg->Draw();
+         c->Print(out + Form("%02d_bgspec_dt_%s.png", 57 + k, fileTag[k]));
+      }
       fs->cd();
       for (TH1D *h : {pAll, pSub, pFn, pLi, dAll, dSub, dFn, dLi, hP[k][0], hP[k][1], hD[k][0], hD[k][1], hDside[k],
                       pAcc, dAcc, pRej, dRej, pSideFull, hPrej[k][0], hPrej[k][1], hDrej[k][0], hDrej[k][1],
                       hPsd[k][0], hPsd[k][1], pPsdRej, dPsdRej, hDtPrev[k], hDtNext[k], pMuRej, dMuRej,
-                      hNx[k][0], hNx[k][1], hPnx1[k][0], hPnx1[k][1], hPnx2[k][0], hPnx2[k][1]}) h->Write();
+                      hNx[k][0], hNx[k][1], hPnx1[k][0], hPnx1[k][1], hPnx2[k][0], hPnx2[k][1], hDt[k][0], hDt[k][1], hDtLo[k][0], hDtLo[k][1]}) h->Write();
       printf("  [SPEC] %s : on %.0f  off·scale %.1f  fast-n %.1f  Li/He %.1f  -> prompt after %.1f, delayed after %.1f\n",
              chanName[k], pAll->Integral(), acciScale[k] * hP[k][1]->Integral(), nFn, nLi, pSub->Integral(), dSub->Integral());
    }
    fs->Close();
-   printf("[SAVED] %sdaily_spectra.root + %s32..56_*.png\n", out.Data(), out.Data());
+   printf("[SAVED] %sdaily_spectra.root + %s32..58_*.png\n", out.Data(), out.Data());
 }
