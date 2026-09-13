@@ -102,6 +102,20 @@ done
 LOG=${WEBSUMMARY_LOG:-/Data_ssd/LOG/websummary.log}
 STATE=${WEBSUMMARY_STATE:-/Data_ssd/LOG/websummary.state}
 LOCK=${WEBSUMMARY_LOCK:-/tmp/websummary.lock}
+NOTIFY=${WEBSUMMARY_NOTIFY:-$DIR/scripts/daq-notify.sh}          # 막혔을 때 책임자에게. 시험은 가짜로 갈아끼운다
+NOTIFY_PARAMS=${WEBSUMMARY_NOTIFY_PARAMS:-$DIR/config/notify.params}
+FAILSTATE=${WEBSUMMARY_FAILSTATE:-/Data_ssd/LOG/websummary.failstate}   # 마지막 실패 사유. 같은 사유로는 한 번만 알린다
+#  ★ 2026-09-13 : 9-11 18:27 부터 이틀 동안 매시 회차가 옛 런(4341)의 대조 불일치에서 멈췄는데 아무도 몰랐다.
+#    막히면 알리고(같은 사유 한 번), 옛 런의 불일치는 발행을 막지 않으며(새 런만 게이트), DST 가 낡은 것이면 스스로 다시 만든다.
+notify_fail() {          # <사유 서명> <메시지> [상태파일]   같은 서명이면 조용. 막는 실패는 $FAILSTATE(DONE 에서 지움),
+   local sig=$1 msg=$2 sf=${3:-$FAILSTATE} prev=""   # 막지 않는 경고는 $FAILSTATE.warn(전체 대조가 맞으면 지움) — 매시 다시 울리지 않게
+   [ -r "$sf" ] && prev=$(cat "$sf" 2>/dev/null)
+   [ "$prev" = "$sig" ] && return 0
+   printf '%s\n' "$sig" > "$sf" 2>/dev/null
+   [ -x "$NOTIFY" ] && "$NOTIFY" --params "$NOTIFY_PARAMS" websummary --msg "$msg" >/dev/null 2>&1
+   return 0
+}
+clear_fail() { rm -f "$FAILSTATE" 2>/dev/null; }
 STAGES_DISABLED=${WEBSUMMARY_STAGES_DISABLED:-0}
 mkdir -p "$(dirname "$LOG")" "$(dirname "$STATE")" 2>/dev/null
 
@@ -217,7 +231,7 @@ run_stage() {          # run_stage <이름표> <명령...>
    log "[RUN ] $label"
    nice -n 15 ionice -c2 -n7 "$@" >>"$LOG" 2>&1
    local rc=$?
-   if [ $rc -ne 0 ]; then log "[FAIL] $label (exit=$rc). 로그 : $LOG"
+   if [ $rc -ne 0 ]; then log "[FAIL] $label (exit=$rc). 로그 : $LOG"; notify_fail "stage:$label" "런 서머리 발행이 막혔다 : 단계 $label 실패 (exit=$rc), run $NEWLIST. 로그 $LOG"
    else                   log "[OK  ] $label"
    fi
    return $rc
@@ -275,7 +289,7 @@ if [ "$DRY" -eq 1 ]; then
       [ -n "$BLOCKED" ] && log "[DRY]   그 다음은 run $BLOCKED 에서 막혀 있다 (후처리 미완)"
       log "[DRY]   run-summary.sh --list $NEWLIST"
       log "[DRY]   dst-build.sh   --list $NEWLIST"
-      log "[DRY]   metrics.sh     --list $NEWLIST  (+ --verify, legacy 면 불일치해도 경고만)"
+      log "[DRY]   metrics.sh     --list $NEWLIST  (+ ibd-summary 뒤 --verify-runs $NEWLIST 게이트, 전체 --verify 는 경고·자가치유)"
       log "[DRY]   ibd-summary.sh --list $NEWLIST"
       log "[DRY]   rate-trend.sh"
       log "[DRY]   veto-summary.sh --list $NEWLIST  (실패해도 WARN 뿐)"
@@ -311,22 +325,47 @@ else
    run_stage "run-summary"   "$MON/run-summary.sh"   --list "$NEWLIST" || exit 1
    run_stage "dst-build"     "$MON/dst-build.sh"     --list "$NEWLIST" || exit 1
    run_stage "metrics-build" "$MON/metrics.sh"       --list "$NEWLIST" || exit 1
+   run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
 
-   log "[RUN ] metrics-verify"
-   nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --verify >>"$LOG" 2>&1
+   #  ---- 게이트 : 이번에 싣는 런만 대조한다 (legacy 행은 방금 ibd-summary 가 만들었다) ----
+   log "[RUN ] metrics-verify (run $NEWLIST)"
+   nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --verify-runs "$NEWLIST" >>"$LOG" 2>&1
    vrc=$?
    if [ $vrc -ne 0 ]; then
       if [ "$METRICS_SOURCE" = legacy ]; then
-         log "[WARN] metrics --verify 불일치 -- metrics_source=legacy 라 발행은 막지 않는다"
+         log "[WARN] metrics --verify 불일치 (run $NEWLIST) -- metrics_source=legacy 라 발행은 막지 않는다"
       else
-         log "[FAIL] metrics --verify 불일치 -- metrics_source=$METRICS_SOURCE 라 발행을 막는다"
+         log "[FAIL] metrics --verify 불일치 (run $NEWLIST) -- metrics_source=$METRICS_SOURCE 라 발행을 막는다"
+         notify_fail "verify:$NEWLIST" "런 서머리 발행이 막혔다 : run $NEWLIST 의 DST/legacy 대조 불일치 (metrics --verify-runs). 로그 $LOG"
          exit 1
       fi
    else
-      log "[OK  ] metrics-verify"
+      log "[OK  ] metrics-verify (run $NEWLIST)"
    fi
 
-   run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
+   #  ---- 전체 대조 : 옛 런의 불일치는 발행을 막지 않는다. DST 쪽이 낡은 것(livetime 이 짧다)이면 한 번 스스로 다시 만든다 ----
+   log "[RUN ] metrics-verify (전체)"
+   VOUT=$(nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --verify 2>&1); vall=$?
+   printf '%s\n' "$VOUT" >>"$LOG"
+   if [ $vall -ne 0 ]; then
+      STALE=$(printf '%s\n' "$VOUT" | awk '/\[DIFF\].*DST 쪽 livetime 이 짧다/ { sub(/^ *\[DIFF\] run /, ""); sub(/_.*/, ""); print }' | sort -u | paste -sd, -)
+      if [ -n "$STALE" ]; then
+         log "[HEAL] 옛 런 $STALE 의 DST 가 런이 덜 끝났을 때 만들어졌다 -- dst-build --force + metrics --force 로 다시 만든다"
+         nice -n 15 ionice -c2 -n7 "$MON/dst-build.sh" --list "$STALE" --force >>"$LOG" 2>&1 \
+            && nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --list "$STALE" --force >>"$LOG" 2>&1
+         VOUT=$(nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --verify 2>&1); vall=$?
+         printf '%s\n' "$VOUT" >>"$LOG"
+      fi
+      if [ $vall -ne 0 ]; then
+         BADRUNS=$(printf '%s\n' "$VOUT" | awk '/\[DIFF\]/ { sub(/^ *\[DIFF\] run /, ""); sub(/_.*/, ""); print }' | sort -u | paste -sd, -)
+         log "[WARN] 옛 런 $BADRUNS 의 DST/legacy 대조 불일치가 남아 있다 -- 발행은 막지 않는다. 한쪽을 다시 계산할 것 (DIFF 줄의 livetime 참조)"
+         notify_fail "verify-old:$BADRUNS" "런 서머리 : 옛 런 $BADRUNS 의 DST/legacy 대조 불일치 (발행은 계속된다). 로그 $LOG 의 DIFF 줄을 볼 것" "$FAILSTATE.warn"
+      else
+         log "[OK  ] metrics-verify (전체)"; rm -f "$FAILSTATE.warn" 2>/dev/null
+      fi
+   else
+      log "[OK  ] metrics-verify (전체)"; rm -f "$FAILSTATE.warn" 2>/dev/null
+   fi
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
 
    #  VETO 패널 반응·veto 계수율 (veto_summary.tsv + veto_*.png). 발행을 막지 않는다.
@@ -366,15 +405,15 @@ else
    #  컨트롤러 판정 R2 -- publish_google.py 는 webroot 만 읽는다. 복사 없이는
    #  발행이 빈다. rsync -a, 로컬(같은 기계 안 두 경로).
    log "[RUN ] webroot 복사"
-   mkdir -p "$WEBROOT" || { log "[FAIL] webroot 를 만들 수 없다 : $WEBROOT"; exit 1; }
+   mkdir -p "$WEBROOT" || { log "[FAIL] webroot 를 만들 수 없다 : $WEBROOT"; notify_fail "webroot" "런 서머리 발행이 막혔다 : webroot 를 만들 수 없다 ($WEBROOT)"; exit 1; }
    if [ ! -r "$TSVDIR/summary.html" ]; then
-      log "[FAIL] $TSVDIR/summary.html 이 없다"; exit 1
+      log "[FAIL] $TSVDIR/summary.html 이 없다"; notify_fail "nohtml" "런 서머리 발행이 막혔다 : $TSVDIR/summary.html 이 없다"; exit 1
    fi
    pngs=("$TSVDIR"/rate_trend_*.png "$TSVDIR"/bg_trend_*.png "$TSVDIR"/veto_*.png)
    pngs=($(for f in "${pngs[@]}"; do [ -e "$f" ] && echo "$f"; done))
    nice -n 15 ionice -c2 -n7 rsync -a "${pngs[@]}" "$TSVDIR/summary.html" "$WEBROOT/" >>"$LOG" 2>&1
    rc=$?
-   if [ $rc -ne 0 ]; then log "[FAIL] webroot 복사 (exit=$rc)"; exit 1; fi
+   if [ $rc -ne 0 ]; then log "[FAIL] webroot 복사 (exit=$rc)"; notify_fail "rsync:$rc" "런 서머리 발행이 막혔다 : webroot 복사 실패 (rsync exit=$rc)"; exit 1; fi
    log "[OK  ] webroot 복사 (${#pngs[@]}개 png + summary.html)"
 
    if [ "$PUBLISH" = 1 ]; then
@@ -392,6 +431,7 @@ LAST_NEW=${NEWLIST_ARR[$((${#NEWLIST_ARR[@]}-1))]}
 for sk in "${SKIPPED_ARR[@]}"; do [ "$sk" -gt "$LAST_NEW" ] && LAST_NEW=$sk; done
 if printf 'last_run=%s\n' "$LAST_NEW" > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"; then
    log "[DONE] run $NEWLIST 처리 완료. last_run=$LAST_NEW (publish=$PUBLISH)$( [ -n "$BLOCKED" ] && echo "  다음은 run $BLOCKED 에서 막힘")"
+   clear_fail
    exit 0
 else
    log "[FAIL] 상태 파일을 쓰지 못했다 : $STATE -- run $NEWLIST 처리는 실제로 끝났으나 기록되지 않았다. 다음 회차가 같은 런부터 다시 시도한다"

@@ -74,6 +74,25 @@ exit 0
 FAKE
       chmod +x "$mon/$s"
    done
+   #  metrics.sh 가짜 : --verify-runs 는 WS_TEST_VERIFY_RUNS_RC, --verify 는 WS_TEST_HEALED 파일이 있으면 0, 없으면
+   #  WS_TEST_VERIFY_DIFF 를 찍고 WS_TEST_VERIFY_RC. '--list X --force'(자가 치유의 둘째 걸음) 가 WS_TEST_HEALED 를 만든다.
+   cat > "$mon/metrics.sh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s %s %s\n' "$(date '+%s.%N')" "metrics.sh" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+case " $* " in
+   *" --verify-runs "*) exit "${WS_TEST_VERIFY_RUNS_RC:-0}" ;;
+   *" --verify "*) if [ -n "${WS_TEST_HEALED:-}" ] && [ -f "$WS_TEST_HEALED" ]; then echo "[VERIFY] 공통 2 행, 불일치 0"; exit 0; fi
+                   [ -n "${WS_TEST_VERIFY_DIFF:-}" ] && printf '%s\n' "$WS_TEST_VERIFY_DIFF"; exit "${WS_TEST_VERIFY_RC:-0}" ;;
+   *" --force "*) [ -n "${WS_TEST_HEALED:-}" ] && : > "$WS_TEST_HEALED"; exit 0 ;;
+esac
+exit 0
+FAKE
+   chmod +x "$mon/metrics.sh"
+   cat > "$mon/notify.sh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${WS_TEST_NOTIFY:-/dev/null}"
+FAKE
+   chmod +x "$mon/notify.sh"
    #  gen-runclass.sh <tsvdir> <out.tsv> -- out.tsv 를 실제로 만든다(비어 있어도
    #  된다. gen-summary-html.sh 가짜는 그 파일 내용을 안 읽는다). 호출 순서가
    #  gen-summary-html.sh 보다 먼저인지를 검사 [9]가 이 calls 파일로 본다.
@@ -445,9 +464,60 @@ CHK skip_incomplete_tiny=1"; else R="$R
 CHK skip_incomplete_tiny=0"; echo "[11] 진단 : last_run=[$SLR11] hb-blocked=[$SLR11b]"; cat "$T/11/log" "$T/11b/log" 2>&1; fi
 
 # ---- 판정 -----------------------------------------------------------------
+
+# ==== [12] 게이트는 새 런만 : --verify-runs 불일치 + metrics_source=dst -> FAIL + 알림 한 번 (같은 사유 두 번째는 조용) ===
+mkdir -p "$T/12/tsv" "$T/12/mon"; mk_fake_mon "$T/12/mon"; seed_pngs "$T/12/tsv"
+mkrun "$T/12/RAW" 004280 3 3
+mkparams "$T/12/params" "$T/12/tsv" 4280 0; sed -i 's/metrics_source = legacy/metrics_source = dst/' "$T/12/params"
+run12() { WEBSUMMARY_ROOTS="$T/12/RAW" WEBSUMMARY_LOCK="$T/12/.lock" WEBSUMMARY_STATE="$T/12/state" WEBSUMMARY_LOG="$T/12/log" \
+          WEBSUMMARY_MON_DIR="$T/12/mon" WEBSUMMARY_NOTIFY="$T/12/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/12/failstate" \
+          WS_TEST_CALLS="$T/12/calls" WS_TEST_NOTIFY="$T/12/notify" WS_TEST_VERIFY_RUNS_RC=1 "$SUT" --params "$T/12/params" >/dev/null 2>&1; }
+run12; RC12a=$?; run12; RC12b=$?
+N12=$(grep -c websummary "$T/12/notify" 2>/dev/null); F12=$(grep -c 'FAIL\] metrics --verify 불일치 (run 4280)' "$T/12/log")
+ORD12=$(awk '/ibd-summary.sh|--verify-runs/ {print $2, $3}' "$T/12/calls" | head -2 | tr '\n' '|')
+if [ "$RC12a" -eq 1 ] && [ "$RC12b" -eq 1 ] && [ "${N12:-0}" -eq 1 ] && [ "$F12" -eq 2 ] && [ ! -e "$T/12/state" ]; then R="$R
+CHK gate_new_runs_notify_once=1"; else R="$R
+CHK gate_new_runs_notify_once=0"; echo "[12] 진단 : rc=$RC12a/$RC12b notify=$N12 fail=$F12 order=$ORD12"; cat "$T/12/log"; fi
+case "$ORD12" in "ibd-summary.sh --list|metrics.sh --verify-runs|") R="$R
+CHK gate_after_ibd=1";; *) R="$R
+CHK gate_after_ibd=0"; echo "[12b] 진단 : 순서=$ORD12";; esac
+
+# ==== [13] 옛 런 불일치는 막지 않는다 : DST 쪽이 낡았으면 dst-build --force + metrics --force 로 고치고 진행 (DONE) ===
+mkdir -p "$T/13/tsv" "$T/13/mon"; mk_fake_mon "$T/13/mon"; seed_pngs "$T/13/tsv"
+mkrun "$T/13/RAW" 004280 3 3
+mkparams "$T/13/params" "$T/13/tsv" 4280 0; sed -i 's/metrics_source = legacy/metrics_source = dst/' "$T/13/params"
+DIFF13='  [DIFF] run 4200_nGd : metrics ibd=74 acci=26 live=83339 / legacy ibd=77 acci=26 live=86380   <- DST 쪽 livetime 이 짧다 : DST 가 런이 덜 끝났을 때 만들어졌다. dst-build --force
+[VERIFY] 공통 80 행, 불일치 1'
+WEBSUMMARY_ROOTS="$T/13/RAW" WEBSUMMARY_LOCK="$T/13/.lock" WEBSUMMARY_STATE="$T/13/state" WEBSUMMARY_LOG="$T/13/log" \
+   WEBSUMMARY_MON_DIR="$T/13/mon" WEBSUMMARY_NOTIFY="$T/13/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/13/failstate" \
+   WS_TEST_CALLS="$T/13/calls" WS_TEST_NOTIFY="$T/13/notify" WS_TEST_VERIFY_RC=1 WS_TEST_VERIFY_DIFF="$DIFF13" WS_TEST_HEALED="$T/13/healed" \
+   "$SUT" --params "$T/13/params" >/dev/null 2>&1; RC13=$?
+SLR13=$(awk -F= '$1=="last_run"{print $2}' "$T/13/state" 2>/dev/null)
+HEAL13=$(grep -c 'dst-build.sh --list 4200 --force' "$T/13/calls"); H13=$(grep -c '\[HEAL\]' "$T/13/log"); N13=$(grep -c . "$T/13/notify" 2>/dev/null || echo 0)
+if [ "$RC13" -eq 0 ] && [ "$SLR13" = "4280" ] && [ "$HEAL13" -eq 1 ] && [ "$H13" -eq 1 ] && [ "${N13:-0}" -eq 0 ]; then R="$R
+CHK old_run_selfheal_no_block=1"; else R="$R
+CHK old_run_selfheal_no_block=0"; echo "[13] 진단 : rc=$RC13 last_run=[$SLR13] heal=$HEAL13/$H13 notify=$N13"; cat "$T/13/log"; fi
+
+# ==== [13b] 고쳐도 남는 옛 런 불일치 : WARN + 알림 한 번, 발행은 계속 (DONE) ===
+mkdir -p "$T/14/tsv" "$T/14/mon"; mk_fake_mon "$T/14/mon"; seed_pngs "$T/14/tsv"
+mkrun "$T/14/RAW" 004280 3 3
+mkparams "$T/14/params" "$T/14/tsv" 4280 0; sed -i 's/metrics_source = legacy/metrics_source = dst/' "$T/14/params"
+DIFF14='  [DIFF] run 4200_nGd : metrics ibd=74 acci=26 live=86380 / legacy ibd=77 acci=26 live=83339   <- legacy 쪽 livetime 이 짧다 : ibd-summary --force
+[VERIFY] 공통 80 행, 불일치 1'
+run14() { WEBSUMMARY_ROOTS="$T/14/RAW" WEBSUMMARY_LOCK="$T/14/.lock" WEBSUMMARY_STATE="$T/14/state" WEBSUMMARY_LOG="$T/14/log" \
+   WEBSUMMARY_MON_DIR="$T/14/mon" WEBSUMMARY_NOTIFY="$T/14/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/14/failstate" \
+   WS_TEST_CALLS="$T/14/calls" WS_TEST_NOTIFY="$T/14/notify" WS_TEST_VERIFY_RC=1 WS_TEST_VERIFY_DIFF="$DIFF14" "$SUT" --params "$T/14/params" >/dev/null 2>&1; }
+run14; RC14=$?; rm -f "$T/14/state"; run14
+SLR14=$(awk -F= '$1=="last_run"{print $2}' "$T/14/state" 2>/dev/null)
+W14=$(grep -c 'WARN\] 옛 런 4200' "$T/14/log"); N14=$(grep -c '옛 런 4200' "$T/14/notify" 2>/dev/null || echo 0); HL14=$(grep -c 'dst-build.sh --list 4200' "$T/14/calls")
+if [ "$RC14" -eq 0 ] && [ "$SLR14" = "4280" ] && [ "$W14" -eq 2 ] && [ "${N14:-0}" -eq 1 ] && [ "$HL14" -eq 0 ]; then R="$R
+CHK old_run_warn_notify_once=1"; else R="$R
+CHK old_run_warn_notify_once=0"; echo "[13b] 진단 : rc=$RC14 last_run=[$SLR14] warn=$W14 notify=$N14 heal=$HL14"; cat "$T/14/log"; cat "$T/14/notify" 2>/dev/null; fi
+
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
-         publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny; do
+         publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny \
+         gate_new_runs_notify_once gate_after_ibd old_run_selfheal_no_block old_run_warn_notify_once; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -456,4 +526,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (12/12)"
+echo "PASS websummary (16/16)"

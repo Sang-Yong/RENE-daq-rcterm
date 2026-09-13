@@ -27,13 +27,14 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$DIR/../.." && pwd)
 OUT=${RUNSUM_OUT:-/scratch/RunSummary}
 CUTS=${MONITORCUTS:-$REPO/config/monitorcuts.params}
-LIST=""; FORCE=false; DRY=0; DO_VERIFY=0
+LIST=""; FORCE=false; DRY=0; DO_VERIFY=0; VERIFY_RUNS=""
 
 while [ $# -gt 0 ]; do
    case "${1:-}" in
       --list)    LIST=${2:-}; shift 2 ;;
       --force)   FORCE=true; shift ;;
       --verify)  DO_VERIFY=1; shift ;;
+      --verify-runs) DO_VERIFY=1; VERIFY_RUNS=$2; shift 2 ;;     # 이 런들만 대조 (쉼표). 발행 게이트는 새 런에만 건다
       --dry-run) DRY=1; shift ;;
       -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
       *) echo "모르는 옵션 : $1"; exit 1 ;;
@@ -86,19 +87,27 @@ verify() {
    mfile="$OUT/metrics_summary.tsv"
    pfile="$OUT/pair_summary.tsv"
    [ -r "$mfile" ] && [ -r "$pfile" ] || { echo "[VERIFY] 두 표가 다 있어야 한다"; return 1; }
-   awk -F'\t' -v M="$mfile" '
+   #  --verify-runs 가 있으면 그 런만 본다. DIFF 줄에 livetime 을 함께 찍는다 — 한쪽이 런이 덜 끝났을 때 계산된 것이면
+   #  (DST 가 낡음, 2026-09-11 의 run 4341 : 83339 s 대 86380 s) 그 값이 바로 갈라 준다.
+   awk -F'\t' -v M="$mfile" -v only="$VERIFY_RUNS" '
+      BEGIN { nsel = split(only, a, ","); for (i = 1; i <= nsel; i++) if (a[i] != "") sel[a[i]] = 1 }
       /^#/ { next }
-      FILENAME==M { ibd[$1 $2]=$7; acc[$1 $2]=$8; next }
+      FILENAME==M { ibd[$1 $2]=$7; acc[$1 $2]=$8; live[$1 $2]=$4; next }
       ($1 $2) in ibd {
+         if (nsel > 0 && !($1 in sel)) next
          n++
          if (ibd[$1 $2] != $7 || acc[$1 $2] != $8) {
             bad++
-            printf "  [DIFF] run %s%s : metrics ibd=%s acci=%s / legacy ibd=%s acci=%s\n",
-                   $1, $2, ibd[$1 $2], acc[$1 $2], $7, $8 }
+            printf "  [DIFF] run %s%s : metrics ibd=%s acci=%s live=%s / legacy ibd=%s acci=%s live=%s%s\n",
+                   $1, $2, ibd[$1 $2], acc[$1 $2], live[$1 $2], $7, $8, $4,
+                   (live[$1 $2]+0 < $4+0) ? "   <- DST 쪽 livetime 이 짧다 : DST 가 런이 덜 끝났을 때 만들어졌다. dst-build --force" :
+                   (live[$1 $2]+0 > $4+0) ? "   <- legacy 쪽 livetime 이 짧다 : ibd-summary --force" : "" }
       }
       END {
-         printf "[VERIFY] 공통 %d 행, 불일치 %d\n", n, bad
-         exit (n>0 && bad==0) ? 0 : 1
+         printf "[VERIFY] 공통 %d 행, 불일치 %d%s%s\n", n, bad, (nsel > 0) ? "  (대상 런 " only ")" : "",
+                (nsel > 0 && n == 0) ? "  -- 대조할 행이 없다 (legacy 쪽이 아직 없다). 막지 않는다" : ""
+         #  런을 지정했는데 공통 행이 없으면 아직 대조할 수 없는 것이지 불일치가 아니다 -> 0  (awk 안 주석에 작은따옴표 금지)
+         exit (bad == 0 && (n > 0 || nsel > 0)) ? 0 : 1
       }' "$mfile" "$pfile"
 }
 
