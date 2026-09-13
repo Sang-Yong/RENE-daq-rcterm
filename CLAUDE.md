@@ -891,6 +891,43 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.194 ★★ 강한 뮤온 veto 로 다시 — "라이브타임을 잃어도 좋다. PMT 하나라도 신호가 있으면 150 µs 데드" (사용자 지시, 09-14 03:4x ~)
+
+사용자 : "뮤온 검출기 PMT 1 개의 신호라도 검출된 순간 veto — 150 µs 데드를 주고 다 버리고, 타겟 신호로만 살아남은 것에서 페어링(multiplicity 포함)을
+다시 수행해 그림을 업데이트하라. 그리고 효과적인 컷을 고민해 의견을 내라."
+
+**먼저 잰 것 (run 4345 sub 100, 60 s, 읽기 전용)** — 이 검출기의 SADC 트리거가 이미 패널 AND 라서 '비트 하나라도' 는 거의 같다.
+```
+사건 63,997   패널 AND(분석 코드) 51,869 = 864 Hz   비트 하나라도 53,086 = 885 Hz (+2.3 %)   비트 하나만 120   비트 3 개 이상 676
+타겟만 남는 10,911 (182 Hz) 중 어느 veto 채널의 S_ADC 가 > 50 인 것 617 (5.7 %) · > 100 160 · > 200 19    (S_ADC 는 ped 뺀 값, 잡음 바닥 ~30)
+```
+그래서 **muon-mode 2 = 비트 하나라도 OR 어느 채널 S_ADC > 50** 을 '강한 veto' 로 정했다 (사용자 문구의 가장 센 해석). 5 서브런 시험 :
+single 26,178 → 24,312 (−7.1 %), 뮤온 254,671 → 263,817 (+3.6 %).
+
+**코드 (commit e5f42f9 + 후속)** — 런별 파이프라인은 그대로다 (mode 0 은 바이트 단위로 같다. monitor-dst 8/8).
+```
+RenePrdSingles.h   gReneMuonMode 0/1/2 · ReneIsMuonVetoMode(Sbit, Sadc)   (mode 2 는 S_ADC 브랜치를 켠다)
+BuildMonitorDst.C  muonMode·adcCut 인자 → dst_m<N>/ · cache_m<N>/ 따로.  T_Info 에 muon_mode · muon_adc_cut
+dst-build.sh       --muon-mode N [--adc-cut 50]
+BuildDaily.C       dstSub 인자 (daily.sh 키 dst_subdir) · ★ 라이브타임에 exp(−R_μ·veto_us) 를 곱한다 — DST 의 live_s 는 벽시계 합이라
+                   after-muon 데드타임이 안 빠져 있었다 (패널 AND 864 Hz × 150 µs = −12 %). 4d 만. 런별 표는 그대로
+websummary.sh      monitorcuts 의 dst_subdir 가 dst_m<N> 이면 새 런마다 그 판도 만든다 (실패해도 발행은 막지 않음)
+그림 53/54         다중도 분포(창 안 다른 single 수 n_extra, on·off·초과분) + 포아송 외삽 N(1)²/(2N(2)) 대 남는 '신호'
+그림 55/56         남는 '신호' 의 prompt 모양 대 n_extra=1 · ≥2 가족의 모양 (같은 면적으로)
+```
+**배치** `/Data_ssd/LOG/dstbuild-m2.sh` (03:54 시작, 4237 먼저 + 3 병렬, nice 15, 로그 `dstbuild-m2-<run>.log`, 진행은 `cache_m2/` 파일 수) —
+daily 가 쓰는 43 런 52,767 서브런. **실측 속도 4~5 s/서브런/워커 → 13~18 시간** (아래 CPU 점유 탓). 끝나면 `/Data_ssd/LOG/after-dstm2.sh` 가
+`config/monitorcuts.params` 에 `dst_subdir = dst_m2` 를 넣고 daily.sh 를 한 번 돌려 웹 폴더에 32~56 을 넣는다 (`after-dstm2.log`).
+
+**★★ 곁들여 본 것 — 이 PC 의 CPU 를 다른 계정의 프로세스 둘이 11 코어 가까이 쓰고 있다 (09-10 20:15 부터).**
+```
+pid 227242  sklee  ./sshd        537 % CPU  3 일 7 시간   ppid 1   RSS 2.4 GB   스레드 18
+pid 227835  sklee  ./rcu-sched   537 % CPU  3 일 7 시간   ppid 1   RSS 2.4 GB   스레드 18
+로그인 : sklee pts/12 151.241.154.243  09-10 20:12 ~ 20:15 (3 분) 뒤 두 프로세스가 떴다.  load average 26 (12 코어)
+```
+진짜 sshd 는 `/usr/sbin/sshd` 이고 `rcu_sched` 는 커널 스레드(`[rcu_sched]`)다 — 상대 경로 `./` 로 뜬 같은 이름의 사용자 프로세스는 위장이다.
+exe·cwd 는 권한이 없어 못 읽었고 더 파지 않았다 (남의 계정). **수집·후처리는 돌고 있으나 배치가 두 배 느리고, 보안 문제일 수 있으므로 책임자가 판단할 것.**
+
 #### 11.193 ★★ 배경 성분별 스펙트럼 · 컷 조건 · 추가 컷 시험 — "신호 스펙트럼이 이상하다" 의 원인 (사용자 지시, 09-14 03:0x ~ 04:4x)
 
 사용자 : "근본이 되는 그림이 다 빠졌다. 배경마다 전체 양의 에너지 스펙트럼이 있어야 한다. 배경 조건을 알려 달라. 컷이 더 많아야 할 것 같다 —
@@ -3450,6 +3487,9 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.194         ★ 강한 뮤온 veto(PMT 하나라도 트리거 또는 S_ADC>50, 150 µs 데드) DST 를 dst_m2/ 로 따로 만드는 배치 진행 중(13~18 h).
+                daily 는 dst_subdir 로 갈아탄다 · 라이브타임에 after-muon 데드타임 보정 · 다중도 포아송 외삽 그림 53~56.
+                ★ sklee 계정의 ./sshd · ./rcu-sched 두 프로세스가 11 코어를 쓰고 있다 (09-10 부터) — 책임자 판단
 §11.193         ★ 배경 성분별 스펙트럼 41~52 + 컷 조건 표. fast-n 사이드밴드는 포화(30 MeV 한 빈)라 과대 → 꼬리 규격화(fn_norm_mode 1).
                 PSD·뮤온 veto 늘리기는 효과 없음. ★ 남는 '신호' 는 2-중성자 상관 배경 모양(2.2·8.5 MeV 봉우리) — 분석팀에 다중도 외삽 제안
 §11.192         ★ 날짜 기준 신호 계산 + 전체 사건 prompt/delayed 스펙트럼(배경 전/후) — 새 단계 daily.sh (BuildDaily.C). 런별은 그대로. 그림 32~40

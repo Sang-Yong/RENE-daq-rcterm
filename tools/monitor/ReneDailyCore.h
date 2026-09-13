@@ -26,6 +26,7 @@ struct PairRec {
    bool   off = false;                 // off-window(우발) 쌍인가
    bool   mult = false;                // multiplicity 통과 (= IBD / IBD_Acci 로 세어지는 것)
    long long i1 = -1;                  // prompt single 의 ev 색인 (psd 를 찾아가기 위해. 병합 목록에서는 뜻이 없다)
+   int    nExtra = 0;                  // multiplicity 창([s1−isoPre, s1) · (s1, s2) · (s2, s2+isoPost]) 안의 다른 single 수 (lower 이상). 다중도 외삽용
 };
 
 //  PairAndCountW 와 같은 루프. 세는 대신 쌍을 모은다. (on-time 은 c.nCoinc/nCoincMult, off 는 nAcci/nAcciMult 와 개수가 같다)
@@ -39,6 +40,14 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
       long long ww = i1; double tLimit = ev[i1]._t_us + w.dtMax;
       while (ww + 1 < nEv && ev[ww + 1]._t_us <= tLimit) ++ww;
       return ww;
+   };
+   //  창 안의 다른 single 수. passMult 는 이웃 하나만 보지만(분석 코드 그대로) 외삽에는 전부 세어야 한다. mult 판정에는 쓰지 않는다
+   auto countExtra = [&](long long i1, long long i2, long long wEnd) {
+      int n = 0;
+      for (long long q = i1 - 1; q >= 0 && ev[i1]._t_us - ev[q]._t_us < w.isoPre; --q) if (ev[q]._pe_sum >= w.lower) n++;
+      for (long long q = i2 + 1; q < nEv && ev[q]._t_us - ev[i2]._t_us < w.isoPost; ++q) if (ev[q]._pe_sum >= w.lower) n++;
+      n += (int)((double)(wEnd - i1) - ((i2 <= wEnd) ? 1.0 : 0.0));
+      return n;
    };
    auto passMult = [&](double prevE, double prevT, double s1t, double nextE, double nextT, double s2t, double vetoExtra) {
       if (prevE >= w.lower && s1t - prevT < w.isoPre)  return false;
@@ -61,6 +70,7 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
          double vetoExtra = (double)(wEnd - i1) - ((i2 <= wEnd) ? 1.0 : 0.0);
          PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = false; p.i1 = i1;
          p.mult = passMult(prev._pe_sum, prev._t_us, s1._t_us, next._pe_sum, next._t_us, s2._t_us, vetoExtra);
+         p.nExtra = countExtra(i1, i2, wEnd);
          out.push_back(p);
          break;
       }
@@ -81,6 +91,7 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
          double vetoExtra = (double)(wEnd - i) - ((j <= wEnd) ? 1.0 : 0.0);
          PairRec p; p.t1_us = s1._t_us; p.e1 = s1._pe_sum; p.e2 = s2._pe_sum; p.off = true; p.i1 = i;
          p.mult = passMult(prev._pe_sum, prev._t_us, s1._t_us, next._pe_sum, next._t_us, s2._t_us, vetoExtra);
+         p.nExtra = countExtra(i, j, wEnd);
          out.push_back(p);
          break;
       }

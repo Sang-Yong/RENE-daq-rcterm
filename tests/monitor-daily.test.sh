@@ -56,8 +56,9 @@ RON=$(sed -n 's/.*on=\([0-9]*\).*/\1/p' "$T/cnt.txt"); ROFF=$(sed -n 's/.*off=\(
 DON=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); DOFF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$7} END{print s+0}' "$TSV")
 [ "$DON" = "$RON" ] && [ "$DOFF" = "$ROFF" ] && ok "★ 날짜별 IBD/우발 합 = 런별 PairAndCountW (on $RON, off $ROFF)" || bad "쌍 개수 불일치" "daily on=$DON off=$DOFF / run on=$RON off=$ROFF"
 #  ③ 산출물
-N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-2]_*.png 2>/dev/null | wc -l)
-[ "$N" -eq 21 ] && ok "그림 32~52 스물한 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
+N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-6]_*.png 2>/dev/null | wc -l)
+[ "$N" -eq 25 ] && ok "그림 32~56 스물다섯 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2 · 다중도 2 · 모양 대조 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
+echo "$OUT" | grep -qE '^\s*\[MULT\] n-Gd : N\(0\)=[0-9.]+ N\(1\)=' && ok "[MULT] 줄 : 다중도 N(0)·N(1)·N(2) 와 포아송 외삽" || bad "[MULT] 줄" "$(echo "$OUT" | grep MULT)"
 head -5 "$TSV" | grep -q $'\tn_psd_rej\tfn_mode\tn_mu_rej$' && ok "표 머리에 n_psd_rej · fn_mode · n_mu_rej 열" || bad "표 머리" "$(grep '^#date' "$TSV")"
 FM=$(awk -F'\t' '!/^#/ {print $(NF-1)}' "$TSV" | sort -u | tr '\n' ' ')
 [ "$FM" = "0 " ] && ok "기본은 fn_mode 0 (사이드밴드) · PSD 컷 끔" || bad "fn_mode 열 '$FM'"

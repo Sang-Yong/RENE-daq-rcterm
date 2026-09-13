@@ -10,7 +10,8 @@
 //   출력   <OutDir>/daily_summary.tsv    날짜·채널마다 한 줄 : 라이브타임 · 런 수 · IBD · 우발 · 후보 · rate[/day] · fast-n · Li/He
 //          <OutDir>/daily_spectra.root   스펙트럼 히스토그램 전부
 //          <OutDir>/32..52_*.png         (32~36 날짜 추이 · 37~40 스펙트럼 전/후 · 41~44 배경 성분별 · 45~48 신호창 분해
-//                                         · 49~50 prompt PSD · 51~52 샤워링 뮤온 뒤 dt 와 Li/He 적합)
+//                                         · 49~50 prompt PSD · 51~52 샤워링 뮤온 뒤 dt 와 Li/He 적합
+//                                         · 53~54 다중도 분포 + 포아송 외삽 · 55~56 남는 신호 대 다중중성자 가족의 prompt 모양)
 //
 //   ---- 날짜에 어떻게 붙이나 ----
 //   * 사건 시각 = 런 시작 epoch + t_us·1e-6  (DST 의 t_us 는 런 안에서 이어지는 시각).  날짜는 이 PC 의 지역시(KST) 자정 기준.
@@ -224,6 +225,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
    }
    TH1D *hPsd[2][2], *hPpsdRej[2][2], *hDpsdRej[2][2], *hDtPrev[2], *hDtNext[2];   // p_psd(on/off) · PSD 로 버린 쌍 · 샤워 뒤 dt
    TH1D *hPmuRej[2][2], *hDmuRej[2][2];                                          // 뮤온 veto 로 버린 쌍 (on/off)
+   TH1D *hNx[2][2], *hPnx1[2][2], *hPnx2[2][2];                                   // 다중도(창 안 다른 single 수) 분포 · nExtra=1 / >=2 의 prompt (on/off)
    for (int k = 0; k < 2; ++k) {
       for (int o = 0; o < 2; ++o) {
          hPsd[k][o] = new TH1D(Form("psd_%s_%s", fileTag[k], o ? "off" : "on"), "", 90, -6, 12); hPsd[k][o]->SetDirectory(nullptr);
@@ -231,6 +233,9 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          hDpsdRej[k][o] = new TH1D(Form("delayed_%s_psdrej_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hDpsdRej[k][o]->SetDirectory(nullptr);
          hPmuRej[k][o] = new TH1D(Form("prompt_%s_muveto_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPmuRej[k][o]->SetDirectory(nullptr);
          hDmuRej[k][o] = new TH1D(Form("delayed_%s_muveto_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hDmuRej[k][o]->SetDirectory(nullptr);
+         hNx[k][o] = new TH1D(Form("nextra_%s_%s", fileTag[k], o ? "off" : "on"), "", 12, -0.5, 11.5); hNx[k][o]->SetDirectory(nullptr);
+         hPnx1[k][o] = new TH1D(Form("prompt_%s_nextra1_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPnx1[k][o]->SetDirectory(nullptr);
+         hPnx2[k][o] = new TH1D(Form("prompt_%s_nextra2p_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPnx2[k][o]->SetDirectory(nullptr);
       }
       hDtPrev[k] = new TH1D(Form("dt_prev_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtPrev[k]->SetDirectory(nullptr);
       hDtNext[k] = new TH1D(Form("dt_next_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtNext[k]->SetDirectory(nullptr);
@@ -300,6 +305,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          std::vector<PairRec> pairs = PairListW(sing, w);
          for (const auto &p : pairs) {
             double e1 = NpeToMeV(p.e1), e2 = NpeToMeV(p.e2); const int o = p.off ? 1 : 0;
+            hNx[k][o]->Fill(std::min(p.nExtra, 11));
+            if (p.nExtra == 1) hPnx1[k][o]->Fill(e1); else if (p.nExtra >= 2) hPnx2[k][o]->Fill(e1);
             if (!p.mult) { hPrej[k][o]->Fill(e1); hDrej[k][o]->Fill(e2); continue; }
             std::string d = DayOf(m.es + p.t1_us * 1e-6); DayAcc &a = acc[k][d]; a.day = d;
             if (muVetoUs > 0 || showerVetoMs > 0) {
@@ -554,13 +561,72 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       DrawDecomposition(out, Form("%02d_decomp_delayed_%s", 46 + 2 * k, fileTag[k]),
                         Form("Delayed spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
                         dAll, dSub, {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}, {dLi, "Li/He [prelim]", (int)kMagenta + 1}});
+      //  53~54 다중도 분포와 포아송 외삽 : 창 안 다른 single 수 n 의 on−acc 초과분 N(n). 뮤온 파쇄 중성자 다발이 포아송이면
+      //  N(0) 의 다중중성자 몫 ≈ N(1)²/(2·N(2)). 이것이 남는 '신호' 와 비슷하면 신호가 2-중성자 배경이라는 뜻이다
+      double nxN[3] = {0, 0, 0}, n0est = -1, n0estErr = -1;
+      {
+         TH1D *ex = (TH1D *)hNx[k][0]->Clone(Form("nextra_%s_excess", fileTag[k])); ex->Add(hNx[k][1], -acciScale[k]);
+         for (int n = 0; n < 3; ++n) nxN[n] = ex->GetBinContent(ex->FindBin(n));
+         if (nxN[2] > 0) { n0est = nxN[1] * nxN[1] / (2 * nxN[2]);
+            double r1 = std::sqrt(hNx[k][0]->GetBinContent(2) + acciScale[k] * acciScale[k] * hNx[k][1]->GetBinContent(2)) / std::max(1.0, nxN[1]);
+            double r2 = std::sqrt(hNx[k][0]->GetBinContent(3) + acciScale[k] * acciScale[k] * hNx[k][1]->GetBinContent(3)) / std::max(1.0, nxN[2]);
+            n0estErr = n0est * std::sqrt(4 * r1 * r1 + r2 * r2); }
+         TCanvas *c = new TCanvas(Form("c_nx_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+         TH1D *on = (TH1D *)hNx[k][0]->Clone(Form("nextra_%s_on_draw", fileTag[k])); TH1D *of = (TH1D *)hNx[k][1]->Clone(Form("nextra_%s_off_draw", fileTag[k])); of->Scale(acciScale[k]);
+         on->SetTitle(Form("Multiplicity of IBD pairs, %s : other singles (> 1.2 MeV) in [prompt#minus%.0f #mus, delayed+%.0f #mus];n_{extra};Pairs", chanName[k], w.isoPre, w.isoPost));
+         on->SetLineColor(kBlack); on->SetLineWidth(2); of->SetLineColor(kBlue + 1); of->SetLineWidth(2); of->SetLineStyle(2); ex->SetLineColor(kOrange + 7); ex->SetLineWidth(3);
+         for (int b = 1; b <= ex->GetNbinsX(); ++b) if (ex->GetBinContent(b) < 0) ex->SetBinContent(b, 0);
+         on->SetStats(0); on->SetMinimum(0); on->SetMaximum(on->GetMaximum() * 1.3 + 1); on->GetXaxis()->SetTitleSize(0.045); on->GetYaxis()->SetTitleSize(0.045);
+         on->Draw("HIST"); of->Draw("HIST SAME"); ex->Draw("HIST SAME");
+         TLegend *lg = new TLegend(0.40, 0.55, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.028);
+         lg->AddEntry(on, Form("on-window pairs (all, before multiplicity cut)  N = %.0f", on->Integral()), "l");
+         lg->AddEntry(of, Form("off-window (accidental, scaled)  N = %.1f", of->Integral()), "l");
+         lg->AddEntry(ex, Form("excess on #minus acc : N(0) = %.1f (passes cut)  N(1) = %.1f  N(2) = %.1f  N(#geq3) = %.1f", nxN[0], nxN[1], nxN[2], ex->Integral(ex->FindBin(3), ex->GetNbinsX())), "l");
+         if (n0est >= 0) lg->AddEntry((TObject *)nullptr, Form("Poisson extrapolation of the multi-n family to n_{extra}=0 : N(1)^{2}/(2N(2)) = %.0f #pm %.0f  [prelim]", n0est, n0estErr), "");
+         lg->AddEntry((TObject *)nullptr, Form("compare : after all subtractions the 'signal' is %.0f", pSub->Integral()), "");
+         lg->Draw();
+         TPad *pd = new TPad(Form("ins_nx_%s", fileTag[k]), "", 0.57, 0.16, 0.95, 0.52);
+         pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
+         TH1D *on2 = (TH1D *)on->Clone(Form("%s_ins", on->GetName())); on2->SetTitle(";;log scale"); on2->SetMinimum(0.5); on2->SetMaximum(on->GetMaximum() * 3);
+         on2->GetXaxis()->SetLabelSize(0.07); on2->GetYaxis()->SetLabelSize(0.07); on2->GetYaxis()->SetTitleSize(0.07); on2->GetYaxis()->SetTitleOffset(1.0);
+         on2->Draw("HIST"); ((TH1D *)of->Clone(Form("%s_ins", of->GetName())))->Draw("HIST SAME"); ((TH1D *)ex->Clone(Form("%s_ins", ex->GetName())))->Draw("HIST SAME"); c->cd();
+         c->Print(out + Form("%02d_bgspec_multiplicity_%s.png", 53 + k, fileTag[k]));
+         printf("  [MULT] %s : N(0)=%.1f N(1)=%.1f N(2)=%.1f  Poisson N0_est=%.1f +- %.1f  signal=%.1f\n", chanName[k], nxN[0], nxN[1], nxN[2], n0est, n0estErr, pSub->Integral());
+         ex->SetDirectory(fs);
+      }
+      //  55~56 prompt 모양 대조 : 남는 '신호'(빨강) 대 n_extra=1 초과분(초록) · n_extra>=2 초과분(주황), 각각 신호 적분으로 규격화
+      {
+         TH1D *x1 = (TH1D *)hPnx1[k][0]->Clone(Form("prompt_%s_nextra1_excess", fileTag[k])); x1->Add(hPnx1[k][1], -acciScale[k]);
+         TH1D *x2 = (TH1D *)hPnx2[k][0]->Clone(Form("prompt_%s_nextra2p_excess", fileTag[k])); x2->Add(hPnx2[k][1], -acciScale[k]);
+         for (TH1D *h : {x1, x2}) for (int b = 1; b <= h->GetNbinsX(); ++b) if (h->GetBinContent(b) < 0) h->SetBinContent(b, 0);
+         double nS = std::max(1.0, pSub->Integral()); double n1 = x1->Integral(), n2 = x2->Integral();
+         TH1D *s1n = (TH1D *)pSub->Clone(Form("prompt_%s_signal_shape", fileTag[k])); TH1D *x1n = (TH1D *)x1->Clone(Form("%s_norm", x1->GetName())); TH1D *x2n = (TH1D *)x2->Clone(Form("%s_norm", x2->GetName()));
+         if (n1 > 0) x1n->Scale(nS / n1); if (n2 > 0) x2n->Scale(nS / n2);
+         TCanvas *c = new TCanvas(Form("c_shape_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
+         s1n->SetTitle(Form("Prompt shape comparison, %s : remaining 'signal' vs multi-n families (normalized to the same area);Energy [MeV];Events / %.2f MeV (normalized)", chanName[k], s1n->GetBinWidth(1)));
+         s1n->SetStats(0); s1n->SetLineColor(kRed + 1); s1n->SetLineWidth(3); s1n->SetFillStyle(0); x1n->SetLineColor(kGreen + 2); x1n->SetLineWidth(2); x2n->SetLineColor(kOrange + 7); x2n->SetLineWidth(2);
+         double ym = std::max({s1n->GetMaximum(), x1n->GetMaximum(), x2n->GetMaximum()}); s1n->SetMinimum(0); s1n->SetMaximum(ym * 1.3 + 1);
+         s1n->GetXaxis()->SetTitleSize(0.045); s1n->GetYaxis()->SetTitleSize(0.045);
+         s1n->Draw("HIST"); x1n->Draw("HIST SAME"); x2n->Draw("HIST SAME");
+         TLegend *lg = new TLegend(0.42, 0.62, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.028);
+         lg->AddEntry(s1n, Form("remaining 'signal' after all subtractions  N = %.0f", nS), "l");
+         lg->AddEntry(x1n, Form("pairs with exactly 1 extra single (on #minus acc), N = %.0f, scaled to %.0f", n1, nS), "l");
+         lg->AddEntry(x2n, Form("pairs with #geq 2 extra singles (on #minus acc), N = %.0f, scaled to %.0f", n2, nS), "l");
+         lg->AddEntry((TObject *)nullptr, "same shape = the 'signal' is the n_{extra}=0 tail of the same multi-neutron family", "");
+         lg->Draw();
+         c->Print(out + Form("%02d_bgspec_shape_%s.png", 55 + k, fileTag[k]));
+         x1->SetDirectory(fs); x2->SetDirectory(fs); s1n->SetDirectory(fs);
+      }
       fs->cd();
       for (TH1D *h : {pAll, pSub, pFn, pLi, dAll, dSub, dFn, dLi, hP[k][0], hP[k][1], hD[k][0], hD[k][1], hDside[k],
                       pAcc, dAcc, pRej, dRej, pSideFull, hPrej[k][0], hPrej[k][1], hDrej[k][0], hDrej[k][1],
-                      hPsd[k][0], hPsd[k][1], pPsdRej, dPsdRej, hDtPrev[k], hDtNext[k], pMuRej, dMuRej}) h->Write();
+                      hPsd[k][0], hPsd[k][1], pPsdRej, dPsdRej, hDtPrev[k], hDtNext[k], pMuRej, dMuRej,
+                      hNx[k][0], hNx[k][1], hPnx1[k][0], hPnx1[k][1], hPnx2[k][0], hPnx2[k][1]}) h->Write();
       printf("  [SPEC] %s : on %.0f  off·scale %.1f  fast-n %.1f  Li/He %.1f  -> prompt after %.1f, delayed after %.1f\n",
              chanName[k], pAll->Integral(), acciScale[k] * hP[k][1]->Integral(), nFn, nLi, pSub->Integral(), dSub->Integral());
    }
    fs->Close();
-   printf("[SAVED] %sdaily_spectra.root + %s32..52_*.png\n", out.Data(), out.Data());
+   printf("[SAVED] %sdaily_spectra.root + %s32..56_*.png\n", out.Data(), out.Data());
 }

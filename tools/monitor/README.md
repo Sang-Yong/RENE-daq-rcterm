@@ -628,6 +628,8 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 45~48 | `45/47_decomp_prompt_<ch>.png` · `46/48_decomp_delayed_<ch>.png` | **신호창 분해** — 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음) |
 | 49~50 | `49/50_bgspec_psd_<ch>.png` | prompt 의 **p_psd** 분포 : on(검정) 대 off(파랑 = γ 참조). p_psd > 3 비율과 컷 선(`daily_psd_nsig`) |
 | 51~52 | `51/52_bgspec_lihe_dt_<ch>.png` | 직전 샤워링 뮤온까지의 **Δt** (검정) · 직후(회색, 역방향 대조) · 전체 합의 Daya Bay Eq.2 적합(빨강). Li/He 빼기의 근거 |
+| 53~54 | `53/54_bgspec_multiplicity_<ch>.png` | 쌍마다 multiplicity 창 안 **다른 single 수 n_extra** 의 분포 (on · off · 초과분). 다중중성자 가족이 포아송이면 n_extra=0 에 남는 몫 ≈ N(1)²/(2N(2)) — 남는 '신호' 와 비교 |
+| 55~56 | `55/56_bgspec_shape_<ch>.png` | 남는 '신호' 의 prompt 모양(빨강) 대 n_extra=1 · ≥2 가족의 prompt 모양(같은 면적으로). 같으면 신호가 그 가족의 꼬리다 |
 
 **배경을 어떻게 고르나 (4d, 날짜 기준. 런별 BuildMetrics 와 같은 정의)** — 컷 값은 `/home/ojk/analysis3/essential/AnalysisCondition.h` 가 정본이고
 DST 단계(`dst-build.sh`)의 muon veto(SADC 패널 위/아래 동시) · after-muon 150 µs · 포화 제거는 이미 걸린 뒤다. 그 위에 :
@@ -641,6 +643,9 @@ fast-n      기본(fn_norm_mode 0) 사이드밴드 prompt 12–50 MeV(single ∪
             fn_norm_mode 1 : 신호창 고에너지 꼬리 [fn_norm_lo_mev(8.5), 12] 의 우발 뺀 on 쌍 수로 평평한 높이를 정한다
 Li/He       직전 샤워링 뮤온(target > mu_shower_npe=20000 NPE)까지 Δt 를 날짜마다 Daya Bay Eq.2 로 적합, 스펙트럼 모양은 '직전 3τ 안 쌍 − 직후 3τ 안 쌍'
 PSD 컷      daily_psd_nsig > 0 이면 prompt 의 p_psd > nsig 인 쌍을 버린다 (on/off 같이. γ 수용 99.9 % @3σ)
+강한 veto   dst_subdir = dst_m2 : dst-build.sh --muon-mode 2 로 만든 DST — veto PMT 30 개 중 하나라도 트리거되거나 S_ADC > 50 이면 뮤온으로 보고
+            150 µs 데드. 타겟만 남은 사건으로 쌍을 만든다 (2026-09-14 사용자 지시). 런별 파이프라인은 dst/(패널 AND) 그대로
+라이브타임  4d 는 DST 의 벽시계 합에 exp(−R_μ·veto_us) 를 곱한다 (after-muon 데드타임. 패널 AND 864 Hz → −12 %)
 ```
 
 **2026-09-14 부터의 그림 규칙 (사용자 지시)** — `tools/monitor/ReneTrendPlot.h` 한 곳에서 그린다. ① n-Gd 와 n-H 는 같은 캔버스에 두지 않는다.

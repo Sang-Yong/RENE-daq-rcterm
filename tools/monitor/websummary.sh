@@ -324,6 +324,13 @@ if [ "$STAGES_DISABLED" = 1 ]; then
 else
    run_stage "run-summary"   "$MON/run-summary.sh"   --list "$NEWLIST" || exit 1
    run_stage "dst-build"     "$MON/dst-build.sh"     --list "$NEWLIST" || exit 1
+   #  날짜 기준 단계가 강한 veto DST(dst_m<N>/)를 읽도록 돼 있으면 그 판도 같이 만든다 (2026-09-14). 실패해도 발행은 막지 않는다
+   MSUB=$(awk -F= '$1 ~ /^[ \t]*dst_subdir[ \t]*$/ { sub(/^[ \t]+/, "", $2); sub(/[ \t#].*$/, "", $2); v = $2 } END { print v }' "$REPO/config/monitorcuts.params" 2>/dev/null)
+   case "${MSUB:-}" in
+      dst_m[0-9]*) MM=${MSUB#dst_m}; log "[RUN ] dst-build --muon-mode $MM (run $NEWLIST, $MSUB/)"
+                   nice -n 15 ionice -c2 -n7 "$MON/dst-build.sh" --list "$NEWLIST" --muon-mode "$MM" >>"$LOG" 2>&1 \
+                      && log "[OK  ] dst-build --muon-mode $MM" || log "[WARN] dst-build --muon-mode $MM 실패 -- daily 가 그 런을 건너뛴다" ;;
+   esac
    run_stage "metrics-build" "$MON/metrics.sh"       --list "$NEWLIST" || exit 1
    run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
 
