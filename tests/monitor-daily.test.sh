@@ -72,6 +72,7 @@ awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 �
 #     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
 DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
 echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0)" || bad "dry-run 인자" "$DRY"
+cp "$TSV" "$T/daily_default.tsv"
 printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
 OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
 [ "$RC2" -eq 0 ] && ok "PSD 컷 + 꼬리 규격화 rc=0" || bad "rc=$RC2" "$(echo "$OUT2" | grep -E 'rror|FATAL' | head -3)"
@@ -82,8 +83,8 @@ NR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$(NF-2)+$NF} END{print s+0}' "$TSV")
 awk -v x="$NR" 'BEGIN{exit !(x >= 0 && x < 2998)}' && ok "PSD·뮤온 veto 로 버린 on 쌍 수가 표에 있다 ($NR, 합성 자료라 뜻은 없다)" || bad "n_psd_rej+n_mu_rej $NR"
 MR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$NF} END{print s+0}' "$TSV")
 [ "$MR" -gt 0 ] && ok "뮤온 veto 300 µs 가 실제로 쌍을 버린다 ($MR)" || bad "n_mu_rej $MR"
-LV=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%d", s}' "$TSV")
-awk -v a="$LV" -v b="$SUM" 'BEGIN{exit !(a < b)}' && ok "늘린 veto 만큼 라이브타임이 준다 ($LV < $SUM)" || bad "라이브타임 보정" "$LV vs $SUM"
+LV=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%.2f", s}' "$TSV"); SUMF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%.2f", s}' "$T/daily_default.tsv")
+awk -v a="$LV" -v b="$SUMF" 'BEGIN{exit !(a+0 < b+0)}' && ok "늘린 veto 만큼 라이브타임이 준다 ($LV < $SUMF; 픽스처 뮤온 0.2 Hz 라 차이는 작다)" || bad "라이브타임 보정" "$LV vs $SUMF"
 DON2=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV")
 [ "$((DON2 + NR))" = "$RON" ] && ok "★ on 쌍 = 남은 것 + PSD·뮤온 veto 로 버린 것 ($DON2 + $NR = $RON)" || bad "컷 회계" "on $DON2 + rej $NR != $RON"
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]

@@ -177,6 +177,22 @@ inline bool ReneIsMuonVeto(const int *Sbit_) {
    return false;
 }
 
+//  ---- 강한 veto (2026-09-14, 사용자 지시 "PMT 하나의 신호라도 검출되면 veto") ----
+//  gReneMuonMode  0 = 패널 위/아래 동시 (분석 코드 그대로. 기본)
+//                 1 = veto PMT 30 개 중 하나라도 트리거 비트가 켜졌으면 veto
+//                 2 = 1 또는 어느 채널의 S_ADC 가 gReneMuonAdcCut 을 넘으면 veto (문턱 아래 신호까지)
+//  실측 (run 4345 sub 100, 60 s) : 패널 AND 51,869 · 비트 하나라도 53,086 (+2.3 %) · 타겟만 남는 10,911 중 S_ADC>50 인 것 617 (5.7 %)
+//  ★ 기본 0 이면 옛 결과와 바이트 단위로 같다 (legacy 패리티 게이트). 1·2 는 dst_m<mode>/ · cache_m<mode>/ 로 따로 만든다.
+static int gReneMuonMode   = 0;
+static int gReneMuonAdcCut = 50;
+template <class T>
+inline bool ReneIsMuonVetoMode(const int *Sbit_, const T *Sadc_) {
+   if (gReneMuonMode == 0) return ReneIsMuonVeto(Sbit_);
+   for (int ch = 0; ch < 30; ++ch) if (Sbit_[ch]) return true;
+   if (gReneMuonMode >= 2 && Sadc_) for (int ch = 0; ch < 30; ++ch) if ((int)Sadc_[ch] > gReneMuonAdcCut) return true;
+   return false;
+}
+
 //  FADC 채널 하나의 NPE. 신호가 없으면 -999 (Step1 의 기본값과 같다).
 //  포화 여부는 saturate 에 OR 로 얹는다.
 inline double ReneChannelNpe(int ch, int timeWindow, bool &saturate) {
@@ -448,6 +464,7 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
    chain.SetBranchStatus("*", 0);
    chain.SetBranchStatus("F_Triggered", 1);
    chain.SetBranchStatus("S_Triggered", 1);
+   if (gReneMuonMode >= 2) chain.SetBranchStatus("S_ADC", 1);
    chain.SetBranchStatus("F_Waveform_*", 1);
    chain.SetBranchStatus("TCBTRGTime", 1);
    chain.SetBranchStatus("F_THR", 1);
@@ -476,7 +493,7 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
       st.nIn++;
 
       //  --- Step1 : muon veto. muonTime 갱신이 dt 계산보다 먼저다 ---
-      bool isVeto = ReneIsMuonVeto(Sbit);
+      bool isVeto = ReneIsMuonVetoMode(Sbit, Sadc);
       if (isVeto) carry.muonTime = globalTime;
       double dt_us = (carry.muonTime > 0) ? (globalTime - carry.muonTime) / 1000.0 : -1.0;
 

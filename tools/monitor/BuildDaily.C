@@ -31,6 +31,10 @@
 //     라이브타임은 그 런의 뮤온율로 exp(−R_μ·(muVetoUs−150 µs)) 만큼 줄여 센다. showerVetoMs > 0 은 샤워링 뮤온 뒤 ms 단위 veto
 //     (Li/He 를 직접 자른다. 적합 창 아래끝은 그 값 이상으로 올린다). 버린 쌍의 스펙트럼을 41~44 에 그린다 —
 //     그 모양이 '신호' 와 같으면 신호가 뮤온 유발 배경이라는 뜻이다.
+//   * dstSub : DST 폴더 이름. "dst" = 분석 코드의 패널 AND veto, "dst_m2" = 강한 veto(PMT 하나라도 트리거 또는 S_ADC > 50)로
+//     dst-build.sh --muon-mode 2 가 만든 것. 런별 파이프라인은 언제나 dst/ 를 쓴다.
+//   * 라이브타임 : DST 의 live_s 는 서브런 벽시계 합이라 after-muon 데드타임이 안 빠져 있다. 여기서 exp(−R_μ·veto_us) 를 곱한다
+//     (패널 AND 864 Hz × 150 µs → 12 % 감소. 이 보정은 4d 에만 있다 — 런별 표는 그대로다).
 //   * fnNormMode = 1 : fast-n 평평한 높이를 사이드밴드(12~50 MeV, 실측 93 % 포화 = 에너지가 잘린 사건) 가 아니라
 //     **신호창 안의 고에너지 꼬리** [fnNormLoMev, S1 상한] 의 우발 뺀 on-window 쌍 수로 정한다. IBD prompt 는 ~8 MeV 에서
 //     끝나므로 그 위는 fast-n (+ Li/He 조금) 뿐이다. 사이드밴드 값은 대조용으로 범례에 남긴다.
@@ -187,7 +191,7 @@ static void DrawDecomposition(const TString &dir, const char *file, const char *
 void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe = 20000, double liheFitLoS = 0.002,
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
-                double muVetoUs = 0, double showerVetoMs = 0) {
+                double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst") {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -241,18 +245,18 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       if (m.es <= 0 || m.live <= 0 || m.nsub <= 0) continue;
       auto ir = rtype.find(m.run);
       if (ir != rtype.end() && !(ir->second == "none" || ir->second == "?")) { nRunSrc++; continue; }
-      TString dst = out + TString::Format("dst/DST_%06d.root", m.run);
+      TString dst = out + TString::Format("%s/DST_%06d.root", dstSub, m.run);
       if (gSystem->AccessPathName(dst)) { nRunNoDst++; continue; }
       std::vector<S1S2_Candidate> sing; std::vector<Float_t> psd; std::vector<ReneSat> sats; std::vector<ReneMuon> mu;
-      double liveS = 0; int nSubrun = 0, schema = 1;
-      if (!DailyLoadDst(dst, sing, psd, sats, mu, liveS, nSubrun, schema)) { nRunNoDst++; continue; }
+      double liveS = 0, dstVetoUs = 150; int nSubrun = 0, schema = 1, dstMuMode = 0;
+      if (!DailyLoadDst(dst, sing, psd, sats, mu, liveS, nSubrun, schema, &dstVetoUs, &dstMuMode)) { nRunNoDst++; continue; }
       nRunUsed++;
       std::vector<double> showers = DailyShowerTimes(mu, muShowerNpe);
       std::vector<double> muT;                                    // 모든 veto 뮤온 시각 (muVetoUs > 0 일 때만)
       if (muVetoUs > 0) { muT.reserve(mu.size()); for (const auto &x : mu) muT.push_back(x.t_us); std::sort(muT.begin(), muT.end()); }
       const double rMuAll = liveS > 0 ? mu.size() / liveS : 0, rShower = liveS > 0 ? showers.size() / liveS : 0;
-      double liveFac = 1.0;                                       // 늘린 veto 의 추가 데드타임 (DST 의 150 µs 는 이미 빠져 있다고 본다)
-      if (muVetoUs > 150) liveFac *= std::exp(-rMuAll * (muVetoUs - 150) * 1e-6);
+      double liveFac = std::exp(-rMuAll * dstVetoUs * 1e-6);    // DST 의 after-muon 데드타임 (live_s 는 벽시계 합이다)
+      if (muVetoUs > dstVetoUs) liveFac *= std::exp(-rMuAll * (muVetoUs - dstVetoUs) * 1e-6);   // 늘린 veto 의 추가분
       if (showerVetoMs > 0) liveFac *= std::exp(-rShower * showerVetoMs * 1e-3);
       //  single ∪ 포화 (fast-n 사이드밴드용, BuildMetrics 와 같다)
       std::vector<S1S2_Candidate> all = sing;
@@ -320,7 +324,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             hDside[k]->Fill(NpeToMeV(p.e2)); hPside[k]->Fill(NpeToMeV(p.e1));
          }
       }
-      printf("  [RUN ] %06d : singles %zu  showers %zu  live %.0f s  (%s)\n", m.run, sing.size(), showers.size(), liveS, DayOf(m.es).c_str());
+      printf("  [RUN ] %06d : singles %zu  muons %zu (%.0f Hz, mode %d)  showers %zu  live %.0f s x %.3f  (%s)\n", m.run, sing.size(), mu.size(), rMuAll, dstMuMode, showers.size(), liveS, liveFac, DayOf(m.es).c_str());
    }
    printf("[INFO] 런 %d 개 사용 · DST 없음 %d · 선원 런 제외 %d\n", nRunUsed, nRunNoDst, nRunSrc);
    if (nRunUsed == 0) { printf("[FATAL] 쓸 런이 없다\n"); return; }

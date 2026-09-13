@@ -48,7 +48,7 @@ static bool DstUpToDate(const TString &path, int nSubNow) {
 }
 
 static void BuildOne(int run, const TString &out, const TString &roots,
-                     double thr, double vetoCutUs, bool force, int maxSubrun) {
+                     double thr, double vetoCutUs, bool force, int maxSubrun, int muonMode, int adcCut) {
    TString runDir = ReneFindRunDir(run, roots);
    if (runDir.IsNull()) { printf("  [SKIP] run %d : PRD 없음\n", run); return; }
    std::vector<int> subs = ReneListSubruns(runDir, run);
@@ -57,8 +57,10 @@ static void BuildOne(int run, const TString &out, const TString &roots,
       subs.erase(std::remove_if(subs.begin(), subs.end(),
                                 [&](int x) { return x > maxSubrun; }), subs.end());
 
-   TString dstDir = out + "dst/";      gSystem->mkdir(dstDir, kTRUE);
-   TString cache  = out + "cache/";    gSystem->mkdir(cache,  kTRUE);
+   //  강한 veto (muonMode 1·2) 는 single 목록 자체가 달라지므로 DST·캐시를 따로 둔다. 0 은 예전 자리 그대로
+   TString dstDir = out + (muonMode ? TString::Format("dst_m%d/", muonMode) : TString("dst/"));      gSystem->mkdir(dstDir, kTRUE);
+   TString cache  = out + (muonMode ? TString::Format("cache_m%d/", muonMode) : TString("cache/"));  gSystem->mkdir(cache,  kTRUE);
+   gReneMuonMode = muonMode; gReneMuonAdcCut = adcCut;
    TString dst = dstDir + TString::Format("DST_%s.root", ReneRunStr(run).Data());
    if (!force && DstUpToDate(dst, (int)subs.size())) {
       printf("  [OK]   run %d : DST 최신 (서브런 %zu)\n", run, subs.size()); return;
@@ -164,6 +166,7 @@ static void BuildOne(int run, const TString &out, const TString &roots,
    TTree *tInfo = new TTree("T_Info", "DST build metadata (one entry)");
    Int_t    i_run = run, i_nsub = (Int_t)subs.size(), i_nbad = nBad, i_schema = kDstSchema;
    Int_t    i_psdTail = kRenePsdTailSamples * 2;     // [ns] 2 ns/샘플
+   Int_t    i_muMode = muonMode, i_adcCut = adcCut;
    Double_t i_thr = thr, i_veto = vetoCutUs, i_live = liveS;
    Long64_t i_built = (Long64_t)time(nullptr);
    tInfo->Branch("run",      &i_run);
@@ -175,6 +178,8 @@ static void BuildOne(int run, const TString &out, const TString &roots,
    tInfo->Branch("built",    &i_built);
    tInfo->Branch("schema",   &i_schema);
    tInfo->Branch("psd_tail_ns", &i_psdTail);
+   tInfo->Branch("muon_mode", &i_muMode);
+   tInfo->Branch("muon_adc_cut", &i_adcCut);
    tInfo->Fill();
 
    f->cd();
@@ -192,7 +197,7 @@ static void BuildOne(int run, const TString &out, const TString &roots,
 
 void BuildMonitorDst(const char *runList, const char *outDir,
                      const char *rawRoots, double vetoCutUs = 150.0,
-                     bool force = false, int maxSubrun = -1) {
+                     bool force = false, int maxSubrun = -1, int muonMode = 0, int adcCut = 50) {
    //  thr : BuildPairSummary.C 와 같은 계산이어야 캐시가 공유된다
    SetChannel(CH_NH);  double thrNH = std::min(S1_MIN_NPE, S2_MIN_NPE);
    SetChannel(CH_NGD); double thrGd = std::min(S1_MIN_NPE, S2_MIN_NPE);
@@ -202,7 +207,7 @@ void BuildMonitorDst(const char *runList, const char *outDir,
    TObjArray *parts = ls.Tokenize(",");
    for (int i = 0; i < parts->GetEntries(); ++i) {
       int run = ((TObjString *)parts->At(i))->GetString().Atoi();
-      if (run > 0) BuildOne(run, out, rawRoots, thr, vetoCutUs, force, maxSubrun);
+      if (run > 0) BuildOne(run, out, rawRoots, thr, vetoCutUs, force, maxSubrun, muonMode, adcCut);
    }
    delete parts;
 }

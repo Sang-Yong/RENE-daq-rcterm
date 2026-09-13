@@ -90,7 +90,8 @@ inline std::vector<PairRec> PairListW(const std::vector<S1S2_Candidate> &ev, con
 
 //  BuildMetrics.C::LoadDst 의 사본
 inline bool DailyLoadDst(const TString &dst, std::vector<S1S2_Candidate> &sing, std::vector<Float_t> &psd,
-                         std::vector<ReneSat> &sats, std::vector<ReneMuon> &mu, double &liveS, int &nSubrun, int &schema) {
+                         std::vector<ReneSat> &sats, std::vector<ReneMuon> &mu, double &liveS, int &nSubrun, int &schema,
+                         double *vetoUs = nullptr, int *muonMode = nullptr) {
    TFile *f = TFile::Open(dst, "READ");
    if (!f || f->IsZombie()) { if (f) f->Close(); return false; }
    TTree *tS = (TTree *)f->Get("T_Singles"); TTree *tM = (TTree *)f->Get("T_Muons");
@@ -111,10 +112,13 @@ inline bool DailyLoadDst(const TString &dst, std::vector<S1S2_Candidate> &sing, 
    tM->SetBranchAddress("sub_id", &m_sub); tM->SetBranchAddress("t_us", &m_t);
    tM->SetBranchAddress("pe", &m_pe);      tM->SetBranchAddress("sat", &m_sat);
    for (Long64_t i = 0; i < tM->GetEntries(); ++i) { tM->GetEntry(i); mu.push_back({m_sub, m_t, m_pe, m_sat}); }
-   Int_t i_nsub, i_schema = 1; Double_t i_live;
+   Int_t i_nsub, i_schema = 1, i_mm = 0; Double_t i_live, i_veto = 150;
    tI->SetBranchAddress("n_subrun", &i_nsub); tI->SetBranchAddress("live_s", &i_live);
    if (tI->GetBranch("schema")) tI->SetBranchAddress("schema", &i_schema);
+   if (tI->GetBranch("veto_us")) tI->SetBranchAddress("veto_us", &i_veto);
+   if (tI->GetBranch("muon_mode")) tI->SetBranchAddress("muon_mode", &i_mm);
    tI->GetEntry(0); nSubrun = i_nsub; liveS = i_live; schema = i_schema;
+   if (vetoUs) *vetoUs = i_veto; if (muonMode) *muonMode = i_mm;
    f->Close(); return true;
 }
 
