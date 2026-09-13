@@ -891,6 +891,28 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.191 ★★ 추이 그림 전면 수정 — 채널별 쪽 · 선형축 + 로그 inset · 번호 붙은 파일 이름 (사용자 지시, 09-14 00:xx)
+
+사용자 : "런 서머리 그림 코드를 전부 고쳐라. nGd·nH 를 같은 캔버스에 그리지 말고, 기본은 선형축이되 로그에서만 보이는 값은 선형 그림 안에
+inset 으로 넣되 범례·히스토그램과 겹치지 않는 자리에. 웹에 순서대로 올릴 수 있게 파일 이름을 단순·순차적으로."
+
+**한 곳에서 그린다 — `tools/monitor/ReneTrendPlot.h` (commit 749be7b).** `BuildRateTrend.C` · `BuildBgTrend.C` · `tools/psd/VetoHistoryPlot.C` 가 include.
+```
+DrawTrendPage(pdf, dir, "NN_이름", 제목, y축, 계열들, pdfMode, opt)
+  · 채널마다 쪽 하나 (rate 7 종 → 13 장, bg 6 종 → 11 장, veto 3 장 = 31 장).  n-Gd 빨강 · n-H 파랑 으로 통일
+  · y 축 선형, 값이 0 이상이면 0 부터 · 위 15 % 여유.  opt.logInset 이고 양수 값의 최대/최소 > 10 이면 로그축 inset
+  · 자리 : 네 구석에 든 점 수를 '그려질 축 범위' 로 세어(자료 범위로 재면 효율 그림에서 범례가 선 위에 앉았다) 가장 빈 구석에 inset,
+    다음 구석에 범례 (불투명 흰 바탕, 폭은 라벨 길이에 맞춰)
+  · 파일 : 01~17 rate/evt (01·02 후보 nGd/nH … 11 rll … 14~17 evt) · 18~28 bg · 29~31 veto.  새 그림은 32 부터
+```
+websummary 는 `[0-9][0-9]_*.png` 만 웹에 싣는다. 옛 이름 그림은 `/scratch/RunSummary/old-png-20260914/` 로 치웠고 웹 폴더는 새 31 장으로 바꿨다.
+시험 typetrend(픽스처는 nGd 만이라 nH 쪽이 안 나오는 것까지 확인) · bgtrend 10 · veto 14 · html 9 · publish 10 통과. 실자료 31 장을 눈으로 확인했다.
+**★ 드라이브 그림은 아직 옛 20 장** — 서비스 계정은 파일을 못 만든다(§11.176). 새 31 장 zip 을 사용자에게 보냈고, 올리면 `publish_google.py --init`
+→ `config/websummary.map` 갱신 → 사이트 퍼가기 블록 v4. 그 전까지 발행은 `[DRIVE] 0/31` 로 경고만 낸다(시트는 계속).
+그림 보는 법 : `tools/monitor/{rate-trend,bg-trend,veto-summary}.sh` (표만 읽어 몇 초) → `/scratch/RunSummary/NN_*.png` + `rate_trend.pdf` · `bg_trend.pdf`.
+
+**백업 매뉴얼 메일** — 사용자 승인 뒤 madjjang150@naver.com 을 전문가 목록에 더해 12 명에게 발송 (01:1x, rc=0). `notify.params` 백업 사본 있음.
+
 #### 11.190 ★★ 런 서머리 자동화 재점검 — 이틀 동안 조용히 막혀 있었다 (사용자 지시, 09-13 23:2x)
 
 사용자 : "백업은 원하는 대로 됐다. 이제 DAQ runsummary 자동화를 다시 점검하고 개선하자." 상태를 보니 **9-11 18:27 부터 매시 회차가
@@ -914,7 +936,10 @@ websummary.log   2026-09-13 22:27:07 [FAIL] metrics --verify 불일치 -- metric
 | 알림 | 새 사건 `websummary` (daq-notify, 책임자). 단계 실패 · 게이트 불일치 · webroot · 복사 실패 전부. **같은 사유로는 한 번만** (`websummary.failstate`, DONE 에서 지움. 옛 런 경고는 `.warn` 에 따로, 전체 대조가 맞으면 지움) |
 | awk 함정 | verify 의 한글 주석에 작은따옴표가 들어가 awk 가 죽었다 — §11.174 ⓐ 와 같은 것. **awk 프로그램 안 주석에 따옴표 금지** |
 
-**결과** — 23:27 회차(옛 코드지만 4341 은 이미 고쳐진 뒤)가 4344·4345 의 ibd-summary 로 넘어갔다. __RESULT__
+**결과** — 23:27 회차(옛 코드지만 4341 은 이미 고쳐진 뒤)가 4344·4345 의 ibd-summary 로 넘어가 **01:03 [DONE] last_run=4345**, 시트 2 행 추가 ·
+드라이브 20/20 교체(옛 이름 그림). legacy 페어링 두 런에 1 시간 35 분 — 매시 회차의 시간 대부분이다 (제안 : legacy 는 하루 한 번 별도 cron 으로, 사용자 판단 대기).
+**곁들여 : `metrics.sh --list` 가 표에 행이 있으면 건너뛰는 것이 낡은 행의 뿌리였다** → BuildMetrics 가 DST 의 `live_s` 와 행의 live 를 대조해 다르면
+다시 계산한다 (commit 6cb8395, `tests/metrics-stale.test.sh` 4 — 실 DST 4305 로 재현). 마지막 두 항목이 §11.190 의 자가 치유와 짝이다.
 
 #### 11.189 ★★ 새 하드 두 장으로 RAW/PRD 백업 시작 준비 — 메일에 '담긴 것' 요약, 시트 점검, 스킬화 (사용자 지시, 09-13 01:1x)
 
@@ -3353,6 +3378,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.191         ★ 추이 그림 전면 수정 — 채널별 쪽 · 선형축 + 빈 구석 로그 inset · 파일 01~31 번호순 (ReneTrendPlot.h). 드라이브 그림 교체는 사용자 업로드 대기
 §11.190         ★ 런 서머리 자동화 : 옛 런(4341, 덜 끝난 DST)의 대조 불일치가 이틀간 발행을 막았는데 알림이 없었다.
                 게이트는 이번 런만 · 옛 런은 경고+자가치유 · 실패는 한 번 알림 (websummary 사건)
 §11.189         ★ 메일에 '담긴 것'(런·part/full·RAW/PRD·개수·서브런) 요약 + 시트 링크. 백업 관리 스킬 신설. 새 하드 2장 RAW/PRD 시작 준비
@@ -3437,6 +3463,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | G·H 를 뽑기 전에 `sudo umount` | 독은 한 USB 장치라 한쪽을 뽑으면 둘 다 떨어진다 | §11.170 |
 | **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 (`RENE-ALL-001` …) | §11.187 · §11.188 |
 | 새 하드부터는 `--only raw` / `--only prd` 로 베이별로 | RAW 하드·PRD 하드 분리 (사용자 지시). 라벨 RENE-RAW-002 · RENE-PRD-001 부터 | §11.188 |
+| 새 그림 31 장(zip)을 드라이브 `RENE_DAQ` 밑 새 폴더에 올리기 → `--init` | 그림 이름이 바뀌어 드라이브의 옛 20 장과 안 맞는다. 서비스 계정은 못 올린다 | §11.191 |
 | 시트의 `Storage Location` | 내가 알 수 없는 값이다 (`Disk Label` 은 이제 도구가 채운다) | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
 | NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |
