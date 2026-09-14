@@ -240,6 +240,9 @@ if [ -z "${NEW//[[:space:]]/}" ]; then
    if [ -r "$OUT/pair_summary.tsv" ]; then
       echo "새로 더할 런은 없다. 선원 정보 보충만 시도한다."
       NEW=$(already | head -1)
+      #  ★ 이 경로는 표의 첫 런(4237, 12,722 서브런)을 고른다. --force 가 켜져 있으면 그 런을 통째로 다시 계산해
+      #    다섯 시간을 태운다 (2026-09-15 실제로 겪음). 보충만 하는 자리이므로 force 를 끈다.
+      FORCE=0
       [ -n "$NEW" ] || { echo "표가 비어 있다."; exit 0; }
    else
       echo "새로 더할 런이 없다. 결과를 보려면 --show."

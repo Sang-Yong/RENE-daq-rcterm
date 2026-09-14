@@ -19,6 +19,7 @@
 
 static const double kDailyTauLiS = 0.257;    // ⁹Li 평균수명 [s]  (BuildMetrics.C 의 kTauLiS 와 같다)
 static const double kDailyTauHeS = 0.172;    // ⁸He
+static const double kDailyTauGdUs = 34.0;    // n-Gd 포획 시간상수 [µs] — AmBe run 4221 의 n-Gd 창 쌍 Δt 적합 실측 (2026-09-14, CLAUDE.md §11.194)
 
 //  쌍 하나. RenePairing.h::PairAndCountW 가 세는 것을 그대로 남긴다.
 struct PairRec {

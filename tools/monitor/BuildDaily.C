@@ -577,7 +577,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       {
          TH1D *ex = (TH1D *)hNx[k][0]->Clone(Form("nextra_%s_excess", fileTag[k])); ex->Add(hNx[k][1], -acciScale[k]);
          for (int n = 0; n < 3; ++n) nxN[n] = ex->GetBinContent(ex->FindBin(n));
-         if (nxN[2] > 0) { n0est = nxN[1] * nxN[1] / (2 * nxN[2]);
+         if (nxN[2] > 0 && nxN[1] > 0) { n0est = nxN[1] * nxN[1] / (2 * nxN[2]);
             double r1 = std::sqrt(hNx[k][0]->GetBinContent(2) + acciScale[k] * acciScale[k] * hNx[k][1]->GetBinContent(2)) / std::max(1.0, nxN[1]);
             double r2 = std::sqrt(hNx[k][0]->GetBinContent(3) + acciScale[k] * acciScale[k] * hNx[k][1]->GetBinContent(3)) / std::max(1.0, nxN[2]);
             n0estErr = n0est * std::sqrt(4 * r1 * r1 + r2 * r2); }
@@ -594,6 +594,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          lg->AddEntry(of, Form("off-window (accidental, scaled)  N = %.1f", of->Integral()), "l");
          lg->AddEntry(ex, Form("excess on #minus acc : N(0) = %.1f (passes cut)  N(1) = %.1f  N(2) = %.1f  N(#geq3) = %.1f", nxN[0], nxN[1], nxN[2], ex->Integral(ex->FindBin(3), ex->GetNbinsX())), "l");
          if (n0est >= 0) lg->AddEntry((TObject *)nullptr, Form("Poisson extrapolation of the multi-n family to n_{extra}=0 : N(1)^{2}/(2N(2)) = %.0f #pm %.0f  [prelim]", n0est, n0estErr), "");
+         else lg->AddEntry((TObject *)nullptr, "Poisson extrapolation : n/a (N(1) or N(2) not positive -- accidental-dominated channel)", "");
          lg->AddEntry((TObject *)nullptr, Form("compare : after all subtractions the 'signal' is %.0f", pSub->Integral()), "");
          lg->Draw();
          TPad *pd = new TPad(Form("ins_nx_%s", fileTag[k]), "", 0.57, 0.16, 0.95, 0.52);
@@ -655,6 +656,20 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             double nFlat = f->GetParameter(0) * (w.dtMax - w.dtMin) / bw;
             lg->AddEntry(f, Form("fit %s : flat + exp, #tau = %.1f #mus, correlated = %.0f, flat#times window = %.0f%s", which ? "(prompt < 3 MeV)" : "(all)", f->GetParameter(2), nCorr, nFlat, rc ? " [fit failed]" : ""), "l");
             printf("  [DT  ] %s %s : tau %.1f us  corr %.0f  flat %.0f  (acc estimate %.1f)\n", chanName[k], which ? "E<3" : "all", f->GetParameter(2), nCorr, nFlat, which ? loOf->Integral() : of->Integral());
+            //  2-성분 : Gd 포획(34 µs, AmBe run 4221 실측 §11.194) 고정 + 자유로운 긴 성분, 평평은 off-window 로 고정. IBD 다운 몫 = N(34 µs)
+            {
+               double flat = (which ? loOf : of)->Integral() / h->GetNbinsX();
+               TF1 *f2 = new TF1(Form("fdt2_%s_%d", fileTag[k], which), "[0] + [1]*exp(-x/[2]) + [3]*exp(-x/[4])", w.dtMin, w.dtMax);
+               f2->SetParameters(flat, h->GetBinContent(1) * 0.5, kDailyTauGdUs, h->GetBinContent(1) * 0.5, 3 * kDailyTauGdUs);
+               f2->FixParameter(0, flat); f2->FixParameter(2, kDailyTauGdUs); f2->SetParLimits(1, 0, 1e6); f2->SetParLimits(3, 0, 1e6); f2->SetParLimits(4, 1.5 * kDailyTauGdUs, 3000);
+               int rc2 = h->Fit(f2, "QRLN0");
+               double n34 = f2->GetParameter(1) * kDailyTauGdUs * (std::exp(-w.dtMin / kDailyTauGdUs) - std::exp(-w.dtMax / kDailyTauGdUs)) / bw;
+               double e34 = f2->GetParError(1) * kDailyTauGdUs * (std::exp(-w.dtMin / kDailyTauGdUs) - std::exp(-w.dtMax / kDailyTauGdUs)) / bw;
+               double t2 = f2->GetParameter(4), n2 = f2->GetParameter(3) * t2 * (std::exp(-w.dtMin / t2) - std::exp(-w.dtMax / t2)) / bw;
+               f2->SetLineColor(which ? kRed + 1 : kBlack); f2->SetLineWidth(1); f2->SetLineStyle(3); f2->Draw("SAME");
+               lg->AddEntry(f2, Form("2-comp %s : N(#tau=%.0f #mus, Gd capture) = %.0f #pm %.0f,  N(#tau_{2}=%.0f #mus) = %.0f, flat fixed%s", which ? "(E<3)" : "(all)", kDailyTauGdUs, n34, e34, t2, n2, rc2 ? " [failed]" : ""), "l");
+               printf("  [DT2 ] %s %s : N(34us) %.0f +- %.0f  N(tau2=%.0f) %.0f\n", chanName[k], which ? "E<3" : "all", n34, e34, t2, n2);
+            }
          }
          lg->Draw();
          c->Print(out + Form("%02d_bgspec_dt_%s.png", 57 + k, fileTag[k]));

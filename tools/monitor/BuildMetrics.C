@@ -87,6 +87,10 @@ struct MetRow {                 // 열 순서는 WriteTsv 와 같아야 한다
    double dtMin=-1,dtMax=-1,dtAcci=-1,s2Lo=-1,s2Hi=-1,isoPre=-1,isoPost=-1;
    double muShowerNpe=-1,fnELo=-1,fnEHi=-1,liheFitLo=-1,liheFitHi=-1;
    double liheLiFrac=-1, psdNsig=-1;
+   //  ---- 2026-09-15 : veto 태깅 효율 재료 (열 43~45, 뒤에 붙는다). 타겟 관통 뮤온 = target NPE > 3000 (샤워 > 20000).
+   //       태그된 것 = T_Muons (veto 가 잡은 것), 안 된 것 = T_Sat (veto 가 못 잡아 single 후보로 왔다가 포화로 버린 것).
+   //       효율 = tag / (tag + untag). 문턱 80 % 적용 뒤 4347 에서 87 → 49 % 로 떨어진 것을 이 열이 잡는다 (§11.199)
+   long long nTag3k=-1, nUntag3k=-1, nUntag20k=-1;
 };
 
 //  DST 를 읽는다. psd 는 sing 과 같은 길이(schema 1 이면 전부 -1),
@@ -307,6 +311,8 @@ static std::map<std::string, MetRow> LoadExisting(const TString &tsv, bool &sche
                >> r.muShowerNpe >> r.fnELo >> r.fnEHi
                >> r.liheFitLo >> r.liheFitHi >> r.liheLiFrac >> r.psdNsig))
          continue;
+      //  뒤에 붙은 열 (없는 옛 행이면 -1 그대로)
+      if (!(ss >> r.nTag3k >> r.nUntag3k >> r.nUntag20k)) { r.nTag3k = r.nUntag3k = r.nUntag20k = -1; }
       out[RowKey(r.run, r.tag)] = r;
    }
    return out;
@@ -322,7 +328,8 @@ static void WriteTsv(const TString &path, const std::map<std::string, MetRow> &r
         "\tn_fn_side_lin\tfn_sat_frac\tn_lihe_rev\te_lihe_rev\tr_mu_shower"
         "\tn_acci_rp\tn_mult_rej\tpsd_mean\tpsd_rms\tn_ibd_psd_nlike"
         "\tdt_min\tdt_max\tdt_acci\ts2_lo\ts2_hi\tiso_pre\tiso_post"
-        "\tmu_shower_npe\tfn_e_lo\tfn_e_hi\tlihe_fit_lo\tlihe_fit_hi\tlihe_li_frac\tpsd_nsig\n";
+        "\tmu_shower_npe\tfn_e_lo\tfn_e_hi\tlihe_fit_lo\tlihe_fit_hi\tlihe_li_frac\tpsd_nsig"
+        "\tn_tag_3k\tn_untag_3k\tn_untag_20k\n";
    for (const auto &kv : rows) {
       const MetRow &r = kv.second;
       o << r.run << '\t' << r.tag << '\t' << r.src << '\t' << FmtRaw(r.liveS, 3) << '\t'
@@ -338,7 +345,8 @@ static void WriteTsv(const TString &path, const std::map<std::string, MetRow> &r
         << r.dtMin << '\t' << r.dtMax << '\t' << r.dtAcci << '\t'
         << r.s2Lo << '\t' << r.s2Hi << '\t' << r.isoPre << '\t' << r.isoPost << '\t'
         << r.muShowerNpe << '\t' << r.fnELo << '\t' << r.fnEHi << '\t'
-        << r.liheFitLo << '\t' << r.liheFitHi << '\t' << r.liheLiFrac << '\t' << r.psdNsig << '\n';
+        << r.liheFitLo << '\t' << r.liheFitHi << '\t' << r.liheLiFrac << '\t' << r.psdNsig << '\t'
+        << r.nTag3k << '\t' << r.nUntag3k << '\t' << r.nUntag20k << '\n';
    }
 }
 
@@ -516,6 +524,12 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          r.nMu     = (long long)mu.size();
          r.nMuShower = (long long)showers.size();
          r.rMuShower = rMu;
+         {  //  veto 태깅 효율 재료 : 태그된 타겟 관통 뮤온 (pe > 3000) 과 안 된 것 (T_Sat 의 pe > 3000 / > 20000)
+            long long t3 = 0, u3 = 0, u20 = 0;
+            for (const auto &m : mu) if (m.pe > 3000) t3++;
+            for (const auto &x : sats) { if (x.pe > 3000) u3++; if (x.pe > 20000) u20++; }
+            r.nTag3k = t3; r.nUntag3k = u3; r.nUntag20k = u20;
+         }
          r.dtMin = w2.dtMin; r.dtMax = w2.dtMax; r.dtAcci = w2.dtAcci;
          r.s2Lo = s2LoMev; r.s2Hi = s2HiMev;
          r.isoPre = w2.isoPre; r.isoPost = w2.isoPost;

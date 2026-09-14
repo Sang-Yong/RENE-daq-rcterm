@@ -103,6 +103,7 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
    BgSeries psdM = mk("#gamma-band mean #pm RMS", kBlack, 20);
    BgSeries nlGd = mk("n-Gd", cGd, 20), nlH = mk("n-H", cH, 21);
    BgSeries mrGd = mk("n-Gd", cGd, 20), mrH = mk("n-H", cH, 21);
+   BgSeries ve3 = mk("target muons > 3000 NPE", kBlack, 20), ve20 = mk("showers > 20000 NPE", kRed + 1, 21);   // 59 veto 태깅 효율
 
    int nUsed = 0;
    for (const auto &r : rows) {
@@ -131,6 +132,11 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
       if (nl >= 0 && ni > 0) (gd ? nlGd : nlH).add(x, 100.0 * nl / ni, 100.0 * std::sqrt(nl) / ni);
       double mr = get(r, "n_mult_rej");
       if (has("n_mult_rej") && mr > -1e29) (gd ? mrGd : mrH).add(x, mr / day, 0);
+      if (gd && has("n_tag_3k")) {   // 두 채널이 같은 값이라 n-Gd 행만
+         double t3 = get(r, "n_tag_3k"), u3 = get(r, "n_untag_3k"), u20 = get(r, "n_untag_20k"), t20 = get(r, "n_mu_shower");
+         if (t3 >= 0 && u3 >= 0 && t3 + u3 > 0) ve3.add(x, 100.0 * t3 / (t3 + u3), 100.0 * std::sqrt(t3 * u3 / (t3 + u3)) / (t3 + u3));
+         if (t20 >= 0 && u20 >= 0 && t20 + u20 > 0) ve20.add(x, 100.0 * t20 / (t20 + u20), 100.0 * std::sqrt(t20 * u20 / (t20 + u20)) / (t20 + u20));
+      }
    }
    printf("[INFO] metrics 행 %zu, 선원 없는 런 행 %d\n", rows.size(), nUsed);
 
@@ -162,6 +168,8 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
         "n-like fraction [%]", {nlH}, false);
    page("27_bg_multrej_nGd", "Multiplicity-rejected excess per day, n-Gd (multi-neutron indicator)",
         "excess [/day]", {mrGd}, false);
+   page("59_bg_vetoeff", "VETO tagging efficiency for target-crossing muons per run : tagged / (tagged + untagged saturated)  [2026-09-15]",
+        "efficiency [%]", {ve3, ve20}, false);
    page("28_bg_multrej_nH",  "Multiplicity-rejected excess per day, n-H (multi-neutron indicator)",
         "excess [/day]", {mrH}, false);
    if (opened) {
