@@ -177,6 +177,11 @@ tools/psd/psd-source-scan.sh --analyze-only  # 스캔은 두고 분석만
 
 ## 6. VETO 패널 · 문턱값 이력 (`veto-history.sh`, 2026-09-09)
 
+> **★ 문턱값 변경 이력의 정본 (2026-09-14, 사용자 지시)** — `tools/psd/thr-history.sh` 가 PRD 가 있는 **모든 런**의 첫 PRD 에서 `S_THR[30]`·`F_THR[4]` 를 읽어
+> `/scratch/RunSummary/psd/thr_by_run.tsv`(런마다 한 줄)와 **`docs/THRESHOLD-HISTORY.md`**(값이 바뀐 구간마다 한 행, 저장소에 커밋)를 만든다.
+> 설정 파일 주석이 아니라 데이터에 기록된 값이 정본이다. 변경 사유·누가·언제는 사람이 적는 **`/Data_ssd/LOG/threshold-changes.log`**(append-only)에,
+> 같은 내용이 설정 파일 `DataTaking_IBD_sykim_2026.config` 의 SADCT THR 주석 줄에도 있다. 문턱을 바꾸면 **셋 다** 갱신할 것 (스크립트는 다시 돌리면 된다).
+
 사용자 질문("08-26 재기동 뒤 문턱을 낮췄는데 뮤온이 줄었다. 900 이상 문턱은 설정한 적 없다")에
 답하려고 PRD 에 기록된 `S_THR`/`F_THR` 와 패널별 반응을 런마다 훑었다(`thr_history.tsv`,
 `veto_history.tsv`, `veto_panel_trend.png` · `veto_rate_trend.png` · `veto_panel1_pmts.png`).
