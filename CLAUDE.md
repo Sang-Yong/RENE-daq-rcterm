@@ -821,7 +821,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 | **`RAW (GB)`** | `<런>` **바로 아래**(하위 폴더 제외)의 `FADC_<런>.root*` + `SADC_<런>.root*` 용량 합 |
 | **`PRD (GB)`** | `<런>/PRD` 의 `PRD_<런>.*.root` 용량 합 |
 | `Detector` `Source` `PMT-A HV (V)` `PMT-B HV (V)` `THR (mV)` `Coincidence (ns)` `Record length` `Time after HV ON` `TLT` | **비어 있는 런 바로 이전 행의 값을 그대로 복사**한다. 사용자가 나중에 직접 고치며, 고친 뒤에는 그 고친 값을 이어서 복사한다 |
-| `Description` | `runcatalog.db` 의 `rundesc`. DAQ 수집 때 사용자가 입력한 것을 **그대로** 옮긴다 |
+| `Description` | `runcatalog.db` 의 `rundesc`. DAQ 수집 때 사용자가 입력한 것을 **그대로** 옮긴다. **★ 2026-09-14 부터 : 그 런의 veto(SADC) 문턱값이 직전 런과 다르면 서두에 `비토 문턱값 변경(증가) ` 또는 `(감소) ` 를 붙인다** (바뀐 채널 중 오른 것이 많으면 증가, 내린 것이 많으면 감소, 같으면 변경). 판정은 PRD 의 `S_THR`(`tools/sheetlog/thr_prefix.py`, 표 `thr_by_run.tsv`). 우리 행은 `append_runs.py --update-desc RUNS --commit` 으로 다시 쓸 수 있다 (남의 행은 안 건드린다) |
 | `Data issue` | postrun 또는 DAQ 의 **비정상 종료 메시지**. 없으면 **비워 둔다** (`onlbit=0` 이면 `runlog` 를 본다) |
 
 런 디렉터리는 dataflow 가 옮기므로 **`/Data_ssd/RAW` -> `/data/RAW` ->
@@ -908,6 +908,10 @@ ch24·25 는 이득이 높아(MIP p50 1400 · 1156) 700 · 900. **패널 4·6·7
 **곁들여 고친 것 — 계수율 문턱.** 총 계수율이 400 Hz 아래로 내려가면 chainwatch 가 `rate_low` 를 전문가 목록에 보내고, usb-recover 의 확인 런이 500 Hz
 미만이라 실패로 판정한다. `config/notify.params` 에 `chain_min_rate = 100` 을 넣고 `recover_min_rate` 를 500 → 100 으로 (백업 `.bak-20260914-thr`).
 **★ 앞으로 '정상 계수율 ~1000 Hz' 라고 적힌 곳(§10 · usb-recover 합격선 · 이 문서 여러 곳)은 ~200 Hz 로 읽을 것.**
+
+**★ 구글 시트 런 로그의 Description 에도 (사용자 지시, 11:3x).** veto 문턱값이 직전 런과 다른 런은 서두에 `비토 문턱값 변경(증가|감소) ` — `tools/sheetlog/thr_prefix.py`
+(PRD 의 S_THR 표로 판정, 표에 없는 런은 첫 PRD 를 그 자리에서 읽는다). `append_runs.py` 가 새 행에 자동으로 붙이고, 우리 행 4340(증가)·4341(감소)·4344(감소)는
+`--update-desc 4340,4341,4344 --commit` 으로 고쳤다. 남의 행(≤4246)의 문턱 변경(4222~4237)은 규칙대로 손대지 않는다. 시험 `tests/thr-prefix.test.sh` 8.
 
 **★ 문턱값 변경 이력 (사용자 지시, 10:4x) — 세 곳에 남긴다.** ① `docs/THRESHOLD-HISTORY.md` : `tools/psd/thr-history.sh` 가 PRD 가 있는 모든 런의 첫 PRD 에서
 `S_THR`·`F_THR` 를 읽어 값이 바뀐 구간마다 한 행 — **데이터가 정본**. 원본 표 `/scratch/RunSummary/psd/thr_by_run.tsv`. ② `/Data_ssd/LOG/threshold-changes.log` :

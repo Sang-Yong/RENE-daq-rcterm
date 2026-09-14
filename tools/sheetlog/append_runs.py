@@ -8,6 +8,8 @@
 기본은 미리보기다.  실제로 쓰려면 --commit 을 준다.
 """
 import argparse, glob, os, sqlite3, subprocess, sys, datetime, re
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import thr_prefix                      # veto 문턱값이 직전 런과 다르면 Description 앞에 '비토 문턱값 변경(증가|감소)' (2026-09-14 사용자 지시)
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
 GID      = 0
@@ -204,7 +206,9 @@ def make_row(dbrow, pre, hdr, col, carry):
         "event rate (khz)": rate,
         "raw (gb)": raw_gb,
         "prd (gb)": prd_gb,
-        "description": (desc or "").strip(),
+        #  ★ veto 문턱값이 직전 런과 다르면 서두에 '비토 문턱값 변경(증가|감소) ' 를 붙인다 (2026-09-14 사용자 지시).
+        #    판정은 PRD 에 기록된 S_THR (tools/psd/thr-history.sh 의 표. 없으면 그 자리에서 첫 PRD 를 읽는다)
+        "description": thr_prefix.prefix_for(run, THR_TABLE) + thr_prefix.strip_prefix((desc or "").strip()),
         "data issue": issue,
     }
     for c in CARRY:
@@ -214,6 +218,62 @@ def make_row(dbrow, pre, hdr, col, carry):
         if k in col:
             line[col[k]] = v
     return line
+
+
+THR_TABLE = thr_prefix.load_table()
+
+
+def do_update_desc(a, ws, grid, hdr_i, hdr, col, run_c):
+    """★ 우리가 쓴 행의 Description 만 다시 쓴다 — veto 문턱값 변경 문구를 서두에 붙이기 위해 (2026-09-14 사용자 지시).
+
+    남의 행(is_ours 가 거짓)은 건드리지 않는다. Description 셀 하나씩만 update 하고, 쓴 뒤 격자를 되읽어
+    그 셀 말고는 한 글자도 안 바뀌었는지 대조한다. 이미 붙은 문구는 떼고 다시 판정하므로 여러 번 돌려도 같다.
+    """
+    want = sorted({int(x) for x in re.split(r"[,\s]+", a.update_desc) if x.strip().isdigit()})
+    dcol = col.get("description")
+    if dcol is None:
+        sys.exit("Description 열이 없다")
+    plans = []
+    for i in range(hdr_i + 1, len(grid)):
+        c = grid[i][run_c] if run_c < len(grid[i]) else ""
+        if not c.strip().isdigit() or int(c) not in want:
+            continue
+        run = int(c)
+        if not is_ours(run):
+            print("  ★ run %d 는 남의 행이다 -- 건드리지 않는다" % run)
+            continue
+        old = grid[i][dcol] if dcol < len(grid[i]) else ""
+        new = thr_prefix.prefix_for(run, THR_TABLE) + thr_prefix.strip_prefix(old)
+        if new != old:
+            plans.append((run, i, old, new))
+        else:
+            print("  run %d : 그대로 (%s)" % (run, old[:40]))
+    if not plans:
+        print("바꿀 Description 이 없다")
+        return
+    print("\n--- Description 을 고칠 %d 행 ---" % len(plans))
+    for run, i, old, new in plans:
+        print("  run %d (%d행) : [%s] -> [%s]" % (run, i + 1, old[:50], new[:60]))
+    if not a.commit:
+        print("\n미리보기다. 실제로 쓰려면 --commit")
+        return
+    import gspread
+    before = [r[:] for r in grid]
+    for run, i, old, new in plans:
+        ws.update_cell(i + 1, dcol + 1, new)
+        print("  씀 : run %d -> %s" % (run, gspread.utils.rowcol_to_a1(i + 1, dcol + 1)))
+    after = ws.get_all_values()
+    changed = {i for _, i, _, _ in plans}
+    bad = 0
+    for i, (x, y) in enumerate(zip(before, after)):
+        xs = [c.strip() for c in x] + [""] * (len(y) - len(x)); ys = [c.strip() for c in y] + [""] * (len(x) - len(y))
+        if i in changed:
+            xs[dcol] = ys[dcol] = ""
+        if xs != ys:
+            bad += 1
+            if bad <= 3:
+                print("  ★ 어긋남 %d행" % (i + 1))
+    print("대조 : %d행 중 Description 밖의 어긋남 %d건%s" % (len(before), bad, "" if bad == 0 else "  ← 확인 필요"))
 
 
 def do_insert(a, ws, grid, hdr_i, hdr, col, run_c):
@@ -311,6 +371,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--all-runs", action="store_true",
                     help="onlbit 무관하게 전부 (기본은 onlbit=1 인 것만)")
+    ap.add_argument("--update-desc", metavar="RUNS",
+                    help="우리가 쓴 행의 Description 만 다시 쓴다 (veto 문턱값 변경 문구). 남의 행은 안 건드린다")
     ap.add_argument("--insert", metavar="RUNS",
                     help="빠진 런을 번호 순서에 맞게 끼워 넣는다 (쉼표로 구분). "
                          "기존 행의 내용은 그대로이고 위치만 아래로 밀린다")
@@ -343,6 +405,8 @@ def main():
     run_c = col["run"]
     print("헤더 %d행, Run 은 %d열" % (hdr_i + 1, run_c + 1))
 
+    if a.update_desc:
+        return do_update_desc(a, ws, grid, hdr_i, hdr, col, run_c)
     if a.insert:
         return do_insert(a, ws, grid, hdr_i, hdr, col, run_c)
 
