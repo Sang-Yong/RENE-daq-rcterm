@@ -55,8 +55,9 @@ def scan_run(run, table=None, path=TABLE):
     if not prd or not os.path.exists(MACRO):
         return None
     try:
-        out = subprocess.run(["root", "-l", "-b", "-q", '%s+("%s", %d)' % (MACRO, prd, run)],
-                             capture_output=True, text=True, timeout=600).stdout
+        #  cron 환경에는 ROOT 가 PATH 에 없다 -- thisroot.sh 를 먼저 source 한다 (sheetlog-auto.sh 가 cron 에서 부른다)
+        cmd = "command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh; root -l -b -q '%s+(\"%s\", %d)'" % (MACRO, prd, run)
+        out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=600).stdout
     except Exception:
         return None
     for ln in out.splitlines():
