@@ -891,6 +891,38 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.199 ★★ 문턱 80 % 데이터(run 4347)로 그림 58 장을 다 그려 본 결과와 코드 개선 (사용자 지시, 09-15 04:1x ~ 05:xx)
+
+사용자 : "문턱을 낮춘 데이터로 그림들을 한 번씩 다 그려 보고 코드 개선안을 찾자." run 4347 은 수집 중(12 h, PRD 733 개)이라 운영 표를 안 건드리고
+`/scratch/RunSummary/thr80/` (dst·cache·psd 는 심볼릭 링크, 표는 복사) 에서 전 단계를 돌렸다 (`/Data_ssd/LOG/thr80-chain.sh`, 58 장, zip 을 사용자에게 보냄).
+run-summary 는 `RUNSUM_PRD_QUIET=0 --allow-acquiring --force` 로 부분 런을 넣었다.
+
+**80 % 문턱이 데이터에 한 일 (run 4347 앞 12 h 대 4346)**
+```
+DAQ 총 계수율 1052 → 306 Hz · veto-only 868 → 121 Hz · ★ VETO+Target 동시 6.3 → 4.1 Hz (그림 17)
+★ veto 태깅 효율 (타겟 관통 뮤온 = T_Muons 대 T_Sat, > 20000 NPE) : 패널 AND 86.8 % → 48.6 %   /  오프라인 S_ADC>50 (dst_m2) : 93.4 % → 92.7 %
+fast-n 사이드밴드 87 → 300 /day (그림 20) · n-Gd on-window 쌍(dst) 91 → 120 /day · n-H 후보 3,707 → 6,460 /day · 우발 25 → 13 /day
+```
+즉 하드웨어 문턱을 올리면 패널 AND 태깅이 절반으로 떨어지지만, **S_ADC 는 사건마다 기록되므로 오프라인 veto(mode 2)는 문턱과 무관하게 93 % 를 유지한다** —
+날짜 기준 단계(dst_m2)의 후보율은 거의 안 변한다 (그림 35). 런별 파이프라인(dst, 패널 AND)의 배경은 늘어난다.
+
+**코드 개선 (commit 016fc73 · ed051f1)**
+| | 무엇 | 왜 |
+|---|---|---|
+| rate-trend | pair_summary(legacy)에 없는 (run,tag) 를 metrics_summary(DST) 행으로 보탠다. `rate-trend.sh` 는 pair_summary 없이도 돈다 | legacy 페어링이 런당 1 h+ 라 매시 회차의 대부분을 먹는다. 이제 DST 만 있어도 그림 01~13 에 곧바로 실린다 |
+| ReneTrendPlot | `TrendMarker` — `psd/thr_by_run.tsv` 에서 S_THR 이 바뀐 런에 세로 점선 `THR <런>` (rate · bg · veto 전부) | 문턱 변경이 추이의 꺾임과 같은 자리인지 한눈에 |
+| metrics + bg-trend | 열 `n_tag_3k n_untag_3k n_untag_20k` (뒤에 붙임) + **그림 59 veto 태깅 효율** | 이 지표가 있었다면 09-09 의 오독도 09-14 의 80 % 문턱의 대가도 그 자리에서 보였다 |
+| daily 57/58 | Δt **2-성분 적합** (34 µs 고정 + 긴 성분 + 평평 고정) → N(34 µs) 를 IBD 다운 몫으로 | §11.194 의 제안. 상수 `kDailyTauGdUs = 34` (AmBe 4221) |
+| ibd-summary | 빈 목록 보충 경로에서 `--force` 를 끈다 | `--list 4347 --force` 가 수집 중 런을 걸러낸 뒤 표의 첫 런 4237(12,722 서브런)을 5 시간 재계산으로 보냈다 (오늘 겪음, 죽였다) |
+| daily 53/54 | 포아송 외삽에서 N(1)·N(2) 가 양수가 아니면 n/a | n-H 는 우발이 커서 N(1) 이 음수로 나온다 |
+**밟은 것** — `pgrep -f 'BuildPairSummary' | xargs kill` 이 제 셸을 죽였다 (§11.142 의 4 번, 여섯 번째). 그리고 ACLiC 는 include 한 헤더가 바뀌어도
+`.so` 를 다시 만들지 않는다 — 헤더를 고치면 `.C` 를 touch 할 것. 시험 : typetrend · bgtrend 4 · veto 14 · bg 12 · metrics(4346) · daily 통과.
+운영 metrics_summary 는 새 열을 채우려고 전 런 `--force` 재계산 (05:0x, websummary 잠금을 쥐고).
+
+**아직 안 한 것 (제안)** — ① veto-summary 를 별도 OUT 에서 `--force --list` 로 돌리면 `veto/thr_history.tsv` 가 그 런만으로 새로 생겨 표가 1 행이 된다
+(운영에서는 안 일어난다). ② 수집 중인 런의 미리보기(`live/`) 단계 — 오늘처럼 손으로 안 해도 되게. ③ 런별 파이프라인의 veto 정의를 mode 2 로 바꿀지는
+사용자 결정("기존 방식은 그대로" 지시가 있었다).
+
 #### 11.198 ★ 계수율 비정상 기준을 '30,000 Hz 이상' 으로 — 20,000 이상 경고, 30,000 이상 알람 + 책임자 메일. 감시 문구 한글화 (사용자 지시, 09-14 17:2x)
 
 사용자 : "수집 이벤트 모니터링에서 경고성 메시지가 계속 뜬다. 메시지를 전부 한글로. 비정상 기준은 30 kHz 이상으로 바꿔 20,000 이상이면 경고,
@@ -3622,6 +3654,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.199         ★★ 80 % 문턱 데이터 그림 58 장 (thr80). veto 태깅 효율 87 → 49 % (패널 AND) / 93 % 유지 (오프라인 S_ADC). 코드 개선 :
+                rate-trend DST 보탬 · THR 표식 · veto 효율 열+그림 59 · Δt 2-성분 적합 · ibd-summary --force 함정
 §11.198         ★ 계수율 비정상 기준 30,000 Hz 이상 (알람+책임자 메일), 20,000 이상 경고 — chainwatch rate_high · daq-notify · rcmon · 세션 모니터 한글
 §11.197         ★★ 문턱값 = run 4222 이전 기준값(4183~4221)의 80 % 로 전면 수정, run 4347 부터 (사용자 지시). §11.196 의 줄은 적용 전 대체.
                 docs/VETO-THRESHOLD-REFERENCE.md (PMT 별 기준표) · daqerr-watch.sh 가 48 h DAQ 오류를 지켜보고 증거를 모은다

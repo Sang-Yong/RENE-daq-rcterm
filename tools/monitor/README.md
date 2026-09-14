@@ -630,7 +630,11 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 51~52 | `51/52_bgspec_lihe_dt_<ch>.png` | 직전 샤워링 뮤온까지의 **Δt** (검정) · 직후(회색, 역방향 대조) · 전체 합의 Daya Bay Eq.2 적합(빨강). Li/He 빼기의 근거 |
 | 53~54 | `53/54_bgspec_multiplicity_<ch>.png` | 쌍마다 multiplicity 창 안 **다른 single 수 n_extra** 의 분포 (on · off · 초과분). 다중중성자 가족이 포아송이면 n_extra=0 에 남는 몫 ≈ N(1)²/(2N(2)) — 남는 '신호' 와 비교 |
 | 55~56 | `55/56_bgspec_shape_<ch>.png` | 남는 '신호' 의 prompt 모양(빨강) 대 n_extra=1 · ≥2 가족의 prompt 모양(같은 면적으로). 같으면 신호가 그 가족의 꼬리다 |
-| 57~58 | `57/58_bgspec_dt_<ch>.png` | prompt–delayed **Δt** (on · off · prompt < 3 MeV) 와 exp(−t/τ) + 평평 적합. 평평 × 창 = 우발 추정의 독립 대조, exp 적분 = 상관 쌍 수 |
+| 57~58 | `57/58_bgspec_dt_<ch>.png` | prompt–delayed **Δt** (on · off · prompt < 3 MeV) 와 exp(−t/τ) + 평평 적합. 평평 × 창 = 우발 추정의 독립 대조, exp 적분 = 상관 쌍 수. **2-성분 적합**(34 µs Gd 포획 고정 + 긴 성분, 평평은 off-window 고정)의 N(34 µs) = IBD 다운 몫 |
+| 59 | `59_bg_vetoeff.png` | **VETO 태깅 효율** = 태그된 타겟 관통 뮤온(T_Muons, > 3000 / > 20000 NPE) / (태그된 + 안 된(T_Sat)). 문턱을 바꾸면 이 그림이 먼저 움직인다 (80 % 문턱 : 87 → 49 %) |
+
+**추이 그림 공통** — 세로 점선 `THR <런>` 은 veto 문턱값이 바뀐 런(`psd/thr_by_run.tsv`, `tools/psd/thr-history.sh`). rate-trend 는 pair_summary(legacy)에 없는 (run,tag) 를
+metrics_summary(DST) 행으로 보태 그린다 — legacy 페어링(런당 한 시간) 없이도 새 런이 곧바로 실린다.
 
 **배경을 어떻게 고르나 (4d, 날짜 기준. 런별 BuildMetrics 와 같은 정의)** — 컷 값은 `/home/ojk/analysis3/essential/AnalysisCondition.h` 가 정본이고
 DST 단계(`dst-build.sh`)의 muon veto(SADC 패널 위/아래 동시) · after-muon 150 µs · 포화 제거는 이미 걸린 뒤다. 그 위에 :
