@@ -136,8 +136,9 @@ void BuildBgTrend(const char *outDir = "/scratch/RunSummary/") {
 
    TString pdf = out + "bg_trend.pdf";
    int nPage = 0; bool opened = false;
+   std::vector<TrendMarker> thrMarkers = ReneLoadThrMarkers(out, epoch, 4280);
    auto page = [&](const char *file, const char *title, const char *yt, std::vector<BgSeries> ss, bool logInset) {
-      TrendPageOpt o; o.logInset = logInset;
+      TrendPageOpt o; o.logInset = logInset; o.markers = thrMarkers;
       if (DrawTrendPage(pdf, out, file, title, yt, ss, opened ? "" : "(", o)) { opened = true; nPage++; }
    };
    //  ★ 채널은 쪽을 나눈다 (사용자 지시 2026-09-14). 번호는 rate 그림(01~17)에 이어 18 부터.

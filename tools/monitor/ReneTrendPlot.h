@@ -11,6 +11,12 @@
 
 #include <TAxis.h>
 #include <TCanvas.h>
+#include <TLatex.h>
+#include <TLine.h>
+#include <TVirtualPad.h>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <TGraphErrors.h>
 #include <TLegend.h>
 #include <TMultiGraph.h>
@@ -30,8 +36,12 @@ struct TrendSeries {
    void add(double xx, double yy, double e = 0) { x.push_back(xx); y.push_back(yy); ey.push_back(e); }
 };
 
+//  x 축에 세울 표식 (예 : veto 문턱값이 바뀐 런). epoch 와 짧은 라벨
+struct TrendMarker { double x; std::string label; };
+
 struct TrendPageOpt {
    bool logInset   = false;   // 값이 한 자릿수 넘게 벌어지면 로그축 inset 을 넣는다
+   std::vector<TrendMarker> markers;   // 세로 점선 + 라벨 (2026-09-15 : 문턱 변경 런)
    bool legend     = true;    // 계열이 둘 이상이면 범례
    const char *timeFmt = "%y/%m/%d";
    int  width = 1400, height = 700;
@@ -110,6 +120,50 @@ static void ReneCornerBox(int corner, double w, double h, double &x1, double &y1
    y1 = (corner == 2 || corner == 3) ? T - h : B;  y2 = y1 + h;
 }
 
+//  veto 문턱값이 바뀐 런의 표식 (2026-09-15, 사용자 지시 "문턱을 바꾼 데이터의 그림을 보자").
+//  <OutDir>/psd/thr_by_run.tsv (tools/psd/thr-history.sh) 에서 S_THR 30 개가 직전 행과 다른 런을 찾아, 그 런의 DAQ 시작 시각에
+//  'THR 4347' 같은 표식을 세운다. 표가 없으면 빈 목록 (그림은 그대로). epoch 는 run_summary 에서 온 run -> 시작 epoch.
+static std::vector<TrendMarker> ReneLoadThrMarkers(const TString &outDir, const std::map<int, double> &epoch, int minRun = 0) {
+   std::vector<TrendMarker> mk;
+   TString p = outDir; if (!p.EndsWith("/")) p += "/"; p += "psd/thr_by_run.tsv";
+   std::ifstream in(p.Data()); if (!in) return mk;
+   std::string line, prev; int prevRun = -1;
+   std::vector<std::pair<int, std::string>> rows;
+   while (std::getline(in, line)) {
+      if (line.empty() || line[0] == '#') continue;
+      std::vector<std::string> f; std::stringstream ss(line); std::string c;
+      while (std::getline(ss, c, '\t')) f.push_back(c);
+      if (f.size() < 36 || f[0].empty() || !isdigit(f[0][0])) continue;
+      std::string key; for (int i = 6; i < 36; ++i) key += f[i] + " ";
+      if (key.find("ERR") != std::string::npos) continue;
+      rows.push_back({atoi(f[0].c_str()), key});
+   }
+   std::sort(rows.begin(), rows.end());
+   for (auto &r : rows) {
+      if (prevRun >= 0 && r.second != prev && r.first >= minRun) {
+         auto ie = epoch.find(r.first);
+         if (ie != epoch.end()) mk.push_back({ie->second, "THR " + std::to_string(r.first)});
+      }
+      prev = r.second; prevRun = r.first;
+   }
+   return mk;
+}
+
+//  표식 그리기 : 축 범위 안의 것만, 세로 점선 + 위쪽 작은 라벨
+static void ReneDrawMarkers(TMultiGraph *mg, const std::vector<TrendMarker> &mk) {
+   if (mk.empty() || !mg->GetXaxis() || !gPad) return;
+   //  TMultiGraph 의 축 객체는 그려진 틀의 범위를 돌려주지 않는다 (SetMinimum/Maximum 뒤에도) -- 패드의 사용자 좌표를 쓴다
+   gPad->Update();
+   double x1 = gPad->GetUxmin(), x2 = gPad->GetUxmax();
+   double y1 = gPad->GetUymin(), y2 = gPad->GetUymax();
+   for (const auto &m : mk) {
+      if (m.x < x1 || m.x > x2) continue;
+      TLine *l = new TLine(m.x, y1, m.x, y2); l->SetLineColor(kGray + 2); l->SetLineStyle(2); l->SetLineWidth(1); l->Draw();
+      //  라벨은 축 아래쪽에 세워 쓴다 (위쪽은 inset·범례가 앉는 자리다)
+      TLatex *t = new TLatex(m.x, y1 + 0.02 * (y2 - y1), m.label.c_str()); t->SetTextSize(0.022); t->SetTextColor(kGray + 2); t->SetTextAngle(90); t->SetTextAlign(11); t->Draw();
+   }
+}
+
 //  쪽 하나. 돌려주는 값 : 그렸는가 (계열이 전부 비면 false, 파일도 안 만든다).
 //  fileName 은 확장자 없는 이름 (예 "01_rate_candidates_nGd").
 static bool DrawTrendPage(const TString &pdf, const TString &pngDir, const char *fileName,
@@ -144,6 +198,7 @@ static bool DrawTrendPage(const TString &pdf, const TString &pngDir, const char 
       if (ylo == 0 && yhi > 0) { mg->SetMinimum(0); mg->SetMaximum(yhi); }
    }
    if (opt.legend && ss.size() > 1) leg->Draw();
+   ReneDrawMarkers(mg, opt.markers);
 
    if (wantInset) {
       TPad *p = new TPad(Form("inset_%s", fileName), "", ix1, iy1, ix2, iy2);

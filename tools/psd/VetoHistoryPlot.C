@@ -42,6 +42,12 @@ void VetoHistoryPlot(const char *tsv = "/scratch/RunSummary/psd/veto_history.tsv
    };
    TString od(out); if (!od.EndsWith("/")) od += "/";
    TrendPageOpt o; o.timeFmt = "%m/%d"; o.width = 1300; o.height = 600;
+   {  //  문턱 변경 표식 : 이 표의 run -> epoch 로 (thr_by_run.tsv 는 od 의 부모 psd/ 에 있을 수도, od 자체에 있을 수도 있다)
+      std::map<int, double> ep; for (auto &v : R) if (v.size() > 1) ep[(int)v[0]] = v[1];
+      TString parent = od; parent.Remove(parent.Length() - 1); parent = parent(0, parent.Last('/') + 1);   // <out>/psd/ -> <out>/
+      o.markers = ReneLoadThrMarkers(parent, ep, 4280);
+      if (o.markers.empty()) { TString pp = parent; pp.Remove(pp.Length() - 1); pp = pp(0, pp.Last('/') + 1); o.markers = ReneLoadThrMarkers(pp, ep, 4280); }
+   }
 
    std::vector<TrendSeries> P;
    for (size_t i = 0; i < pan.size(); i++) P.push_back(mk(10 + pan[i], 4280, Form("panel %d", pan[i]), (int)i));

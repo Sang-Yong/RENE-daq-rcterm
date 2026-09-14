@@ -48,10 +48,12 @@ done
 
 [ -r "$MACRO" ] || { echo "매크로가 없다 : $MACRO"; exit 1; }
 [ -r "$COND" ]  || { echo "컷 상수 헤더를 읽을 수 없다 : $COND"; exit 1; }
-[ -r "$OUT/pair_summary.tsv" ] || {
-   echo "pair_summary.tsv 가 없다. 먼저 :"
-   echo "   $DIR/run-summary.sh && $DIR/ibd-summary.sh"
+#  2026-09-15 : pair_summary(legacy) 가 없어도 metrics_summary(DST) 가 있으면 그린다 (매크로가 없는 (run,tag) 를 DST 행으로 보탠다)
+[ -r "$OUT/pair_summary.tsv" ] || [ -r "$OUT/metrics_summary.tsv" ] || {
+   echo "pair_summary.tsv 도 metrics_summary.tsv 도 없다. 먼저 :"
+   echo "   $DIR/run-summary.sh && ($DIR/metrics.sh --list <런> 또는 $DIR/ibd-summary.sh)"
    exit 1; }
+[ -r "$OUT/pair_summary.tsv" ] || : > "$OUT/pair_summary.tsv"
 
 if ! command -v root >/dev/null 2>&1; then
    # shellcheck disable=SC1091

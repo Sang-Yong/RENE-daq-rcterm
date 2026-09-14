@@ -66,6 +66,7 @@
 #include <ctime>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -185,7 +186,28 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
          rows.push_back(r);
       }
    }
-   if (rows.empty()) { printf("[FATAL] pair_summary 에 읽을 행이 없다\n"); return; }
+   //  ★ DST 경로(metrics_summary.tsv, schema 2)의 행을 pair_summary 에 없는 (run,tag) 에 보탠다 (2026-09-15).
+   //    legacy 페어링(ibd-summary)은 런당 한 시간 넘게 PRD 를 다시 읽으므로, DST 만 있는 런도 추이에 곧바로 실린다.
+   //    열 : run tag src live_s n_paired n_paired_acci n_ibd n_ibd_acci n_single r_ll n_subrun ... dt_min dt_max dt_acci s2_lo s2_hi iso_pre iso_post (29~35)
+   {
+      std::set<std::pair<int, std::string>> have;
+      for (const auto &r : rows) have.insert({r.run, r.tag});
+      std::ifstream in((out + "metrics_summary.tsv").Data()); std::string line; int nAdd = 0;
+      while (in && std::getline(in, line)) {
+         if (line.empty() || line[0] == '#') continue;
+         std::vector<std::string> f; std::stringstream ss(line); std::string c;
+         while (std::getline(ss, c, '\t')) f.push_back(c);
+         if (f.size() < 36) continue;
+         TrendRow r; r.run = atoi(f[0].c_str()); r.tag = f[1]; r.src = f[2] + "(dst)";
+         if (r.run <= 0 || have.count({r.run, r.tag})) continue;
+         r.liveSec = atof(f[3].c_str()); r.nIbd = atoll(f[6].c_str()); r.nIbdAcci = atoll(f[7].c_str());
+         r.rll = atof(f[9].c_str()); r.rllN = atoi(f[10].c_str());
+         r.dtMin = atof(f[28].c_str()); r.dtMax = atof(f[29].c_str()); r.isoPre = atof(f[33].c_str()); r.isoPost = atof(f[34].c_str());
+         rows.push_back(r); nAdd++;
+      }
+      if (nAdd) printf("[INFO] metrics_summary(DST) 에서 pair_summary 에 없는 행 %d 개를 보탰다\n", nAdd);
+   }
+   if (rows.empty()) { printf("[FATAL] pair_summary 에도 metrics_summary 에도 읽을 행이 없다\n"); return; }
 
    // ---- run_summary 에서 x축(시각)과 livetime ----
    std::map<int, double> epoch, live;
@@ -294,8 +316,10 @@ void BuildRateTrend(const char *outDir = "/scratch/RunSummary/", double epsE = 1
    TString pdf = out + "rate_trend.pdf";
    int page = 0; bool opened = false;
    //  쪽 하나. 첫 쪽이 PDF 를 열고("("), 마지막은 아래에서 "]" 로 닫는다.
+   std::vector<TrendMarker> thrMarkers = ReneLoadThrMarkers(out, epoch, 4280);
+   if (!thrMarkers.empty()) printf("[INFO] 문턱 변경 표식 %zu 개 (psd/thr_by_run.tsv)\n", thrMarkers.size());
    auto draw = [&](const char *file, const char *title, const char *yt, std::vector<Series> ss, bool logInset) {
-      TrendPageOpt o; o.logInset = logInset;
+      TrendPageOpt o; o.logInset = logInset; o.markers = thrMarkers;
       if (DrawTrendPage(pdf, out, file, title, yt, ss, opened ? "" : "(", o)) { opened = true; page++; }
    };
    const char *tags[2] = {"_nGd", "_nH"};
