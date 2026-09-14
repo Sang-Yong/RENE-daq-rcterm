@@ -113,6 +113,12 @@ while true; do
       done
    fi
    echo "  ------------------------------------------------------------------"
+   #  계수율 경고 (2026-09-14 사용자 지시) : ADC 별 평균 계수율 최댓값이 20,000 이상이면 경고, 30,000 이상이면 알람 기준 초과
+   maxar=$(for d in "${daqs[@]}"; do set -- $d; echo "${4#ar=}"; done | awk 'NR==1||$1>m{m=$1} END{ if (NR) printf "%.0f", m }')
+   if [ -n "${maxar:-}" ]; then
+      if [ "$maxar" -ge "${RCMON_ALARM_RATE:-30000}" ]; then echo "  ★★ 계수율 비정상 : ADC 별 최댓값 ${maxar} Hz ≥ 알람 기준 ${RCMON_ALARM_RATE:-30000} Hz — 잡음 트리거 의심 (chainwatch 가 알람·메일)"
+      elif [ "$maxar" -ge "${RCMON_WARN_RATE:-20000}" ]; then echo "  ★ 경고 : 계수율이 높습니다 — ADC 별 최댓값 ${maxar} Hz ≥ ${RCMON_WARN_RATE:-20000} Hz"; fi
+   fi
    printf '  %s\n' "$hbtxt"
    echo "  Ctrl-C : 이 화면만 종료 (DAQ 는 계속 돈다)"
 

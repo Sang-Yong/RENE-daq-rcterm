@@ -145,5 +145,31 @@ check "중복 없음"        '[ "$(printf "%s" "$out" | grep -o "boss@example.or
 out=$(python3 "$SM" --params "$T/sm.params" --to routine --subject s --dry-run 2>&1)
 check "routine 은 책임자만" '! printf "%s" "$out" | grep -q "a@example.org"'
 
+echo "[R] 계수율 비정상 기준 30,000 Hz (2026-09-14) — 20,000 이상 경고만 · 30,000 이상 즉시 알림"
+hbr() {  # run daqtime ar
+   { echo "time=$(date +%s)"; echo "pid=1"; echo "phase=running"; echo "run=$1"; echo "subrun=3"
+     echo "state=Running"; echo "daqtime=$2"; echo "totev=100"; echo "ndaq=2"
+     echo "daq0=FADCDAQ n=1000 sr=$3 ar=$3"; echo "daq1=SADCDAQ n=1000 sr=$3 ar=$3"; } > "$HB"
+}
+rm -f "$ST"; hbr 4350 400 300; run --min-rate 100
+check "300 Hz : 알림 없음"                   '[ ! -s "$CALLS" ]'
+check "300 Hz : 경고 문구 없음"              '! grep -q "계수율이 높습니다" "$LOG"'
+hbr 4350 460 25000; run --min-rate 100
+check "25,000 Hz : 알림 없음 (경고만)"       '[ ! -s "$CALLS" ]'
+check "25,000 Hz : 한글 경고 문구가 로그에"  'grep -q "경고 : 계수율이 높습니다 — ADC 별 최댓값 25000 Hz" "$LOG"'
+check "25,000 Hz : --status 에 경고"         '"$CW" --params /nonexistent --status --heartbeat "$HB" --state "$ST" --log "$LOG" --dbfile "$DB" 2>/dev/null | grep -q "★ 경고"'
+hbr 4350 520 35000; run --min-rate 100
+check "35,000 Hz : rate_high 즉시 알림 (연속 조건 없이)" 'grep -q " rate_high --msg" "$CALLS"'
+check "35,000 Hz : 사유가 한글"              'grep -q "계수율 비정상 : ADC 별 계수율 최댓값 35000 Hz 가 알람 기준 30000 Hz 이상" "$CALLS"'
+hbr 4350 580 35000; run --min-rate 100
+check "이어지면 재알림 간격 안에는 생략"     '[ ! -s "$CALLS" ]'
+hbr 4350 640 400; run --min-rate 100
+check "돌아오면 해소 기록"                   'grep -q "rate_high 해소됨" "$LOG"'
+#  도배 방지 표식이 alarm_state 옆에 남으므로 (dry-run 도 남긴다) 운영 디렉터리를 더럽히지 않게 임시 params 를 준다
+printf 'alarm_state = %s/daq-alarm.state\non_rate_high = both\nmail_to = boss@example.org\n' "$T" > "$T/nt.params"
+out=$("$NT" --params "$T/nt.params" rate_high --msg "시험" --dry-run 2>&1)
+check "daq-notify rate_high : 알람 (기본 both)"   'printf "%s" "$out" | grep -q "\[DRY\] 알람 : rate_high"'
+check "daq-notify rate_high : 책임자 메일"        'printf "%s" "$out" | grep -qE "routine|책임자"'
+
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

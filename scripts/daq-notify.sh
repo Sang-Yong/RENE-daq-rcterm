@@ -16,6 +16,7 @@
 #     sheetlog         구글시트 런 로그에 등재했다 (scripts/sheetlog-auto.sh)
 #     chain_down       후처리 사슬이 끊겼다 -- /scratch·postrun·dataflow 중 하나가 없다
 #     rate_low         수집은 도는데 ADC 별 계수율이 문턱 아래다 (HV 를 먼저 의심)
+#     rate_high        ★ ADC 별 계수율이 30,000 Hz 이상 (잡음 트리거). 알람 + 책임자 메일 (2026-09-14 사용자 지시)
 #     rotate           정상 런 교체 (이전 런 정상 마감, 간격 짧음). ★ 책임자에게만
 #     resumed          문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다
 #                      위 넷은 scripts/chainwatch.sh 가 보낸다
@@ -53,7 +54,7 @@ NOTIFY_LOG=${NOTIFY_LOG:-/Data/LOG/daq-notify.log}   # 시험은 갈아끼운다
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
-                [sheetlog]=mail [chain_down]=mail [rate_low]=mail \
+                [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
@@ -81,6 +82,7 @@ load_params() {
          on_sheetlog)        ON[sheetlog]=$v ;;
          on_chain_down)      ON[chain_down]=$v ;;
          on_rate_low)        ON[rate_low]=$v ;;
+         on_rate_high)       ON[rate_high]=$v ;;
          on_rotate)          ON[rotate]=$v ;;
          on_resumed)         ON[resumed]=$v ;;
          on_backup_session)  ON[backup_session]=$v ;;
@@ -239,6 +241,14 @@ build_body() {
             echo "  문제(실패·정지) 뒤 새 런이 warmup 을 넘겨 정상 가동에 들어갔다."
             echo "  이전 런이 왜 끝났는지는 위 '런 교체 상세' 와 감시자 로그를 볼 것."
             echo "  이전 런의 산출물 개수 대조 :  scripts/runcheck.sh --run <이전 런>" ;;
+         rate_high)
+            echo "  ★ 계수율이 알람 기준(30,000 Hz)을 넘었다. 물리 사건이 아니라 잡음 트리거일 가능성이 높다."
+            echo "  1) 보드 전원을 내렸다 올린 뒤라면 트리거 설정이 날아간 것이다 (실측 23,527 Hz, CLAUDE.md 11.119)"
+            echo "     -> 수집을 세우고 src/NOTICE_CODE_RUN.sh 로 설정을 복원한 뒤 다시 띄운다"
+            echo "  2) 아니면 SADC/FADC 문턱값이 바뀌었는지 :  설정 파일의 THR 줄과 TCB 로그의 'THR :' 를 대조"
+            echo "     (설정 파일 /home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026.config, 이력 docs/THRESHOLD-HISTORY.md)"
+            echo "  3) HV·잡음원(조명·장비) 도 본다. 지금 값은 위 heartbeat 의 daq0/daq1 줄 (ar= 가 평균 계수율)"
+            echo "  4) 알람을 끄려면 :  scripts/daq-alarm.sh --silence" ;;
          rate_low)
             echo "  ★ 보드보다 검출기를 먼저 의심할 것. 2026-09-01 에 계수가 0 이었던"
             echo "     원인은 PMT HV 였고, 보드 진단에 30분을 헛되이 썼다."

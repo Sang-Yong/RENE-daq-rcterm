@@ -891,6 +891,21 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.198 ★ 계수율 비정상 기준을 '30,000 Hz 이상' 으로 — 20,000 이상 경고, 30,000 이상 알람 + 책임자 메일. 감시 문구 한글화 (사용자 지시, 09-14 17:2x)
+
+사용자 : "수집 이벤트 모니터링에서 경고성 메시지가 계속 뜬다. 메시지를 전부 한글로. 비정상 기준은 30 kHz 이상으로 바꿔 20,000 이상이면 경고,
+30,000 이상이면 알람 실행 + 책임자 메일." — 계속 뜨던 것은 이 세션의 모니터가 영어로 내던 `LOW RATE` (기준 400/100 Hz, 문턱 조정 뒤 309 Hz 라 매분).
+
+| 곳 | 무엇 |
+|---|---|
+| `scripts/chainwatch.sh` | `check_rate_high` : ADC 별 계수율 **최댓값** ≥ `chain_alarm_rate`(30,000) → 사건 `rate_high` **즉시**(연속 조건 1) · ≥ `chain_warn_rate`(20,000) → 경고 문구만 로그·`--status`. `--warn-rate/--alarm-rate`. rate_low(하한 100 Hz, 연속 2)는 HV 꺼짐 감지용으로 남긴다 |
+| `scripts/daq-notify.sh` | 사건 `rate_high` = **알람 + 메일(책임자만)**, `on_rate_high` 키. 본문 '무엇을 하면 되나' : 전원 재투입 뒤 설정 소실(23,527 Hz) → NOTICE_CODE_RUN.sh, 문턱 대조, HV·잡음원 |
+| `scripts/rcmon.sh` | 화면에 ADC 별 최댓값이 20,000 이상이면 `★ 경고`, 30,000 이상이면 `★★ 계수율 비정상` 한 줄 (RCMON_WARN_RATE/RCMON_ALARM_RATE) |
+| `config/notify.params(.example)` | `on_rate_high = both` · `chain_warn_rate = 20000` · `chain_alarm_rate = 30000` (전문가 목록에는 넣지 않는다 — 책임자만). 백업 `.bak-20260914-ratehigh` |
+| 세션 모니터 | 한글로 다시 띄움 : 런 교체 · 단계 · 계수율 20k 경고/30k 비정상(상태가 바뀔 때만 한 번) · USB/DRAM 오류 · 감시자 restart/FATAL |
+
+시험 `tests/chainwatch-runchange.test.sh` 에 rate_high 4 건 (25,000 → 경고만 · 35,000 → 즉시 알림 · 300 → 없음 · daq-notify dry-run 이 알람+메일). 감시자(rcsupervisor)는 계수율 상한을 보지 않는다(stall 만) — 그대로.
+
 #### 11.197 ★★ 문턱값을 '기준값의 80 %' 로 전면 수정 — 기준값 = run 4222 이전(4183~4221)의 원래 값 (사용자 지시, 09-14 11:5x) — run 4347 부터
 
 사용자 : "run 4222 이전 설정이 비토 원래 문턱값이다. 확인·기록하고 PMT 별 기준값으로 잡아 그 80 % 로 전면 수정해 데이터를 받아라. 전에 기준값보다
@@ -3594,6 +3609,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.198         ★ 계수율 비정상 기준 30,000 Hz 이상 (알람+책임자 메일), 20,000 이상 경고 — chainwatch rate_high · daq-notify · rcmon · 세션 모니터 한글
 §11.197         ★★ 문턱값 = run 4222 이전 기준값(4183~4221)의 80 % 로 전면 수정, run 4347 부터 (사용자 지시). §11.196 의 줄은 적용 전 대체.
                 docs/VETO-THRESHOLD-REFERENCE.md (PMT 별 기준표) · daqerr-watch.sh 가 48 h DAQ 오류를 지켜보고 증거를 모은다
 §11.196         ★ (적용 안 됨 — §11.197 로 대체) '산' 패널 16 채널 SADC 문턱을 뮤온율로 올리려던 값. chain_min_rate · recover_min_rate 100 은 유지

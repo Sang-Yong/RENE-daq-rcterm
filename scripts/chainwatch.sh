@@ -16,6 +16,9 @@
 #  무엇을 보는가
 #     chain_down   /scratch 마운트 · postrun · dataflow 중 하나가 없다
 #     rate_low     수집은 도는데 ADC 별 계수율 최솟값이 문턱 아래다
+#     rate_high    ★ 비정상 기준 (2026-09-14 사용자 지시) : ADC 별 계수율 최댓값이 chain_alarm_rate(30,000 Hz) 이상이면
+#                  그 자리에서 알람 + 책임자 메일. chain_warn_rate(20,000 Hz) 이상이면 경고 문구만 (로그·--status). 잡음 트리거
+#                  (전원 재투입 뒤 설정 소실 = 23,527 Hz, §11.119) 이 그 모양이다
 #     rotate       런 번호가 바뀌었고 이전 런이 정상 마감(onlbit=1) + 간격이 짧다
 #                  -> 책임자에게만 (정상 로테이션)
 #     resumed      런 번호가 바뀌었는데 이전 런이 실패했거나 간격이 길다
@@ -50,7 +53,9 @@ LOCK=/Data_ssd/LOG/.chainwatch.lock
 
 HB=/Data/LOG/rcterm.hb
 NFS_ROOT=/scratch
-MINRATE=400          # ADC 별 계수율 최솟값의 문턱 [Hz]. 정상은 약 1000
+MINRATE=400          # ADC 별 계수율 최솟값의 문턱 [Hz]. (2026-09-14 veto 문턱 조정 뒤 정상은 ~300 Hz — params 에서 100)
+WARNRATE=20000       # ADC 별 계수율 최댓값이 이 이상이면 경고 문구 (알림 없음)
+ALARMRATE=30000      # 이 이상이면 rate_high 알림 = 알람 + 책임자 메일 (연속 조건 없이 즉시)
 CONSEC=2             # 이만큼 연속으로 이상이어야 알린다 (일시적 흔들림 무시)
 WARMUP=180           # 런 시작 후 이 시간[초] 안에는 계수율을 판정하지 않는다
 REALERT_MIN=60       # 이상이 이어질 때 다시 알리는 간격 [분]
@@ -73,6 +78,8 @@ load_params() {
          heartbeat)          HB=$v ;;
          chain_nfs_root)     NFS_ROOT=$v ;;
          chain_min_rate)     MINRATE=$v ;;
+         chain_warn_rate)    WARNRATE=$v ;;
+         chain_alarm_rate)   ALARMRATE=$v ;;
          chain_consecutive)  CONSEC=$v ;;
          chain_warmup_sec)   WARMUP=$v ;;
          chain_realert_min)  REALERT_MIN=$v ;;
@@ -96,6 +103,8 @@ while [ $# -gt 0 ]; do
    case "$1" in
       --params)       shift 2 ;;
       --min-rate)     MINRATE=$2; shift 2 ;;
+      --warn-rate)    WARNRATE=$2; shift 2 ;;
+      --alarm-rate)   ALARMRATE=$2; shift 2 ;;
       --consecutive)  CONSEC=$2; shift 2 ;;
       --warmup)       WARMUP=$2; shift 2 ;;
       --realert-min)  REALERT_MIN=$2; shift 2 ;;
@@ -160,6 +169,8 @@ gate_on() {
 # =====================================================================
 DOWN=""       # chain_down 사유
 RATE_MSG=""   # rate_low 사유
+HIGH_MSG=""   # rate_high 사유
+WARN_MSG=""   # 20,000 이상 경고 문구 (알림 없음)
 
 check_chain() {
    local miss=""
@@ -189,6 +200,29 @@ check_rate() {
       return 1
    fi
    RATE_MSG=""; return 0
+}
+
+#  ★ 계수율 높음 (2026-09-14 사용자 지시). 합이 아니라 ADC 별 최댓값. 30,000 이상 = 이상(알람+메일), 20,000 이상 = 경고 문구
+check_rate_high() {
+   local age phase daqtime maxrate run sub
+   HIGH_MSG=""; WARN_MSG=""
+   age=$(hb_age) || return 0
+   [ "$age" -le "$HB_MAX_AGE" ] || return 0
+   phase=$(hb_field phase); [ "$phase" = "running" ] || return 0
+   daqtime=$(hb_field daqtime)
+   awk -v d="${daqtime:-0}" -v w="$WARMUP" 'BEGIN{ exit !(d+0 >= w+0) }' || return 0
+   maxrate=$(sed -n 's/.* ar=\([0-9.]*\).*/\1/p' "$HB" 2>/dev/null \
+             | awk 'NR==1||$1>m{m=$1} END{ if (NR) printf "%.0f", m; }')
+   [ -n "${maxrate:-}" ] || return 0
+   run=$(hb_field run); sub=$(hb_field subrun)
+   if awk -v r="$maxrate" -v m="$ALARMRATE" 'BEGIN{ exit !(r+0 >= m+0) }'; then
+      HIGH_MSG="★ 계수율 비정상 : ADC 별 계수율 최댓값 ${maxrate} Hz 가 알람 기준 ${ALARMRATE} Hz 이상입니다 (run $run sub $sub). 잡음 트리거를 의심할 것"
+      return 1
+   fi
+   if awk -v r="$maxrate" -v m="$WARNRATE" 'BEGIN{ exit !(r+0 >= m+0) }'; then
+      WARN_MSG="경고 : 계수율이 높습니다 — ADC 별 최댓값 ${maxrate} Hz (경고 기준 ${WARNRATE} Hz, 알람 기준 ${ALARMRATE} Hz), run $run sub $sub"
+   fi
+   return 0
 }
 
 # ---- 런 교체 -----------------------------------------------------------
@@ -295,8 +329,8 @@ check_runchange() {
 
 # ---- 한 조건을 처리한다 ----------------------------------------------
 #  연속 CONSEC 회여야 알리고, 이어지는 동안은 REALERT_MIN 간격으로만 알린다.
-handle() {               # $1=이벤트  $2=이상이면 1  $3=사유
-   local ev=$1 bad=$2 msg=$3 n now last
+handle() {               # $1=이벤트  $2=이상이면 1  $3=사유  [$4=연속 문턱 (기본 CONSEC)]
+   local ev=$1 bad=$2 msg=$3 n now last consec=${4:-$CONSEC}
    now=$(date +%s)
    n=$(st_get "fail_$ev"); n=${n:-0}
    if [ "$bad" -eq 0 ]; then
@@ -308,8 +342,8 @@ handle() {               # $1=이벤트  $2=이상이면 1  $3=사유
       return 0
    fi
    n=$(( n + 1 )); st_set "fail_$ev" "$n"
-   say "  $ev : 이상 (연속 $n/$CONSEC) - $msg"
-   [ "$n" -ge "$CONSEC" ] || { log "$ev 이상 $n/$CONSEC : $msg"; return 0; }
+   say "  $ev : 이상 (연속 $n/$consec) - $msg"
+   [ "$n" -ge "$consec" ] || { log "$ev 이상 $n/$consec : $msg"; return 0; }
    last=$(st_get "alert_$ev"); last=${last:-0}
    if [ $(( now - last )) -lt $(( REALERT_MIN * 60 )) ]; then
       log "$ev 이상 (알림 생략, ${REALERT_MIN}분 이내) : $msg"
@@ -334,7 +368,7 @@ main() {
    if ! gate_on; then
       say "운용 중이 아니다 (tmux 세션 daq 도 없고 감시자도 없다). 점검하지 않는다."
       #  세워 둔 동안 카운터가 남아 있으면 다음 기동 때 곧바로 알림이 나간다.
-      st_set fail_chain_down 0; st_set fail_rate_low 0
+      st_set fail_chain_down 0; st_set fail_rate_low 0; st_set fail_rate_high 0
       return 0
    fi
    say "운용 중 (gate on).  heartbeat=$HB"
@@ -345,13 +379,18 @@ main() {
    check_rate;  local r=$?
    handle rate_low "$r" "$RATE_MSG"
 
+   #  ★ 비정상 기준 = 30,000 Hz 이상 (연속 조건 없이 즉시). 20,000 이상은 경고 문구만
+   check_rate_high; local h=$?
+   if [ -n "$WARN_MSG" ]; then log "$WARN_MSG"; say "  $WARN_MSG"; st_set warn_rate_high "$(date '+%F %T') $WARN_MSG"; else st_set warn_rate_high ""; fi
+   handle rate_high "$h" "$HIGH_MSG" 1
+
    check_runchange
    return 0
 }
 
 if [ "$STATUS" -eq 1 ]; then
    echo "chainwatch 상태  $(date '+%F %T')"
-   echo "  문턱      : 계수율 ${MINRATE} Hz · 연속 ${CONSEC} 회 · warmup ${WARMUP}s · 재알림 ${REALERT_MIN}분"
+   echo "  문턱      : 계수율 하한 ${MINRATE} Hz (연속 ${CONSEC} 회) · ★ 경고 ${WARNRATE} Hz 이상 · 알람+메일 ${ALARMRATE} Hz 이상 (즉시) · warmup ${WARMUP}s · 재알림 ${REALERT_MIN}분"
    if gate_on; then echo "  운용      : 중 (gate on)"; else echo "  운용      : 아님 (gate off)"; fi
    mountpoint -q "$NFS_ROOT" 2>/dev/null && echo "  $NFS_ROOT  : 마운트됨" || echo "  $NFS_ROOT  : ★ 마운트 안 됨"
    proc_alive 'scripts/postrun\.sh'  && echo "  postrun   : 살아 있음" || echo "  postrun   : ★ 없음"
@@ -362,8 +401,9 @@ if [ "$STATUS" -eq 1 ]; then
    else
       echo "  heartbeat : 파일 없음 ($HB)"
    fi
-   cd=$(st_get fail_chain_down); rl=$(st_get fail_rate_low)
-   echo "  연속 카운터 : chain_down=${cd:-0} rate_low=${rl:-0}  (문턱 $CONSEC)"
+   cd=$(st_get fail_chain_down); rl=$(st_get fail_rate_low); rh=$(st_get fail_rate_high)
+   echo "  연속 카운터 : chain_down=${cd:-0} rate_low=${rl:-0} rate_high=${rh:-0}  (문턱 $CONSEC, rate_high 는 1)"
+   w=$(st_get warn_rate_high); [ -n "$w" ] && echo "  ★ 경고     : $w"
    echo "  런 추적     : last_run=$(st_get last_run)  (교체 간격 문턱 ${ROTATE_GAP}s · DB $DBFILE)"
    exit 0
 fi

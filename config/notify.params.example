@@ -78,6 +78,7 @@ on_sheetlog         = mail
 #                      both 로 올리는 것을 권한다
 on_chain_down       = mail
 on_rate_low         = mail
+on_rate_high        = both      # ★ ADC 별 계수율 30,000 Hz 이상 (잡음 트리거) : 알람 + 책임자 메일 (2026-09-14 사용자 지시)
 on_rotate           = mail      # 정상 런 교체. 책임자에게만 (아래 목록에 넣지 말 것)
 on_resumed          = mail      # 문제 뒤 다시 정상 가동
 on_backup_session   = mail      # 저장소 백업 세션 시작/종료 (새 판인지 포함). 책임자만
@@ -114,7 +115,9 @@ recover_keep_data   = 0       # 1 이면 확인 런의 파일을 남긴다. 0 �
 #  ★ tmux 세션 'daq' 도 없고 감시자도 없으면 아무 말도 하지 않는다.
 #    사람이 일부러 세운 것을 고장으로 알리지 않기 위해서다.
 chain_nfs_root      = /scratch   # 이것이 마운트돼 있어야 postrun 이 돈다
-chain_min_rate      = 400        # ADC 별 계수율 최솟값의 문턱 [Hz]. 정상은 약 1000
+chain_min_rate      = 100        # ADC 별 계수율 최솟값의 문턱 [Hz]. 2026-09-14 veto 문턱 조정 뒤 정상은 ~300 Hz
+chain_warn_rate     = 20000      # ★ ADC 별 계수율 최댓값이 이 이상이면 경고 문구만 (로그 · --status · rcmon 화면)
+chain_alarm_rate    = 30000      # ★ 이 이상이면 rate_high = 알람 + 책임자 메일, 연속 조건 없이 즉시 (2026-09-14 사용자 지시)
                                  # ★ 합이 아니라 최솟값이다. 한 보드만 죽으면
                                  #   합·평균은 멀쩡해 보인다
 chain_consecutive   = 2          # 이만큼 연속으로 이상이어야 알린다 (흔들림 무시)
