@@ -38,7 +38,7 @@ case "${1:-}" in
    --status)
       echo "기록 폴더 : $LOGDIR"; python3 "$PY" --status --log-dir "$LOGDIR"
       echo "상태 : fails=$(getst fails) last_ok=$(getst last_ok) last_fail=$(getst last_fail) last_mail=$(getst last_mail) last_reason=$(getst last_reason)"
-      crontab -l 2>/dev/null | grep -q 'reactor-power-log.sh' && echo "cron : 등록됨 ($(crontab -l | grep -c 'reactor-power-log.sh') 줄)" || echo "cron : ★ 등록 안 됨 (--install-cron)"
+      crontab -l 2>/dev/null | grep -v '^#' | grep -q 'reactor-power-log.sh' && echo "cron : 등록됨 ($(crontab -l | grep -v '^#' | grep -c 'reactor-power-log.sh') 줄)" || echo "cron : ★ 등록 안 됨 (--install-cron)"
       exit 0 ;;
    --install-cron)
       cur=$(crontab -l 2>/dev/null)

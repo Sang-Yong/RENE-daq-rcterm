@@ -11,7 +11,7 @@
 KHNP : POST https://npp.khnp.co.kr/branch-operation-info-by-plant {branchCd:BR0303, branchCd2:<2311..2336>, branchCd3:<호기>} →
        unitInfoList[0].status (KH1201 운전 / KH1202 정지) · unitDetailOutput.NO_1.VALUE = 원자로 출력 % · NO_8 = 발전기 출력 MW (관찰로 추정)
 """
-import argparse, json, math, sys, urllib.request
+import argparse, json, math, sys, time, urllib.request
 
 DET = (-1276.152, 1086.739, 28.928)
 RCT = [(-580.5237, -313.7868, 31.9872), (-431.818, -105.361, 31.9872), (-283.2894, 102.8167, 28.0087),
@@ -38,8 +38,14 @@ def khnp_fetch_raw(timeout=30, fixture=None):
                                      headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0",
                                               "X-Requested-With": "XMLHttpRequest",
                                               "Referer": f"https://npp.khnp.co.kr/ON004004002002002?unitCd={cd}"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            out.append(json.loads(r.read().decode("utf-8", "ignore")))
+        last = None
+        for attempt in range(3):                      # DNS·망 순간 실패는 세 번까지 (2026-09-15 첫 실행이 'Name or service not known' 한 번)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    out.append(json.loads(r.read().decode("utf-8", "ignore"))); last = None; break
+            except Exception as e:
+                last = e; time.sleep(10)
+        if last is not None: raise last
     return out
 
 def khnp_parse(raw):
