@@ -185,12 +185,40 @@ inline bool ReneIsMuonVeto(const int *Sbit_) {
 //  ★ 기본 0 이면 옛 결과와 바이트 단위로 같다 (legacy 패리티 게이트). 1·2 는 dst_m<mode>/ · cache_m<mode>/ 로 따로 만든다.
 static int gReneMuonMode   = 0;
 static int gReneMuonAdcCut = 50;
+//  ★ mode 2 의 함정 (2026-09-15 실측) : pedestal 이 컷 위로 올라간 채널이 있으면 모든 사건이 '뮤온' 이 돼 single 이 사라진다.
+//    run 4237 sub 3000~7200 은 ch7 이 100 % (single 0), 4286·4288 은 ch29 가 82 % (single −80 %), 4302 는 ch29 21 % (−30 %).
+//    그래서 서브런마다 먼저 채널별로 '트리거 비트가 꺼진 사건 중 S_ADC > 컷인 비율' 을 재고, gReneAdcNoiseFrac 보다 크면
+//    그 서브런의 ADC 판정에서 그 채널을 뺀다 (비트 판정은 그대로). 정상 채널은 이 비율이 몇 % 다 (run 4313~4347 : 전 채널 < 5 %).
+static double   gReneAdcNoiseFrac = 0.10;
+static bool     gReneAdcMask[30] = {true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+                                    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true};
+static int      gReneAdcExclSub = 0;      // 채널을 뺀 서브런 수 (BuildMonitorDst 가 런마다 0 으로 되돌린다)
+static unsigned gReneAdcExclCh  = 0;      // 뺀 채널의 합집합 (비트)
 template <class T>
 inline bool ReneIsMuonVetoMode(const int *Sbit_, const T *Sadc_) {
    if (gReneMuonMode == 0) return ReneIsMuonVeto(Sbit_);
    for (int ch = 0; ch < 30; ++ch) if (Sbit_[ch]) return true;
-   if (gReneMuonMode >= 2 && Sadc_) for (int ch = 0; ch < 30; ++ch) if ((int)Sadc_[ch] > gReneMuonAdcCut) return true;
+   if (gReneMuonMode >= 2 && Sadc_) for (int ch = 0; ch < 30; ++ch) if (gReneAdcMask[ch] && (int)Sadc_[ch] > gReneMuonAdcCut) return true;
    return false;
+}
+//  서브런 하나의 S_ADC · S_Triggered 만 읽어 채널별 잡음 비율을 재고 gReneAdcMask 를 채운다. 뺀 채널 수를 돌려준다.
+inline int ReneScanAdcNoise(const TString &prdPath, int cut, double frac) {
+   for (int ch = 0; ch < 30; ++ch) gReneAdcMask[ch] = true;
+   TChain c("Event");
+   if (c.Add(prdPath) == 0) return 0;
+   c.SetBranchStatus("*", 0); c.SetBranchStatus("S_ADC", 1); c.SetBranchStatus("S_Triggered", 1);
+   Int_t adc[30], bit[30];
+   c.SetBranchAddress("S_ADC", adc); c.SetBranchAddress("S_Triggered", bit);
+   Long64_t n = c.GetEntries(); long long off[30] = {0}, over[30] = {0};
+   for (Long64_t i = 0; i < n; ++i) {
+      c.GetEntry(i);
+      for (int ch = 0; ch < 30; ++ch) if (!bit[ch]) { off[ch]++; if (adc[ch] > cut) over[ch]++; }
+   }
+   int nExcl = 0;
+   for (int ch = 0; ch < 30; ++ch)
+      if (off[ch] >= 100 && (double)over[ch] / off[ch] > frac) { gReneAdcMask[ch] = false; gReneAdcExclCh |= (1u << ch); nExcl++; }
+   if (nExcl) gReneAdcExclSub++;
+   return nExcl;
 }
 
 //  FADC 채널 하나의 NPE. 신호가 없으면 -999 (Step1 의 기본값과 같다).
@@ -473,6 +501,7 @@ inline ReneSubrunStat ReneProcessSubrun(const TString &prdPath, int sub, double 
 
    Long64_t n = chain.GetEntries();
    if (n == 0) return st;
+   if (gReneMuonMode >= 2) ReneScanAdcNoise(prdPath, gReneMuonAdcCut, gReneAdcNoiseFrac);   // pedestal 이 컷 위인 채널을 이 서브런에서 뺀다
 
    chain.GetEntry(0);
    const int timeWindow = Fndp[0];

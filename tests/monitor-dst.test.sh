@@ -61,7 +61,31 @@ if [ "$FOUND2" = 1 ]; then
       }" 2>&1)
    echo "$OUT2" | grep -q 'CHK T_Singles_mono=1 nsub=2' || { echo "FAIL boundary-singles"; exit 1; }
    echo "$OUT2" | grep -q 'CHK T_Muons_mono=1 nsub=2'   || { echo "FAIL boundary-muons"; exit 1; }
-   echo "PASS monitor-dst (8/8)"
+   # 6) mode 2 의 pedestal 가드 (2026-09-15) : run 4237 sub 3000 은 ch7 의 S_ADC 가 전 사건에서 컷(50) 위라 가드 없이는 single 이 0 이다.
+   #    가드(비트 꺼진 사건 중 > 10 %)가 그 채널을 빼면 single 이 mode 0 의 절반 이상 돌아오고, 가드를 끄면(비율 2.0) 다시 0 근처다
+   PRD3000=""
+   for r in /Data_ssd/RAW /data/RAW /scratch/RAW; do [ -f "$r/004237/PRD/PRD_004237.03000.root" ] && PRD3000="$r/004237/PRD/PRD_004237.03000.root" && break; done
+   if [ -n "$PRD3000" ]; then
+      cat > "$T/guard.C" <<EOF3
+#include "$DIR/tools/monitor/RenePrdSingles.h"
+void guard() {
+   long long n[3] = {0, 0, 0}; unsigned ch[3] = {0, 0, 0}; int k = 0;
+   for (int mode : {0, 2, 2}) {
+      gReneMuonMode = mode; gReneMuonAdcCut = 50; gReneAdcNoiseFrac = (k == 1) ? 2.0 : 0.10; gReneAdcExclSub = 0; gReneAdcExclCh = 0;
+      ReneCarry carry; std::vector<S1S2_Candidate> sing; std::vector<ReneMuon> mu;
+      ReneSubrunStat st = ReneProcessSubrun("$PRD3000", 3000, LOWER_LIMIT, 150.0, carry, sing, &mu);
+      n[k] = st.nSingle; ch[k] = gReneAdcExclCh; k++;
+   }
+   printf("CHK guard=%d  (mode0 %lld, mode2 noguard %lld, mode2 guard %lld, excl 0x%x)\\n",
+          (int)(n[1] < n[0] / 10 && n[2] > n[0] / 2 && (ch[2] & (1u << 7)) != 0 && ch[1] == 0), n[0], n[1], n[2], ch[2]);
+}
+EOF3
+      OUT3=$(root -l -b -q "$T/guard.C+" 2>&1)
+      echo "$OUT3" | grep -q 'CHK guard=1' || { echo "FAIL adc-guard"; echo "$OUT3" | grep -E 'CHK|rror' | tail -5; exit 1; }
+      echo "PASS monitor-dst (9/9)"
+   else
+      echo "PASS monitor-dst (8/8, 가드 시험 SKIP: 4237 sub 3000 없음)"
+   fi
 else
    echo "PASS monitor-dst (6/6, 경계 시험 SKIP: 4237 없음)"
 fi

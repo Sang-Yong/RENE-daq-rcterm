@@ -61,6 +61,7 @@ static void BuildOne(int run, const TString &out, const TString &roots,
    TString dstDir = out + (muonMode ? TString::Format("dst_m%d/", muonMode) : TString("dst/"));      gSystem->mkdir(dstDir, kTRUE);
    TString cache  = out + (muonMode ? TString::Format("cache_m%d/", muonMode) : TString("cache/"));  gSystem->mkdir(cache,  kTRUE);
    gReneMuonMode = muonMode; gReneMuonAdcCut = adcCut;
+   gReneAdcExclSub = 0; gReneAdcExclCh = 0; for (int ch = 0; ch < 30; ++ch) gReneAdcMask[ch] = true;   // 런마다 초기화
    TString dst = dstDir + TString::Format("DST_%s.root", ReneRunStr(run).Data());
    if (!force && DstUpToDate(dst, (int)subs.size())) {
       printf("  [OK]   run %d : DST 최신 (서브런 %zu)\n", run, subs.size()); return;
@@ -180,6 +181,8 @@ static void BuildOne(int run, const TString &out, const TString &roots,
    tInfo->Branch("psd_tail_ns", &i_psdTail);
    tInfo->Branch("muon_mode", &i_muMode);
    tInfo->Branch("muon_adc_cut", &i_adcCut);
+   Double_t i_adcNoise = gReneAdcNoiseFrac; Int_t i_adcExclSub = gReneAdcExclSub; UInt_t i_adcExclCh = gReneAdcExclCh;
+   tInfo->Branch("muon_adc_noise_frac", &i_adcNoise); tInfo->Branch("adc_excl_subruns", &i_adcExclSub); tInfo->Branch("adc_excl_channels", &i_adcExclCh);
    tInfo->Fill();
 
    f->cd();
@@ -193,6 +196,11 @@ static void BuildOne(int run, const TString &out, const TString &roots,
           "(캐시 %d / 새로 %d / 실패 %d)  [%.1f s]\n",
           run, sing.size(), sats.size(), muons.size(), liveS, nFromCache, nRead, nBad,
           w.RealTime());
+   if (gReneAdcExclSub > 0) {
+      TString chs; for (int ch = 0; ch < 30; ++ch) if (gReneAdcExclCh & (1u << ch)) chs += TString::Format("%s%d", chs.IsNull() ? "" : ",", ch);
+      printf("  [ADC ] run %d : S_ADC pedestal 이 컷(%d) 위인 채널을 ADC 판정에서 뺀 서브런 %d 개 (채널 %s, 비율 > %.2f)\n",
+             run, gReneMuonAdcCut, gReneAdcExclSub, chs.Data(), gReneAdcNoiseFrac);
+   }
 }
 
 void BuildMonitorDst(const char *runList, const char *outDir,

@@ -891,6 +891,50 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.200 ★★ 런별 파이프라인도 mode 2 · 원자로 스펙트럼을 기준으로 한 prompt 창 · 통계 검수 — 하루 1.8 ± 0.6 대 기대 0.6 (사용자 지시, 09-15 13:0x ~ 14:xx)
+
+사용자 : "런별 파이프라인 veto 도 mode 2 로. prompt 스펙트럼의 2.2 · 8 MeV 언덕은 두 중성자 사건일 가능성이 매우 크다. 원자로 실험들이 보고한
+중성미자 검출 신호의 에너지 스펙트럼을 레퍼런스로 페어링 기준을 삼아라. 원자로에서 멀어 하루 1 개 있을까 말까 하니 페어링 뒤 통계를 검수하고
+과하면 컷을 더 걸어라." (commit d46d634 + 후속)
+
+**① 런별 지표 → dst_m2.** `metrics.sh` 가 monitorcuts 의 새 키 `metrics_dst_subdir`(운영 = dst_m2) 로 DST 폴더를 고른다(`BuildMetrics(…, dstSub)`).
+legacy(ibd-summary, PRD 재독)는 분석 코드의 패널 AND veto 라 뜻이 달라 **`--verify` 대조를 건너뛴다** — websummary 는 `[SKIP] metrics-verify` 를 찍고
+게이트·자가치유를 지나가며, metrics 가 읽는 mode-N 빌드는 실패하면 발행을 막는 단계(run_stage) 로 올렸다 (daily 만 읽는 판은 WARN). 시험 websummary 16 → 18.
+운영 : 47 런 `metrics.sh --force` 재계산(13:49) → bg-trend · rate-trend 재생성. 4325~4328 은 서브런 0 하나가 깨진 빈 런(live 0)이라 mode-2 DST 가 없고 행은 0 그대로.
+mode 2 로 바꾸며 `VetoAdcEff.C`(scratchpad) 로 S_ADC 컷을 다시 쟀다 (run 4347, 80 % 문턱) : 타겟 관통 뮤온(>20000 NPE) 태깅 패널 AND 50 % · 비트 84 % ·
+S_ADC>50 94 % (>20 이면 98 % 이지만 타겟만 있는 보통 사건의 74 % 를 가짜 veto — 50 은 6 %, 120 은 1.4 %/92 %). **50 을 그대로 둔다.**
+
+**② 원자로 참조 신호창 (4d).** 문헌 — Daya Bay PRL 116 061801 · RENO PRL 116 211801 : IBD prompt(가시 에너지)는 ~1.5 MeV 에서 시작해 **3~4 MeV 최대,
+8 MeV 위는 ~1 %** (4~6 MeV 에 ~10 % 의 '5 MeV 초과'). 코드에 참조 모양을 넣었다 — `ReactorPromptShape()` : Mueller et al. PRC 83 054615 (2011) Table VI 의
+exp(Σα_p E^(p−1)) (pdftotext 로 원문 표에서 대조) × Vogel–Beacom σ ∝ E_e p_e, E_vis = E_ν − 0.782, 핵분열 분율 0.564/0.076/0.304/0.056, σ_E = 0.12√E
+(AmBe n-H 봉우리 σ 0.179 @2.23). 실측 잔여(42 일, dst_m2) 는 **1.2~2.8 MeV(n-H 2.2 MeV γ + Compton) 와 7.6~9.4 MeV(n-Gd 8 MeV) 에만 있고 3~7 MeV 는 비어 있다**
+— 사용자 진단대로 두 중성자 가족이다. 그래서 `daily_prompt_lo_mev = 3.0` · `daily_prompt_hi_mev = 7.0` 창으로 후보를 센다(표 열 `n_on_win … rate_win`, 그림 60/61
+검수 · 62/63 창 rate). 창 밖 스펙트럼은 37~58 에 그대로 남는다. 템플릿 효율 : 창 0.576 · S1 창(1.2~12) 0.991.
+
+**③ 통계 검수 (n-Gd, 33.0 라이브 일, 44 런)** — 그림 60.
+```
+창 3~7 MeV : on 361 · 우발 49.5 · fast-n 244.4 (평평, 8.5~12 MeV 꼬리 규격화의 창 몫 0.37) · Li/He 7.9  →  후보 59 ± 20 = 1.79 ± 0.61 /day
+기대        하루 1 IBD × 창 효율 0.576 = 0.58 /day (33 일에 19.0)  →  창/기대 = 3.1 (통계 ±1.1)
+창 안 쌍 Δt (우발 바닥 고정 + τ=34 µs 고정) : 상관 쌍 293 = fast-n + IBD 가 같은 포획 시간이라 Δt 로는 못 가른다
+fast-n 규격화 의존 : 꼬리를 9.5~12 로 하면 fast-n 163 → 후보 141 ± 20 (4.3 /day). 4.2~7 MeV 잔여가 8.5 꼬리로는 0 근처, 9.5 꼬리로는 +4/빈 → 8.5 가 맞다
+multiplicity 창 1000/1000 µs : on 361 → 322 (−11 % = single 80 Hz × 1.6 ms 의 무작위 손실), 후보 70 ± 19 (2.1 /day) — 배경은 그대로, 효과 없음
+남는 초과는 3.0~4.0 MeV 에 몰려 있다 (53 ± 15, 1.6 /day) = 원자로 스펙트럼이 최대인 자리.  통계로는 아직 못 가른다
+```
+**판정.** 강한 veto + multiplicity + 원자로 창 뒤의 후보는 하루 1.8 ± 0.6 (fast-n 규격화 계통 ~±1.3) 로 기대 0.6 의 3 배 안팎이고, 남는 것은 에너지에
+평평한 상관 성분(fast-n 꼴)이다. Δt(포획 34 µs)·PSD(FoM 0.5)·다중도 창·veto 늘리기로는 더 못 깎는다 — **컷이 아니라 fast-n 뺄셈의 정확도 문제**다.
+하루 ≲1 과 모순되지는 않는다(2σ 안). 다음 손잡이는 (a) fast-n 규격화를 창 밖 두 구간(4.2~7 의 평평함 + 9.6~12)으로 동시에 맞추는 것, (b) 통계 —
+한 달 더 쌓으면 3~4 MeV 초과의 유의도가 갈린다. 변형 세 벌은 `/scratch/RunSummary/winstudy/{v2_fn95,v3_iso1000,v4_both}/` 에 남겼다.
+**★★ 그림 62 가 잡은 mode 2 의 구멍 — pedestal 이 컷 위로 올라간 채널이 single 을 통째로 지운다.** 6 월(run 4237) 의 06-16~19 가 −7 /day 였다 :
+그 날들의 on 쌍이 0 — dst_m2 의 4237 은 서브런 1440~7200 에 **single 이 0 개** (뮤온은 mode 0 의 1.3~1.9 배). `AdcFrac.C`(scratchpad) 로 재니 그 서브런들은
+**ch7 의 S_ADC 가 사건의 100 %** 에서 50 을 넘고(pedestal 이 컷 위), ch13 도 42 %. 전 런을 대조하니 **4237~4307 의 24 런이 mode 2 에서 single 을 15~81 % 잃고
+있었다** (4286·4288 ch29 82 % · 4302 ch29 21 % · 4237 ch3/7/13). 4313 이후는 멀쩡(≥ 85 %). 즉 09-14 의 "mode 2 는 −7 %" 는 run 4345 만 본 값이었다.
+**가드 (commit 아래)** — `ReneScanAdcNoise()` : 서브런마다 S_ADC·S_Triggered 만 먼저 읽어 채널별로 '비트 꺼진 사건 중 S_ADC > 컷 비율' 을 재고
+`gReneAdcNoiseFrac`(0.10) 을 넘는 채널은 그 서브런의 ADC 판정에서 뺀다 (비트 판정은 그대로). T_Info 에 `muon_adc_noise_frac · adc_excl_subruns ·
+adc_excl_channels`, `[ADC ]` 로그 줄. 실측 4237 sub 3000 : mode 0 single 5,635 · mode 2 가드 없이 0 · 가드 5,101 (ch7·13 제외). 시험 monitor-dst 8 → 9.
+재생성 `/Data_ssd/LOG/m2-rebuild.sh` (24 런 + 대조 4345, 3 병렬 `--force`, 약 9 h) → 끝나면 metrics·bg/rate-trend·daily 를 다시 만들고 웹에 복사한다.
+**그 전까지 위 ③ 의 수치(1.8 ± 0.6 /day 등)는 4313 이후 런이 주도한 값이고, 6~8 월 런의 몫은 과소다** — 재생성 뒤 다시 읽을 것 (`m2-rebuild.log` 의 [WIN] 줄).
+시험 : websummary 18 · monitor-daily 28 · monitor-metrics(4346) · monitor-dst 9.
+
 #### 11.199 ★★ 문턱 80 % 데이터(run 4347)로 그림 58 장을 다 그려 본 결과와 코드 개선 (사용자 지시, 09-15 04:1x ~ 05:xx)
 
 사용자 : "문턱을 낮춘 데이터로 그림들을 한 번씩 다 그려 보고 코드 개선안을 찾자." run 4347 은 수집 중(12 h, PRD 733 개)이라 운영 표를 안 건드리고
@@ -3654,6 +3698,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.200         ★★ 런별 지표도 dst_m2 (metrics_dst_subdir, legacy 대조 건너뜀) · 원자로 IBD prompt 참조 모양(Mueller 2011 × σ_IBD) + prompt 창 3~7 MeV
+                (daily_prompt_lo/hi_mev, 그림 60~63) · 검수 : 창 후보 1.8 ± 0.6 /day 대 기대 0.6 (하루 1 IBD × 효율 0.58). 남는 것은 fast-n 꼴, 컷으론 못 깎는다
 §11.199         ★★ 80 % 문턱 데이터 그림 58 장 (thr80). veto 태깅 효율 87 → 49 % (패널 AND) / 93 % 유지 (오프라인 S_ADC). 코드 개선 :
                 rate-trend DST 보탬 · THR 표식 · veto 효율 열+그림 59 · Δt 2-성분 적합 · ibd-summary --force 함정
 §11.198         ★ 계수율 비정상 기준 30,000 Hz 이상 (알람+책임자 메일), 20,000 이상 경고 — chainwatch rate_high · daq-notify · rcmon · 세션 모니터 한글

@@ -571,13 +571,13 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          r->Draw("HIST");
          TBox *box = new TBox(winL[k], ymin * 1.1 - 1, std::min(winH[k], eHi), ymax * 1.45 + 1); box->SetFillColorAlpha(kGray + 1, 0.18); box->SetLineColor(kGray + 2); box->Draw("SAME");
          r->Draw("HIST SAME"); tA->Draw("HIST SAME"); tB->Draw("HIST SAME");
-         TLegend *lg = new TLegend(0.38, 0.56, 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.026);
-         lg->AddEntry(r, Form("prompt after acc./fast-n/Li-He subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
-         lg->AddEntry(box, Form("reactor-referenced prompt window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
+         TLegend *lg = new TLegend(0.40, 0.54, 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.023);
+         lg->AddEntry(r, Form("prompt after acc. / fast-n / Li-He subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
+         lg->AddEntry(box, Form("window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
          lg->AddEntry((TObject *)nullptr, Form("candidates in window = %.1f #pm %.1f  =  %.2f #pm %.2f /day  (%.1f live days)", candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days), "");
-         lg->AddEntry(tA, Form("reactor IBD prompt shape (Mueller 2011 flux #times #sigma_{IBD}, #sigma_{E}=0.12#sqrt{E}), scaled to the window candidates"), "l");
-         lg->AddEntry(tB, Form("same shape at %.0f IBD/day (expectation at this baseline) : window eff. %.2f #rightarrow %.1f expected, S1-window eff. %.2f", expPerDay, effW, expW, effS1), "l");
-         lg->AddEntry((TObject *)nullptr, Form("window / expectation = %.1f  (#gg 1 means correlated background survives : add cuts)", expW > 0 ? candW / expW : 0), "");
+         lg->AddEntry(tA, "reactor IBD prompt shape (Mueller 2011 #times #sigma_{IBD}, #sigma_{E}=0.12#sqrt{E}), scaled to window", "l");
+         lg->AddEntry(tB, Form("same shape at %.0f IBD/day : window eff. %.2f #rightarrow %.1f expected  (S1 eff. %.2f)", expPerDay, effW, expW, effS1), "l");
+         lg->AddEntry((TObject *)nullptr, Form("window / expectation = %.1f   (#gg 1 : correlated background survives, add cuts)", expW > 0 ? candW / expW : 0), "");
          lg->Draw();
          //  inset : 창 안 쌍의 Δt
          TPad *pin = new TPad(Form("pin_win_%s", fileTag[k]), "", 0.12, 0.50, 0.40, 0.88); pin->SetFillColor(kWhite); pin->SetBorderSize(1); pin->Draw(); pin->cd();

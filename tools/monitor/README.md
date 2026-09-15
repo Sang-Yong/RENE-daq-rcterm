@@ -632,6 +632,8 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 55~56 | `55/56_bgspec_shape_<ch>.png` | 남는 '신호' 의 prompt 모양(빨강) 대 n_extra=1 · ≥2 가족의 prompt 모양(같은 면적으로). 같으면 신호가 그 가족의 꼬리다 |
 | 57~58 | `57/58_bgspec_dt_<ch>.png` | prompt–delayed **Δt** (on · off · prompt < 3 MeV) 와 exp(−t/τ) + 평평 적합. 평평 × 창 = 우발 추정의 독립 대조, exp 적분 = 상관 쌍 수. **2-성분 적합**(34 µs Gd 포획 고정 + 긴 성분, 평평은 off-window 고정)의 N(34 µs) = IBD 다운 몫 |
 | 59 | `59_bg_vetoeff.png` | **VETO 태깅 효율** = 태그된 타겟 관통 뮤온(T_Muons, > 3000 / > 20000 NPE) / (태그된 + 안 된(T_Sat)). 문턱을 바꾸면 이 그림이 먼저 움직인다 (80 % 문턱 : 87 → 49 %) |
+| 60~61 | `60/61_signal_window_<ch>.png` | **원자로 참조 신호창 검수** (2026-09-15) : 배경 전부 뺀 prompt 스펙트럼(빨강) 위에 **원자로 IBD prompt 참조 모양**(Mueller 2011 flux × Vogel–Beacom σ, E_vis = E_ν − 0.78, σ_E = 0.12√E ; 파랑 = 창 안 후보 수로 규격화, 초록 점선 = 하루 1 IBD 기대) 과 창 `daily_prompt_lo/hi_mev`(회색). 범례에 창 안 on·우발·fast-n·Li/He·후보±오차·/day·템플릿 창 효율·기대치·비율. inset = 창 안 쌍의 Δt (평평 고정 + exp 34 µs 적합 → 상관 쌍 수) |
+| 62~63 | `62/63_daily_rate_window_<ch>.png` | 창 안 후보 rate [/day] 날짜별 (배경 전부 뺀 뒤). 표의 `rate_win` |
 
 **추이 그림 공통** — 세로 점선 `THR <런>` 은 veto 문턱값이 바뀐 런(`psd/thr_by_run.tsv`, `tools/psd/thr-history.sh`). rate-trend 는 pair_summary(legacy)에 없는 (run,tag) 를
 metrics_summary(DST) 행으로 보태 그린다 — legacy 페어링(런당 한 시간) 없이도 새 런이 곧바로 실린다.
@@ -649,7 +651,13 @@ fast-n      기본(fn_norm_mode 0) 사이드밴드 prompt 12–50 MeV(single ∪
 Li/He       직전 샤워링 뮤온(target > mu_shower_npe=20000 NPE)까지 Δt 를 날짜마다 Daya Bay Eq.2 로 적합, 스펙트럼 모양은 '직전 3τ 안 쌍 − 직후 3τ 안 쌍'
 PSD 컷      daily_psd_nsig > 0 이면 prompt 의 p_psd > nsig 인 쌍을 버린다 (on/off 같이. γ 수용 99.9 % @3σ)
 강한 veto   dst_subdir = dst_m2 : dst-build.sh --muon-mode 2 로 만든 DST — veto PMT 30 개 중 하나라도 트리거되거나 S_ADC > 50 이면 뮤온으로 보고
-            150 µs 데드. 타겟만 남은 사건으로 쌍을 만든다 (2026-09-14 사용자 지시). 런별 파이프라인은 dst/(패널 AND) 그대로
+            150 µs 데드. 타겟만 남은 사건으로 쌍을 만든다 (2026-09-14 사용자 지시). ★ 2026-09-15 부터 런별 지표(metrics_summary · 추이 18~28·59 · 웹 표)도
+            metrics_dst_subdir = dst_m2 로 같은 DST 를 읽는다. legacy(ibd-summary, PRD 재독) 만 패널 AND 라 --verify 대조는 건너뛴다
+            ★ pedestal 가드 : 서브런마다 '트리거 비트 꺼진 사건 중 S_ADC > 50 인 비율' 이 10 % 를 넘는 채널은 그 서브런의 ADC 판정에서 뺀다
+            (run 4237 ch7 100 % · 4286/4288 ch29 82 % 처럼 pedestal 이 컷 위로 올라간 채널이 single 을 통째로 지웠다, §11.200). [ADC ] 로그 · T_Info adc_excl_*
+신호창      daily_prompt_lo_mev / hi_mev (3.0 / 7.0) : 후보 수 n_cand_win · rate_win 은 prompt 가 이 창 안인 쌍만 센다 (2026-09-15).
+            근거 = 원자로 IBD prompt 스펙트럼(Daya Bay PRL 116 061801 · RENO PRL 116 211801 : 3~4 MeV 최대, 8 MeV 위 ~1 %) 과 실측 잔여의 두 언덕
+            (1.2~2.8 MeV n-H 2.2 MeV γ · 7.6~9.4 MeV n-Gd 8 MeV = 두 중성자 가족). 창 밖 스펙트럼은 그림 37~58 에 그대로 남는다
 라이브타임  4d 는 DST 의 벽시계 합에 exp(−R_μ·veto_us) 를 곱한다 (after-muon 데드타임. 패널 AND 864 Hz → −12 %)
 ```
 
