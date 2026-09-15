@@ -1,0 +1,117 @@
+[
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1202",
+    "puCdNm": "1호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 0,
+    "TIME": "2026-09-15 18:41:03",
+    "TYPE": "조치"
+   }
+  }
+ },
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1202",
+    "puCdNm": "2호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 0,
+    "TIME": "2026-09-15 18:39:58",
+    "TYPE": "조치"
+   },
+   "NO_8": {
+    "VALUE": 0,
+    "TIME": "2026-09-15 18:48:30",
+    "TYPE": "조치"
+   }
+  }
+ },
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1201",
+    "puCdNm": "3호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 100,
+    "TIME": "2026-09-15 18:48:28",
+    "TYPE": "정상"
+   },
+   "NO_8": {
+    "VALUE": 1040,
+    "TIME": "2026-09-15 18:48:30",
+    "TYPE": "정상"
+   }
+  }
+ },
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1201",
+    "puCdNm": "4호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 100,
+    "TIME": "2026-09-15 18:48:18",
+    "TYPE": "정상"
+   },
+   "NO_8": {
+    "VALUE": 1034,
+    "TIME": "2026-09-15 18:48:30",
+    "TYPE": "정상"
+   }
+  }
+ },
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1201",
+    "puCdNm": "5호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 100,
+    "TIME": "2026-09-15 18:48:08",
+    "TYPE": "정상"
+   },
+   "NO_8": {
+    "VALUE": 1041,
+    "TIME": "2026-09-15 18:48:30",
+    "TYPE": "정상"
+   }
+  }
+ },
+ {
+  "unitInfoList": [
+   {
+    "status": "KH1201",
+    "puCdNm": "6호기"
+   }
+  ],
+  "unitDetailOutput": {
+   "NO_1": {
+    "VALUE": 100,
+    "TIME": "2026-09-15 18:48:03",
+    "TYPE": "정상"
+   },
+   "NO_8": {
+    "VALUE": 1041,
+    "TIME": "2026-09-15 18:48:20",
+    "TYPE": "정상"
+   }
+  }
+ }
+]

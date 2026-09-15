@@ -24,27 +24,58 @@ SIG = 5.9e-43
 NU_PER_FIS = 6.0
 EFF_PAPER = 300.0 / (P_GW[2] * FIS * SIG * NP / (4 * math.pi * 2400.0 ** 2) * 86400)
 
-def khnp_live(timeout=30):
-    """호기별 (출력 %, 상태, 발전기 MW, 시각). 실패하면 None."""
+KHNP_URL = "https://npp.khnp.co.kr/branch-operation-info-by-plant"
+RATED_GROSS_MWE = [1000.0, 1000.0, 1040.0, 1040.0, 1040.0, 1040.0]   # 발전기 출력 → 열출력 환산용 (3~6 호기 = 100 % 때 실측 1,034~1,041 MW. 1·2 호기는 가정)
+
+def khnp_fetch_raw(timeout=30, fixture=None):
+    """호기별 원본 JSON 여섯 개. fixture(파일 경로)를 주면 거기서 읽는다(시험용). 실패하면 예외."""
+    if fixture:
+        with open(fixture, encoding="utf-8") as f: return json.load(f)
     out = []
     for i, cd in enumerate(UNIT_CD, 1):
         body = json.dumps({"branchCd": "BR0303", "branchCd2": cd, "branchCd3": str(i)}).encode()
-        req = urllib.request.Request("https://npp.khnp.co.kr/branch-operation-info-by-plant", data=body, method="POST",
+        req = urllib.request.Request(KHNP_URL, data=body, method="POST",
                                      headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0",
                                               "X-Requested-With": "XMLHttpRequest",
                                               "Referer": f"https://npp.khnp.co.kr/ON004004002002002?unitCd={cd}"})
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                d = json.loads(r.read().decode("utf-8", "ignore"))
-        except Exception as e:
-            print(f"[WARN] KHNP {cd} : {e}", file=sys.stderr); return None
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out.append(json.loads(r.read().decode("utf-8", "ignore")))
+    return out
+
+def khnp_parse(raw):
+    """원본 JSON 여섯 개 → 호기별 dict(unit, status, pct, mwe, time). 값이 없으면 None."""
+    units = []
+    for i, d in enumerate(raw, 1):
         ui = (d.get("unitInfoList") or [{}])[0]; det = d.get("unitDetailOutput") or {}
         pct = det.get("NO_1", {}).get("VALUE"); mw = det.get("NO_8", {}).get("VALUE"); t = det.get("NO_1", {}).get("TIME")
         st = {"KH1201": "운전", "KH1202": "정지"}.get(ui.get("status"), ui.get("status"))
         try: pct = float(pct)
         except Exception: pct = None
-        out.append((pct, st, mw, t))
-    return out
+        try: mw = float(mw)
+        except Exception: mw = None
+        units.append({"unit": i, "status": st, "pct": pct, "mwe": mw, "time": t})
+    return units
+
+def khnp_live(timeout=30):
+    """호기별 (출력 %, 상태, 발전기 MW, 시각). 실패하면 None."""
+    try: raw = khnp_fetch_raw(timeout)
+    except Exception as e:
+        print(f"[WARN] KHNP : {e}", file=sys.stderr); return None
+    return [(u["pct"], u["status"], u["mwe"], u["time"]) for u in khnp_parse(raw)]
+
+def baselines():
+    return [math.dist(DET, r) for r in RCT]
+
+def expected(pct, eff=None):
+    """호기별 출력 %(6 개) → dict(flux, ibd_noeff, ibd, per_unit=[(flux, ibd_noeff, ibd)]). 창 3~7 MeV 몫은 부르는 쪽이 곱한다."""
+    eff = EFF_PAPER if eff is None else eff
+    L = baselines(); per = []; tf = tr = 0.0
+    for i in range(6):
+        p = P_GW[i] * (pct[i] or 0.0) / 100.0
+        flux = p * FIS * NU_PER_FIS / (4 * math.pi * (L[i] * 100) ** 2)
+        r = p * FIS * SIG * NP / (4 * math.pi * (L[i] * 100) ** 2) * 86400
+        per.append((flux, r, r * eff)); tf += flux; tr += r
+    return {"flux": tf, "ibd_noeff": tr, "ibd": tr * eff, "per_unit": per, "eff": eff}
 
 def main():
     ap = argparse.ArgumentParser()

@@ -660,6 +660,7 @@ PSD 컷      daily_psd_nsig > 0 이면 prompt 의 p_psd > nsig 인 쌍을 버린
             (1.2~2.8 MeV n-H 2.2 MeV γ · 7.6~9.4 MeV n-Gd 8 MeV = 두 중성자 가족). 창 밖 스펙트럼은 그림 37~58 에 그대로 남는다
 기대치      daily_expected_ibd_per_day : 이 자리의 기대 IBD/day (창 적용 전). tools/reactor/expected_ibd.py 가 KHNP 실시간 호기 출력·좌표·논문 타겟으로 낸다
             (2026-09-15 : 한빛 1·2 호기 정지 → 0.345, 6 호기 전부면 0.494). 그림 60/61 의 초록 점선과 '창/기대' 비율이 이 값을 쓴다
+            호기 출력은 scripts/reactor-power-log.sh 가 매시 기록한다 (docs/REACTOR-POWER-LOG.md, 시트 KHNP_daily_power 탭)
 라이브타임  4d 는 DST 의 벽시계 합에 exp(−R_μ·veto_us) 를 곱한다 (after-muon 데드타임. 패널 AND 864 Hz → −12 %)
 ```
 

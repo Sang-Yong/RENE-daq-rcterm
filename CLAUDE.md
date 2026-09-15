@@ -891,6 +891,25 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.202 ★★ 한빛 호기별 출력을 시간마다 기록 — cron 47 분 + @reboot, 로컬 TSV 정본 + 구글 시트 KHNP_daily_power 탭 (사용자 지시, 09-15 19:0x)
+
+사용자 : "1·2 호기는 예방정비로 출력이 없고 3~6 호기는 ~1 GW 발전기 출력이 실시간으로 갱신된다. 필요한 것은 발전기 출력이 아니라 핵분열 열출력이니
+환산하고, 한 시간마다 사이트에서 값을 불러와 일일 단위로 기록해 두어 나중에 기대 중성미자와 비교할 수 있게 하라. 새 구글 시트 탭(gid 748730312)에
+기록하고, 24 시간 백그라운드로, 재부팅 뒤 망이 붙으면 자동으로, 안 되면 책임자에게 메일, 수동 실행 매뉴얼도."
+
+| 파일 | 하는 일 |
+|---|---|
+| `tools/reactor/expected_ibd.py` | KHNP `POST /branch-operation-info-by-plant`(branchCd BR0303 · 2311~2336) 읽기 · 좌표/열출력/타겟 상수 · `expected(pct)` |
+| `tools/reactor/reactor_power_log.py` | 한 줄 기록기. 26 열(시트 탭 폭) : 호기별 status/원자로 출력 %/발전기 MW · **열출력 합 = % × 정격**(1·2 호기 2,775, 3~6 호기 2,815 MWth) · 발전기 환산 열출력(대조) · flux · 기대 IBD/day · 3~7 MeV 창 몫. 날짜가 바뀌면 지난 날짜의 **일일 평균 행**(type=day). 정본은 로컬 TSV, 시트는 (datetime,type) 짝으로 빠진 행을 메우며 되읽어 대조. rc 0/2/3/4 |
+| `scripts/reactor-power-log.sh` | cron 래퍼 : flock · 망 대기(최대 20 분, @reboot 용) · 연속 2 회 실패 → 책임자 메일(같은 사유 6 h 에 한 번) · 복구 메일 · `--dry-run/--status/--install-cron/--no-notify` |
+| `docs/REACTOR-POWER-LOG.md` | 운용 매뉴얼 (수동 실행 · rc 표 · cron 재설치) |
+| `tests/reactor-power-log.test.sh` | 17 건 (fixture JSON `tests/fixtures/khnp_hanbit_20260915.json` · TSV 시트 대역 · 가짜 메일) : 26 열·환산값·일일 행·dry-run·실패/복구 메일·시트 막힘 뒤 메움·잠금·cron 환경 |
+
+★ 원자로 출력 % 가 곧 열출력 비율이라 그것이 정본이고, 발전기 MW 는 정격 발전 효율(1,040 MWe/2,815 MWth)로 나눈 대조 열이다 (정상이면 1 % 안에서 같다).
+crontab : `47 * * * *` + `@reboot` (`--install-cron`, 옛 crontab 은 `~/crontab.bak-<시각>`). 시트 열은 자동 갱신되고, 기대 IBD 는 `monitorcuts` 의
+`daily_expected_ibd_per_day` 에 손으로 옮긴다 (호기 상태가 바뀔 때). 밟은 것 : 래퍼가 `REACTOR_PY_ARGS` 를 낱말로 나눠 `--now 'YYYY-MM-DD HH:MM'` 의
+공백이 깨졌다 → `T` 구분도 받는다.
+
 #### 11.201 ★★ 이 자리에서 기대되는 원자로 ν̄ flux 와 IBD 수 — 한빛 1·2 호기가 정지 중이라 하루 0.35 (사용자 지시, 09-15 18:4x)
 
 사용자 : "검출기와 발전소의 상대 좌표(vDet · vRct[0..5], rct[0] = 1 호기)로 KHNP 사이트의 호기별 출력에 따른 중성미자 방출·flux·검출 기대량을
@@ -3724,6 +3743,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.202         ★★ 한빛 호기별 출력 시간별 기록 (cron 47 분 + @reboot) → /Data_ssd/LOG/reactor-power/reactor_power.tsv + 시트 KHNP_daily_power 탭.
+                실패 2 회면 책임자 메일. 매뉴얼 docs/REACTOR-POWER-LOG.md
 §11.201         ★★ 기대 IBD : 한빛 1·2 호기 정지(예방정비, ~2027-03) · 3~6 호기 100 % → flux 8.2×10⁹ /cm²/s, 0.35 IBD/day (효율 0.29), 창 3~7 MeV 0.20/day.
                 tools/reactor/expected_ibd.py (KHNP 실시간) · monitorcuts daily_expected_ibd_per_day
 §11.200         ★★ 런별 지표도 dst_m2 (metrics_dst_subdir, legacy 대조 건너뜀) · 원자로 IBD prompt 참조 모양(Mueller 2011 × σ_IBD) + prompt 창 3~7 MeV
