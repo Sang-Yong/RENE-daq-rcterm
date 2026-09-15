@@ -66,3 +66,5 @@ daily_prompt_lo_mev = -1   # 4d 만. 원자로 참조 신호창 [MeV] : 후보 �
 daily_prompt_hi_mev = -1   #   근거 : 원자로 ν̄ IBD prompt 스펙트럼(Daya Bay PRL 116 061801 · RENO PRL 116 211801)은 3~4 MeV 에서 최대, 8 MeV 위는 ~1 %.
                         #   실측 잔여 '신호' 는 1.2~2.8 MeV(n-H 2.2 MeV 포획 γ + 그 Compton) 와 7.6~9.4 MeV(n-Gd 8 MeV) 에만 있고 3~7 MeV 는 비어 있다
                         #   = 두 중성자 가족. 3.0 / 7.0 으로 두면 그 둘을 창 밖으로 내고 IBD 효율 ~0.6 을 남긴다 (템플릿 효율은 그림 60/61 에 찍힌다)
+daily_expected_ibd_per_day = 1.0   # 4d 만. 이 자리에서 기대되는 IBD/day (창 적용 전, 선택 효율 포함). tools/reactor/expected_ibd.py 가 KHNP 실시간 출력으로
+                        #   낸다 (2026-09-15 18:48 : 한빛 1·2 호기 정지, 3~6 호기 100 % → 0.34 /day. 6 호기 전부 100 % 면 0.49). 그림 60/61 의 초록 점선·비율

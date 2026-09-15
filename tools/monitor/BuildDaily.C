@@ -234,7 +234,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
                 double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst",
-                double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1) {
+                double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1, double expIbdPerDay = 1.0) {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -551,14 +551,14 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          TH1D *tpl = (TH1D *)pSub->Clone(Form("prompt_%s_reactor_template", fileTag[k])); ReactorPromptShape(tpl);
          int bW1 = tpl->FindBin(winL[k]), bW2 = tpl->FindBin(std::min(winH[k], eHi) - 1e-6), bS1 = tpl->FindBin(s1lo), bS2 = tpl->FindBin(std::min(s1hi, eHi) - 1e-6);
          double effW = tpl->Integral() > 0 ? tpl->Integral(bW1, bW2) / tpl->Integral() : 0, effS1 = tpl->Integral() > 0 ? tpl->Integral(bS1, bS2) / tpl->Integral() : 0;
-         const double expPerDay = 1.0;                       // 사용자 기대 : 이 거리에서 하루 ~1 개 (검출기 전체, 컷 전)
+         const double expPerDay = expIbdPerDay;              // 기대 IBD/day (창 적용 전). monitorcuts daily_expected_ibd_per_day — tools/reactor/expected_ibd.py 가 낸다
          double expW = expPerDay * days * effW;
          TH1D *tA = (TH1D *)tpl->Clone(Form("prompt_%s_reactor_scaled", fileTag[k]));   // 창 안 후보 수로 규격화 (모양 비교)
          if (tpl->Integral(bW1, bW2) > 0) tA->Scale(std::max(candW, errW) / tpl->Integral(bW1, bW2));
          TH1D *tB = (TH1D *)tpl->Clone(Form("prompt_%s_reactor_expected", fileTag[k]));  // 1 IBD/day 기대로 규격화
          if (tpl->Integral() > 0) tB->Scale(expPerDay * days / tpl->Integral());
          printf("[WIN ] %s : window %.1f-%.1f MeV  on %lld  acc %.1f  fast-n %.1f  Li/He %.1f  -> cand %.1f +- %.1f  (%.2f +- %.2f /day over %.1f live days)  "
-                "reactor template eff(window) %.3f eff(S1) %.3f  expected at %.0f IBD/day : %.1f\n",
+                "reactor template eff(window) %.3f eff(S1) %.3f  expected at %.2f IBD/day : %.1f\n",
                 chanName[k], winL[k], winH[k], onW, accW, fnW, liWw, candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days, effW, effS1, expPerDay, expW);
          TCanvas *c = new TCanvas(Form("c_win_%s", fileTag[k]), "", 1400, 700);
          c->SetLeftMargin(0.09); c->SetBottomMargin(0.13); c->SetRightMargin(0.03); c->SetGridx(); c->SetGridy();
@@ -576,7 +576,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          lg->AddEntry(box, Form("window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
          lg->AddEntry((TObject *)nullptr, Form("candidates in window = %.1f #pm %.1f  =  %.2f #pm %.2f /day  (%.1f live days)", candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days), "");
          lg->AddEntry(tA, "reactor IBD prompt shape (Mueller 2011 #times #sigma_{IBD}, #sigma_{E}=0.12#sqrt{E}), scaled to window", "l");
-         lg->AddEntry(tB, Form("same shape at %.0f IBD/day : window eff. %.2f #rightarrow %.1f expected  (S1 eff. %.2f)", expPerDay, effW, expW, effS1), "l");
+         lg->AddEntry(tB, Form("same shape at %.2f IBD/day (expected at this baseline) : window eff. %.2f #rightarrow %.1f expected  (S1 eff. %.2f)", expPerDay, effW, expW, effS1), "l");
          lg->AddEntry((TObject *)nullptr, Form("window / expectation = %.1f   (#gg 1 : correlated background survives, add cuts)", expW > 0 ? candW / expW : 0), "");
          lg->Draw();
          //  inset : 창 안 쌍의 Δt
