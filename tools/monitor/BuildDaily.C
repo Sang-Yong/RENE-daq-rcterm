@@ -49,6 +49,8 @@
 #include <TFile.h>
 #include <TH1D.h>
 #include <TF1.h>
+#include <TGraphErrors.h>
+#include <TObjString.h>
 #include <TLegend.h>
 #include <TLine.h>
 #include <TPad.h>
@@ -234,7 +236,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
                 double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst",
-                double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1, double expIbdPerDay = 1.0) {
+                double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1, double expIbdPerDay = 1.0,
+                const char *fnFitRanges = "4.2,7.0,9.6,12.0") {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -391,18 +394,41 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
 
    //  ---- fast-n 규격화 (채널 전체) : 사이드밴드 0차 외삽, 또는 신호창 고에너지 꼬리 ----
    double nFnSide[2] = {0, 0}, nFnUse[2] = {0, 0}; std::string fnHow[2];
+   TH1D *hFnShape[2] = {nullptr, nullptr};          // fast-n prompt 모양 (신호창 안). 0/1 = 평평, 2 = 지수 (2026-09-16)
+   double fnFit[4] = {4.2, 7.0, 9.6, 12.0};         // 모드 2 의 대조 구간 둘 [MeV] : IBD 봉우리(3~4) 와 n-Gd 8 MeV 언덕(7.6~9.4) 을 피한다
+   { TString r(fnFitRanges); TObjArray *t = r.Tokenize(","); for (int i = 0; i < 4 && i < t->GetEntries(); ++i) fnFit[i] = ((TObjString *)t->At(i))->GetString().Atof(); delete t; }
    for (int k = 0; k < 2; ++k) {
       SetChannel(chans[k]); PairWindows w = CurrentPairWindows();
       double s1lo = NpeToMeV(w.s1lo), s1hi = NpeToMeV(w.s1hi);
       long long nSideAll = 0; for (auto &kv : acc[k]) { nSideAll += kv.second.nSide; liveTot[k] += kv.second.live; showerTot[k] += kv.second.nShower; nPsdRejTot[k] += kv.second.nPsdRej; nMuRejTot[k] += kv.second.nMuRej; }
       nFnSide[k] = nSideAll * fnScale[k];
       int bS1 = hP[k][0]->FindBin(s1lo), bS2 = hP[k][0]->FindBin(std::min(s1hi, eHi - 1e-6)); int nbS = std::max(1, bS2 - bS1 + 1);
-      if (fnNormMode == 1) {
+      hFnShape[k] = (TH1D *)hP[k][0]->Clone(Form("fn_shape_%s", fileTag[k])); hFnShape[k]->SetDirectory(nullptr); hFnShape[k]->Reset();
+      if (fnNormMode == 2) {
+         //  on − 우발 의 prompt 를 두 대조 구간에서 A·exp(−E/λ) 로 적합 (빈 오차 = √(on + s²·off)). 기대 IBD 는 대조 구간에서 fast-n 의 ~2 % 라 무시
+         TGraphErrors g; int np = 0;
+         for (int b = bS1; b <= bS2; ++b) {
+            double x = hP[k][0]->GetBinCenter(b);
+            if (!((x >= fnFit[0] && x < fnFit[1]) || (x >= fnFit[2] && x < fnFit[3]))) continue;
+            double on = hP[k][0]->GetBinContent(b), off = hP[k][1]->GetBinContent(b);
+            g.SetPoint(np, x, on - acciScale[k] * off); g.SetPointError(np, 0, std::sqrt(std::max(1.0, on + acciScale[k] * acciScale[k] * off))); np++;
+         }
+         TF1 fexp(Form("fexp_%s", fileTag[k]), "[0]*exp(-x/[1])", s1lo, s1hi);
+         fexp.SetParameters(np > 0 ? g.GetY()[0] : 1.0, 3.0); fexp.SetParLimits(1, 0.3, 100);
+         int rc = -1; if (np >= 3) rc = (int)g.Fit(&fexp, "QN0");
+         double chi2 = fexp.GetChisquare(), lam = fexp.GetParameter(1), elam = fexp.GetParError(1);
+         for (int b = bS1; b <= bS2; ++b) hFnShape[k]->SetBinContent(b, std::max(0.0, fexp.Eval(hFnShape[k]->GetBinCenter(b))));
+         nFnUse[k] = hFnShape[k]->Integral(bS1, bS2);
+         fnHow[k] = TString::Format("exp(-E/%.2f#pm%.2f MeV) fitted to on#minusacc in %.1f-%.1f & %.1f-%.0f MeV (#chi^{2}/ndf %.1f/%d)%s",
+                                    lam, elam, fnFit[0], fnFit[1], fnFit[2], fnFit[3], chi2, std::max(0, np - 2), rc ? " [fit failed]" : "").Data();
+         printf("[FN  ] %s : expo fit lambda %.3f +- %.3f MeV  A %.2f  chi2/ndf %.1f/%d  points %d%s\n", chanName[k], lam, elam, fexp.GetParameter(0), chi2, std::max(0, np - 2), np, rc ? "  [fit failed]" : "");
+      } else if (fnNormMode == 1) {
          int bT1 = hP[k][0]->FindBin(std::max(fnNormLoMev, s1lo)), bT2 = bS2; int nbT = std::max(1, bT2 - bT1 + 1);
          double tail = hP[k][0]->Integral(bT1, bT2) - acciScale[k] * hP[k][1]->Integral(bT1, bT2);
          nFnUse[k] = std::max(0.0, tail) / nbT * nbS;
          fnHow[k] = TString::Format("flat, normalized to the %.1f-%.0f MeV tail of the on-window prompt (acc. subtracted)", std::max(fnNormLoMev, s1lo), s1hi).Data();
-      } else { nFnUse[k] = nFnSide[k]; fnHow[k] = "flat, sideband 0th-order extrapolation"; }
+         for (int b = bS1; b <= bS2; ++b) hFnShape[k]->SetBinContent(b, nFnUse[k] / nbS);
+      } else { nFnUse[k] = nFnSide[k]; fnHow[k] = "flat, sideband 0th-order extrapolation"; for (int b = bS1; b <= bS2; ++b) hFnShape[k]->SetBinContent(b, nFnUse[k] / nbS); }
       printf("[FN  ] %s : sideband %.1f  used %.1f  (%s)  psd-rejected on-pairs %lld  muon-veto-rejected on-pairs %lld\n", chanName[k], nFnSide[k], nFnUse[k], fnHow[k].c_str(), nPsdRejTot[k], nMuRejTot[k]);
    }
 
@@ -412,7 +438,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       SetChannel(chans[k]); PairWindows w = CurrentPairWindows();
       double s1lo = NpeToMeV(w.s1lo), s1hi = std::min(NpeToMeV(w.s1hi), eHi);
       int bS1 = hP[k][0]->FindBin(s1lo), bS2 = hP[k][0]->FindBin(s1hi - 1e-6), bW1 = hP[k][0]->FindBin(winL[k]), bW2 = hP[k][0]->FindBin(std::min(winH[k], eHi) - 1e-6);
-      fnFracW[k] = (bS2 >= bS1) ? (double)std::max(0, std::min(bW2, bS2) - std::max(bW1, bS1) + 1) / (bS2 - bS1 + 1) : 0;
+      fnFracW[k] = hFnShape[k]->Integral(bS1, bS2) > 0 ? hFnShape[k]->Integral(std::max(bW1, bS1), std::min(bW2, bS2)) / hFnShape[k]->Integral(bS1, bS2) : 0;   // 모양(평평/지수)의 창 안 비율
       TH1D *t = (TH1D *)hPli[k][0]->Clone(Form("tmp_li_%d", k)); t->SetDirectory(nullptr); t->Add(hPli[k][1], -1);
       for (int b = 1; b <= t->GetNbinsX(); ++b) if (t->GetBinContent(b) < 0) t->SetBinContent(b, 0);
       liFracW[k] = t->Integral() > 0 ? t->Integral(bW1, bW2) / t->Integral() : 0; delete t;
@@ -452,7 +478,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             std::string runs; for (int r : a.runs) runs += (runs.empty() ? "" : ",") + std::to_string(r);
             //  원자로 참조 신호창 후보 : on − 우발 − fast-n(창 몫) − Li/He(창 몫). 오차는 on/off 통계만
             {
-               double fnDay = fnNormMode == 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k];
+               double fnDay = fnNormMode >= 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k];
                double liDay = a.nLihe > 0 ? a.nLihe : 0;
                a.candW = a.nOnW - acciScale[k] * a.nOffW - fnDay * fnFracW[k] - liDay * liFracW[k];
                a.errW = std::sqrt((double)a.nOnW + acciScale[k] * acciScale[k] * a.nOffW);
@@ -461,7 +487,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
               << a.nOn << '\t' << a.nOff << '\t' << TString::Format("%.2f", nAcci) << '\t' << TString::Format("%.2f", nCand) << '\t'
               << TString::Format("%.2f", err) << '\t' << TString::Format("%.2f", day > 0 ? nCand / day : 0) << '\t'
               << TString::Format("%.2f", day > 0 ? err / day : 0) << '\t' << a.nSide << '\t'
-              << TString::Format("%.2f", fnNormMode == 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k]) << '\t'
+              << TString::Format("%.2f", fnNormMode >= 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k]) << '\t'
               << a.nShower << '\t' << TString::Format("%.2f", a.nLihe) << '\t' << TString::Format("%.2f", a.eLihe) << '\t' << a.liheStat << '\t' << runs
               << '\t' << a.nPsdRej << '\t' << fnNormMode << '\t' << a.nMuRej
               << '\t' << a.nOnW << '\t' << a.nOffW << '\t' << TString::Format("%.2f", a.candW) << '\t' << TString::Format("%.2f", a.errW) << '\t'
@@ -517,9 +543,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       TH1D *pAll = (TH1D *)hP[k][0]->Clone(Form("prompt_%s_all", fileTag[k]));
       TH1D *pSub = (TH1D *)hP[k][0]->Clone(Form("prompt_%s_subtracted", fileTag[k]));
       pSub->Add(hP[k][1], -acciScale[k]);
-      TH1D *pFn = (TH1D *)pAll->Clone(Form("prompt_%s_fastn", fileTag[k])); pFn->Reset();
-      { int b1 = pFn->FindBin(s1lo), b2 = pFn->FindBin(std::min(s1hi, eHi - 1e-6)); int nb = std::max(1, b2 - b1 + 1);
-        for (int b = b1; b <= b2; ++b) pFn->SetBinContent(b, nFn / nb); }
+      TH1D *pFn = (TH1D *)hFnShape[k]->Clone(Form("prompt_%s_fastn", fileTag[k]));   // 평평(모드 0/1) 또는 지수(모드 2), 적분 = nFn
       pSub->Add(pFn, -1);
       TH1D *pLi = (TH1D *)hPli[k][0]->Clone(Form("prompt_%s_lihe_template", fileTag[k])); pLi->Add(hPli[k][1], -1);
       for (int b = 1; b <= pLi->GetNbinsX(); ++b) if (pLi->GetBinContent(b) < 0) pLi->SetBinContent(b, 0);
@@ -535,7 +559,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       if (nLi > 0 && dLi->Integral() > 0) { dLi->Scale(nLi / dLi->Integral()); dSub->Add(dLi, -1); }
       std::vector<std::pair<std::string, double>> parts = {
          {"accidental (off-window #times window ratio)", acciScale[k] * hP[k][1]->Integral()},
-         {fnNormMode == 1 ? "fast-n (flat, tail-normalized)  [prelim]" : "fast-n (sideband, flat)  [prelim]", nFn},
+         {fnNormMode == 2 ? "fast-n (exponential, two-region fit)  [prelim]" : fnNormMode == 1 ? "fast-n (flat, tail-normalized)  [prelim]" : "fast-n (sideband, flat)  [prelim]", nFn},
          {"^{9}Li/^{8}He (daily fits)  [prelim]", nLi}};
       DrawSpectrum(out, Form("%02d_spectrum_prompt_%s", 37 + 2 * k, fileTag[k]),
                    Form("Prompt energy spectrum of all IBD pairs, %s (all days)", chanName[k]), pAll, pSub, parts);

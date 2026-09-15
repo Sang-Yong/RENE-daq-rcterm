@@ -52,7 +52,10 @@ fn_norm_mode   = 0      # fast-n 의 평평한 높이를 무엇으로 정하나.
                         #       포화 사건이라 에너지가 잘려 있고, 새는 뮤온이 섞여 신호창으로 평평하게 외삽하면 과대 추정된다)
                         #   1 = 신호창 안 고에너지 꼬리 [fn_norm_lo_mev, S1 상한] 의 우발 뺀 on-window 쌍 수로 규격화.
                         #       IBD prompt 는 ~8 MeV 에서 끝나므로 그 위는 fast-n (+ Li/He 조금) 뿐이다
+                        #   2 = ★ 지수 모양 (2026-09-16) : on−우발 prompt 를 fn_fit_ranges_mev 의 두 대조 구간에서 A·exp(−E/λ) 로 적합해 신호창 전체에 편다.
+                        #       평평(1)은 3~4 MeV 를 덜 빼고 5~6 MeV 를 더 뺐다 (잔여 +25/−5 빈, §11.203). 대조 구간은 IBD 봉우리(3~4) 와 n-Gd 8 MeV 언덕(7.6~9.4) 을 피한다
 fn_norm_lo_mev = 8.5
+fn_fit_ranges_mev = 4.2,7.0,9.6,12.0   # fn_norm_mode 2 의 대조 구간 둘 (lo1,hi1,lo2,hi2) [MeV]
 mu_veto_us     = 0      # > 150 이면 prompt 가 어느 veto 뮤온이든 그 뒤 이 µs 안일 때 쌍을 버린다 (DST 의 150 µs 를 늘리는 것).
                         #   라이브타임을 exp(−R_μ·(값−150 µs)) 로 줄여 센다. R_μ ≈ 0.8 kHz 라 300 µs 면 12 % 를 더 잃는다
 shower_veto_ms = 0      # > 0 이면 샤워링 뮤온(mu_shower_npe) 뒤 이 ms 안의 쌍을 버린다 (⁹Li/⁸He 직접 제거. Li/He 적합 창 아래끝도 이 값으로)

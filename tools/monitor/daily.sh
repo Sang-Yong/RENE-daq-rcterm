@@ -44,11 +44,12 @@ MUV=$(getp mu_veto_us 0); SHV=$(getp shower_veto_ms 0); DSTSUB=$(getp dst_subdir
 ISOPRE=$(getp daily_iso_pre_us -1); ISOPOST=$(getp daily_iso_post_us -1)
 WINLO=$(getp daily_prompt_lo_mev -1); WINHI=$(getp daily_prompt_hi_mev -1)   # 원자로 참조 신호창 [MeV]. -1 = S1 창 그대로 (2026-09-15)
 EXPIBD=$(getp daily_expected_ibd_per_day 1.0)   # 기대 IBD/day (창 적용 전). tools/reactor/expected_ibd.py 의 EXPECTED_IBD_PER_DAY
+FNFIT=$(getp fn_fit_ranges_mev 4.2,7.0,9.6,12.0)   # fn_norm_mode 2 의 지수 적합 대조 구간 둘 [MeV] (lo1,hi1,lo2,hi2)
 [ -d "$OUT" ] || { echo "출력 디렉터리가 없다 : $OUT (/scratch 마운트 확인)"; exit 1; }
 [ -r "$OUT/run_summary.tsv" ] || { echo "run_summary.tsv 가 없다 (run-summary.sh 먼저)"; exit 1; }
 command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh
 command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
-ARGS="\"$OUT/\", $MU, $LLO, $LHI, $LMIN, $FLO, $FHI, $LFR, $PSDC, $FNM, $FNLO, $MUV, $SHV, \"$DSTSUB\", $ISOPRE, $ISOPOST, $WINLO, $WINHI, $EXPIBD"
+ARGS="\"$OUT/\", $MU, $LLO, $LHI, $LMIN, $FLO, $FHI, $LFR, $PSDC, $FNM, $FNLO, $MUV, $SHV, \"$DSTSUB\", $ISOPRE, $ISOPOST, $WINLO, $WINHI, $EXPIBD, \"$FNFIT\""
 echo "날짜별 : $OUT/daily_summary.tsv · daily_spectra.root · 32..63_*.png   (컷 $CUTS · psd_nsig $PSDC · fn_norm $FNM/$FNLO · mu_veto ${MUV}us · shower_veto ${SHV}ms · dst $DSTSUB · window ${WINLO}-${WINHI} MeV)"
 if [ "$DRY" = 1 ]; then echo "(dry-run) root -l -b -q '$DIR/BuildDaily.C+($ARGS)'"; exit 0; fi
 root -l -b -q "$DIR/BuildDaily.C+($ARGS)"

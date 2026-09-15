@@ -73,7 +73,7 @@ awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 �
 #  ⑤ 추가 컷 · 대안 규격화 (2026-09-14) : monitorcuts 키 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev 가 그대로 넘어가고,
 #     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
 DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
-echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1, -1, -1, 1.0)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst · iso -1/-1 · window -1/-1 · 기대 1.0)" || bad "dry-run 인자" "$DRY"
+echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1, -1, -1, 1.0, "4.2,7.0,9.6,12.0")' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst · iso -1/-1 · window -1/-1 · 기대 1.0 · fn 적합 구간)" || bad "dry-run 인자" "$DRY"
 cp "$TSV" "$T/daily_default.tsv"
 printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
 OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
@@ -102,4 +102,11 @@ awk -v e="$EFFW" 'BEGIN{split(e,a," "); exit !(a[1] > 0.45 && a[1] < 0.80 && a[2
 WON3=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$23} END{print s+0}' "$TSV"); DON3=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); WLO=$(awk -F'\t' '!/^#/ {print $29"-"$30}' "$TSV" | sort -u | tr '\n' ' ')
 [ "$WON3" -le "$DON3" ] && [ "$WLO" = "3.00-7.00 " ] && ok "창 안 on 쌍 $WON3 ≤ 전체 $DON3, win 열 $WLO" || bad "창 열" "on_win $WON3 / $DON3, win $WLO"
 [ -s "$T/out/60_signal_window_nGd.png" ] && [ -s "$T/out/62_daily_rate_window_nGd.png" ] && ok "그림 60 (신호창 검수) · 62 (창 rate)" || bad "그림 60/62 없음"
+#  ⑦ fast-n 지수 적합 (fn_norm_mode 2, 2026-09-16) : [FN] 줄에 lambda 가 나오고 fn_flat 열이 라이브타임 비례로 채워진다
+printf 'fn_norm_mode = 2\nfn_fit_ranges_mev = 4.2,7.0,9.6,12.0\n' > "$T/cuts3.params"
+OUT4=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts3.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC4=$?
+[ "$RC4" -eq 0 ] && ok "fn_norm_mode 2 rc=0" || bad "rc=$RC4" "$(echo "$OUT4" | grep -E 'rror|FATAL' | head -3)"
+echo "$OUT4" | grep -qE '^\[FN  \] n-Gd : expo fit lambda [0-9.]+ \+- [0-9.]+ MeV' && ok "[FN] 지수 적합 줄 (lambda)" || bad "[FN] 지수" "$(echo "$OUT4" | grep 'FN  ')"
+FM=$(awk -F'\t' '!/^#/ {print $21}' "$TSV" | sort -u | tr '\n' ' '); [ "$FM" = "2 " ] && ok "fn_mode 열 = 2" || bad "fn_mode 열 '$FM'"
+[ -s "$T/out/41_bgspec_prompt_nGd.png" ] && ok "그림 41 (지수 fast-n 성분)" || bad "그림 41"
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]
