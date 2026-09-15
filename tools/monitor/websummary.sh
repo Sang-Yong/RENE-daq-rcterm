@@ -18,7 +18,7 @@
 #
 #  순서 : 게이트(완결 런 목록, start_run 부터 연속으로 완결된 것까지만)
 #      -> run-summary.sh -> dst-build.sh -> metrics.sh(빌드)
-#      -> metrics.sh --verify (legacy 인 동안은 불일치해도 경고만)
+#      -> metrics.sh --verify (legacy 인 동안은 불일치해도 경고만. metrics_dst_subdir 이 dst 가 아니면 대조 자체를 건너뛴다)
 #      -> ibd-summary.sh -> rate-trend.sh
 #      -> veto-summary.sh (VETO 패널 반응·veto 계수율. 실패해도 WARN 뿐, 2026-09-09)
 #      -> bg-trend.sh   (실패해도 WARN 뿐)
@@ -324,16 +324,29 @@ if [ "$STAGES_DISABLED" = 1 ]; then
 else
    run_stage "run-summary"   "$MON/run-summary.sh"   --list "$NEWLIST" || exit 1
    run_stage "dst-build"     "$MON/dst-build.sh"     --list "$NEWLIST" || exit 1
-   #  날짜 기준 단계가 강한 veto DST(dst_m<N>/)를 읽도록 돼 있으면 그 판도 같이 만든다 (2026-09-14). 실패해도 발행은 막지 않는다
-   MSUB=$(awk -F= '$1 ~ /^[ \t]*dst_subdir[ \t]*$/ { sub(/^[ \t]+/, "", $2); sub(/[ \t#].*$/, "", $2); v = $2 } END { print v }' "$REPO/config/monitorcuts.params" 2>/dev/null)
-   case "${MSUB:-}" in
-      dst_m[0-9]*) MM=${MSUB#dst_m}; log "[RUN ] dst-build --muon-mode $MM (run $NEWLIST, $MSUB/)"
-                   nice -n 15 ionice -c2 -n7 "$MON/dst-build.sh" --list "$NEWLIST" --muon-mode "$MM" >>"$LOG" 2>&1 \
-                      && log "[OK  ] dst-build --muon-mode $MM" || log "[WARN] dst-build --muon-mode $MM 실패 -- daily 가 그 런을 건너뛴다" ;;
-   esac
+   #  강한 veto DST(dst_m<N>/) : 날짜 기준 단계(dst_subdir) 와 런별 지표(metrics_dst_subdir, 2026-09-15) 가 읽는 판을 같이 만든다.
+   #  런별 지표가 읽는 판은 실패하면 그 런의 지표 행이 영영 비므로 발행을 막는다(run_stage). daily 만 읽는 판은 WARN 만.
+   CUTSFILE=${WEBSUMMARY_MONITORCUTS:-$REPO/config/monitorcuts.params}
+   cutkey() { awk -F= -v k="$1" '$1 ~ "^[ \t]*"k"[ \t]*$" { sub(/^[ \t]+/, "", $2); sub(/[ \t#].*$/, "", $2); v = $2 } END { print v }' "$CUTSFILE" 2>/dev/null; }
+   MSUB=$(cutkey dst_subdir); MMET=$(cutkey metrics_dst_subdir); MMET=${MMET:-dst}
+   for SUB in $(printf '%s\n' "$MMET" "$MSUB" | grep -E '^dst_m[0-9]+$' | sort -u); do
+      MM=${SUB#dst_m}
+      if [ "$SUB" = "$MMET" ]; then
+         run_stage "dst-build-m$MM" "$MON/dst-build.sh" --list "$NEWLIST" --muon-mode "$MM" || exit 1
+      else
+         log "[RUN ] dst-build --muon-mode $MM (run $NEWLIST, $SUB/)"
+         nice -n 15 ionice -c2 -n7 "$MON/dst-build.sh" --list "$NEWLIST" --muon-mode "$MM" >>"$LOG" 2>&1 \
+            && log "[OK  ] dst-build --muon-mode $MM" || log "[WARN] dst-build --muon-mode $MM 실패 -- daily 가 그 런을 건너뛴다"
+      fi
+   done
    run_stage "metrics-build" "$MON/metrics.sh"       --list "$NEWLIST" || exit 1
    run_stage "ibd-summary" "$MON/ibd-summary.sh" --list "$NEWLIST" || exit 1
 
+   if [ "$MMET" != dst ]; then
+      #  런별 지표가 강한 veto DST 를 읽으면 legacy(패널 AND veto, PRD 재독) 와는 뜻이 달라 대조할 수 없다 (2026-09-15)
+      log "[SKIP] metrics-verify : metrics_dst_subdir=$MMET (legacy 페어링은 패널 AND veto 라 DST/legacy 대조가 뜻이 없다). 발행은 계속된다"
+      rm -f "$FAILSTATE.warn" 2>/dev/null
+   else
    #  ---- 게이트 : 이번에 싣는 런만 대조한다 (legacy 행은 방금 ibd-summary 가 만들었다) ----
    log "[RUN ] metrics-verify (run $NEWLIST)"
    nice -n 15 ionice -c2 -n7 "$MON/metrics.sh" --verify-runs "$NEWLIST" >>"$LOG" 2>&1
@@ -373,6 +386,7 @@ else
    else
       log "[OK  ] metrics-verify (전체)"; rm -f "$FAILSTATE.warn" 2>/dev/null
    fi
+   fi   # MMET = dst
    run_stage "rate-trend"  "$MON/rate-trend.sh"                    || exit 1
 
    #  날짜 기준 계산 + 스펙트럼 (daily_summary.tsv · 32~40_*.png, 2026-09-14). 런별 표와 별개. 발행을 막지 않는다 (WARN 만) --

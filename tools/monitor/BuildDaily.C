@@ -43,7 +43,9 @@
 //     **신호창 안의 고에너지 꼬리** [fnNormLoMev, S1 상한] 의 우발 뺀 on-window 쌍 수로 정한다. IBD prompt 는 ~8 MeV 에서
 //     끝나므로 그 위는 fast-n (+ Li/He 조금) 뿐이다. 사이드밴드 값은 대조용으로 범례에 남긴다.
 //   ★예비 표기는 metrics 와 같다 — fast-n · Li/He 는 분석팀 검증 전까지 물리로 읽지 말 것.
+#include <TBox.h>
 #include <TCanvas.h>
+#include <TPad.h>
 #include <TFile.h>
 #include <TH1D.h>
 #include <TF1.h>
@@ -99,11 +101,47 @@ static std::string DayOf(double epoch, double *dayStart = nullptr) {
    return b;
 }
 
+//  원자로 ν̄_e IBD prompt(가시 에너지) 스펙트럼 참조 모양 (2026-09-15, 사용자 지시 "원자로 실험들이 보고한 스펙트럼을 페어링 기준으로").
+//    flux  : Mueller et al., PRC 83, 054615 (2011) Table VI — 동위원소별 exp(Σ α_p E^(p−1)) (order 5). 핵분열 분율은 Daya Bay 평균
+//            (²³⁵U 0.564 · ²³⁸U 0.076 · ²³⁹Pu 0.304 · ²⁴¹Pu 0.056, PRL 116 061801). 4–6 MeV 의 '5 MeV 초과'(RENO PRL 116 211801,
+//            Daya Bay PRL 116 061801, 관측 대비 ~10 %) 는 넣지 않았다 — 창 결정에는 무관하다.
+//    σ_IBD : Vogel–Beacom 0차, ∝ E_e p_e (E_e = E_ν − 1.293 MeV).  E_vis = E_ν − 0.782 MeV (양전자 운동에너지 + 2 m_e).
+//    분해능 : σ(E) = resA·√E [MeV].  resA 0.12 = AmBe run 4221 의 n-H 2.23 MeV 봉우리 σ 0.179 (AnalysisCondition.h) 에 맞춘 값.
+//  모양만 뜻이 있다 (절대 규격화는 부르는 쪽이 한다). 측정된 prompt 스펙트럼은 ~1.5 MeV 에서 시작해 3–4 MeV 에서 최대, 8 MeV 위는 ~1 % 다.
+static void ReactorPromptShape(TH1D *h, double resA = 0.12) {
+   static const double a[4][6] = {{3.217, -3.111, 1.395, -0.3690, 0.04445, -0.002053},      // 235U
+                                  {0.4833, 0.1927, -0.1283, -0.006762, 0.002233, -0.0001536}, // 238U
+                                  {6.413, -7.432, 3.535, -0.8820, 0.1025, -0.004550},        // 239Pu
+                                  {3.251, -3.204, 1.428, -0.3675, 0.04254, -0.001896}};      // 241Pu
+   static const double frac[4] = {0.564, 0.076, 0.304, 0.056};
+   const double me = 0.511, delta = 1.293; const int nf = 1400; const double de = 0.01;
+   std::vector<double> ev(nf, 0.0);
+   for (int i = 0; i < nf; ++i) {
+      double Evis = (i + 0.5) * de, Enu = Evis + 0.782, Ee = Enu - delta;
+      if (Ee <= me) continue;
+      double pe = std::sqrt(Ee * Ee - me * me), flux = 0;
+      for (int k = 0; k < 4; ++k) { double poly = 0, x = 1; for (int q = 0; q < 6; ++q) { poly += a[k][q] * x; x *= Enu; } flux += frac[k] * std::exp(poly); }
+      ev[i] = flux * Ee * pe;
+   }
+   h->Reset();
+   for (int b = 1; b <= h->GetNbinsX(); ++b) {
+      double lo = h->GetBinLowEdge(b), hi = h->GetBinLowEdge(b + 1), sum = 0;
+      for (int i = 0; i < nf; ++i) {
+         if (ev[i] <= 0) continue;
+         double E = (i + 0.5) * de, sg = resA * std::sqrt(E); if (sg <= 0) continue;
+         sum += ev[i] * 0.5 * (std::erf((hi - E) / (sg * M_SQRT2)) - std::erf((lo - E) / (sg * M_SQRT2)));
+      }
+      h->SetBinContent(b, sum);
+   }
+}
+
 struct DayAcc {
    std::string day; double dayStart = 0;
    double live = 0; std::set<int> runs; int nsub = 0;
    long long nOn = 0, nOff = 0, nSide = 0;           // multiplicity 통과 쌍 : on · off · 사이드밴드(on)
    long long nShower = 0, nPsdRej = 0, nMuRej = 0;   // 샤워링 뮤온 수 · PSD 로 버린 on 쌍 · 뮤온 veto 로 버린 on 쌍
+   long long nOnW = 0, nOffW = 0;                     // 그 중 prompt 가 원자로 참조 신호창 [win_lo, win_hi) 안인 쌍 (2026-09-15)
+   double candW = 0, errW = 0;                        // 신호창 후보 (on − 우발 − fast-n − Li/He 의 창 몫) 과 오차. 표·그림 62/63 이 쓴다
    std::vector<double> dtPrev;                       // on 쌍의 직전 샤워링 뮤온까지 dt [s]  (Li/He 적합 표본)
    std::vector<double> dtNext;                       // 역방향 (대조)
    double nLihe = -1, eLihe = -1; std::string liheStat = "-";
@@ -196,7 +234,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                 double liheFitHiS = 10.0, int liheMinCand = 50, double fnELoMev = 12.0, double fnEHiMev = 50.0,
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
                 double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst",
-                double isoPreUs = -1, double isoPostUs = -1) {
+                double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1) {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -231,6 +269,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
    TH1D *hPmuRej[2][2], *hDmuRej[2][2];                                          // 뮤온 veto 로 버린 쌍 (on/off)
    TH1D *hNx[2][2], *hPnx1[2][2], *hPnx2[2][2];                                   // 다중도(창 안 다른 single 수) 분포 · nExtra=1 / >=2 의 prompt (on/off)
    TH1D *hDt[2][2], *hDtLo[2][2];                                                // prompt–delayed Δt (multiplicity 통과, on/off) · prompt < 3 MeV 만
+   TH1D *hDtW[2][2];                                                             // 원자로 참조 신호창 안 쌍의 Δt (on/off)
+   double winL[2] = {0, 0}, winH[2] = {0, 0};                                     // 채널별 신호창 [MeV] (winLoMev/winHiMev < 0 이면 S1 창 그대로)
    for (int k = 0; k < 2; ++k) {
       for (int o = 0; o < 2; ++o) {
          hPsd[k][o] = new TH1D(Form("psd_%s_%s", fileTag[k], o ? "off" : "on"), "", 90, -6, 12); hPsd[k][o]->SetDirectory(nullptr);
@@ -243,7 +283,9 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          hPnx2[k][o] = new TH1D(Form("prompt_%s_nextra2p_%s", fileTag[k], o ? "off" : "on"), "", nbE, eLo, eHi); hPnx2[k][o]->SetDirectory(nullptr);
          { SetChannel(chans[k]); PairWindows wd = CurrentPairWindows();
            hDt[k][o] = new TH1D(Form("dt_%s_%s", fileTag[k], o ? "off" : "on"), "", 50, 0, wd.dtMax); hDt[k][o]->SetDirectory(nullptr);
-           hDtLo[k][o] = new TH1D(Form("dt_%s_elo_%s", fileTag[k], o ? "off" : "on"), "", 50, 0, wd.dtMax); hDtLo[k][o]->SetDirectory(nullptr); }
+           hDtLo[k][o] = new TH1D(Form("dt_%s_elo_%s", fileTag[k], o ? "off" : "on"), "", 50, 0, wd.dtMax); hDtLo[k][o]->SetDirectory(nullptr);
+           hDtW[k][o] = new TH1D(Form("dt_%s_win_%s", fileTag[k], o ? "off" : "on"), "", 25, 0, wd.dtMax); hDtW[k][o]->SetDirectory(nullptr);
+           winL[k] = winLoMev > 0 ? winLoMev : NpeToMeV(wd.s1lo); winH[k] = winHiMev > 0 ? winHiMev : NpeToMeV(wd.s1hi); }
       }
       hDtPrev[k] = new TH1D(Form("dt_prev_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtPrev[k]->SetDirectory(nullptr);
       hDtNext[k] = new TH1D(Form("dt_next_shower_%s", fileTag[k]), "", 200, 0, liheFitHiS); hDtNext[k]->SetDirectory(nullptr);
@@ -328,8 +370,9 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             if (pp > -50) hPsd[k][o]->Fill(std::max(-5.99, std::min(11.99, pp)));
             if (psdCutNsig > 0 && pp > psdCutNsig) { hPpsdRej[k][o]->Fill(e1); hDpsdRej[k][o]->Fill(e2); if (!p.off) a.nPsdRej++; continue; }
             hDt[k][o]->Fill(p.dt_us); if (e1 < 3.0) hDtLo[k][o]->Fill(p.dt_us);
-            if (p.off) { a.nOff++; hP[k][1]->Fill(e1); hD[k][1]->Fill(e2); continue; }
-            a.nOn++; hP[k][0]->Fill(e1); hD[k][0]->Fill(e2);
+            const bool inW = (e1 >= winL[k] && e1 < winH[k]); if (inW) hDtW[k][o]->Fill(p.dt_us);
+            if (p.off) { a.nOff++; if (inW) a.nOffW++; hP[k][1]->Fill(e1); hD[k][1]->Fill(e2); continue; }
+            a.nOn++; if (inW) a.nOnW++; hP[k][0]->Fill(e1); hD[k][0]->Fill(e2);
             double dp = DailyDtShower(p.t1_us, showers, false), dn = DailyDtShower(p.t1_us, showers, true);
             if (dp >= 0) { a.dtPrev.push_back(dp); hDtPrev[k]->Fill(dp); if (dp < 3 * kDailyTauLiS) { hPli[k][0]->Fill(e1); hDli[k][0]->Fill(e2); } }
             if (dn >= 0) { a.dtNext.push_back(dn); hDtNext[k]->Fill(dn); if (dn < 3 * kDailyTauLiS) { hPli[k][1]->Fill(e1); hDli[k][1]->Fill(e2); } }
@@ -363,6 +406,20 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       printf("[FN  ] %s : sideband %.1f  used %.1f  (%s)  psd-rejected on-pairs %lld  muon-veto-rejected on-pairs %lld\n", chanName[k], nFnSide[k], nFnUse[k], fnHow[k].c_str(), nPsdRejTot[k], nMuRejTot[k]);
    }
 
+   //  ---- 원자로 참조 신호창의 배경 몫 (2026-09-15) : fast-n 은 평평이라 창 폭 비율, Li/He 는 초과분 템플릿의 창 안 비율 ----
+   double fnFracW[2] = {0, 0}, liFracW[2] = {0, 0};
+   for (int k = 0; k < 2; ++k) {
+      SetChannel(chans[k]); PairWindows w = CurrentPairWindows();
+      double s1lo = NpeToMeV(w.s1lo), s1hi = std::min(NpeToMeV(w.s1hi), eHi);
+      int bS1 = hP[k][0]->FindBin(s1lo), bS2 = hP[k][0]->FindBin(s1hi - 1e-6), bW1 = hP[k][0]->FindBin(winL[k]), bW2 = hP[k][0]->FindBin(std::min(winH[k], eHi) - 1e-6);
+      fnFracW[k] = (bS2 >= bS1) ? (double)std::max(0, std::min(bW2, bS2) - std::max(bW1, bS1) + 1) / (bS2 - bS1 + 1) : 0;
+      TH1D *t = (TH1D *)hPli[k][0]->Clone(Form("tmp_li_%d", k)); t->SetDirectory(nullptr); t->Add(hPli[k][1], -1);
+      for (int b = 1; b <= t->GetNbinsX(); ++b) if (t->GetBinContent(b) < 0) t->SetBinContent(b, 0);
+      liFracW[k] = t->Integral() > 0 ? t->Integral(bW1, bW2) / t->Integral() : 0; delete t;
+      printf("[WIN ] %s : reactor-referenced prompt window [%.2f, %.2f) MeV  (S1 window %.2f-%.2f)  fast-n share %.3f  Li/He template share %.3f\n",
+             chanName[k], winL[k], winH[k], s1lo, NpeToMeV(w.s1hi), fnFracW[k], liFracW[k]);
+   }
+
    //  ---- 날짜별 Li/He 적합 + 표 ----
    double nLiheTot[2] = {0, 0};
    {
@@ -371,7 +428,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
            "# 날짜는 이 PC 의 지역시 자정 기준. live_s 는 서브런을 등분해 날짜에 나눠 붙인 값. rate 는 [/day] = 후보/live.\n"
            "# ★예비 : fast-n(0차 외삽) · Li/He(Daya Bay Eq.2, 표본 " << liheMinCand << " 미만이면 lowstat) 는 분석팀 검증 전.\n"
            "#date\ttag\tlive_s\tn_run\tn_subrun\tn_ibd\tn_ibd_acci\tacci_scaled\tn_cand\tcand_err\trate_per_day\trate_err"
-           "\tn_fn_side\tfn_flat\tn_shower\tn_lihe\te_lihe\tlihe_stat\truns\tn_psd_rej\tfn_mode\tn_mu_rej\n";
+           "\tn_fn_side\tfn_flat\tn_shower\tn_lihe\te_lihe\tlihe_stat\truns\tn_psd_rej\tfn_mode\tn_mu_rej"
+           "\tn_on_win\tn_off_win\tn_cand_win\tcand_win_err\trate_win\trate_win_err\twin_lo_mev\twin_hi_mev\n";
       for (int k = 0; k < 2; ++k) {
          SetChannel(chans[k]); std::string tag = ChannelTag(chans[k]).Data();
          for (auto &kv : acc[k]) {
@@ -392,13 +450,23 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                } else a.liheStat = "nofit";
             }
             std::string runs; for (int r : a.runs) runs += (runs.empty() ? "" : ",") + std::to_string(r);
+            //  원자로 참조 신호창 후보 : on − 우발 − fast-n(창 몫) − Li/He(창 몫). 오차는 on/off 통계만
+            {
+               double fnDay = fnNormMode == 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k];
+               double liDay = a.nLihe > 0 ? a.nLihe : 0;
+               a.candW = a.nOnW - acciScale[k] * a.nOffW - fnDay * fnFracW[k] - liDay * liFracW[k];
+               a.errW = std::sqrt((double)a.nOnW + acciScale[k] * acciScale[k] * a.nOffW);
+            }
             o << a.day << '\t' << tag << '\t' << TString::Format("%.1f", a.live) << '\t' << a.runs.size() << '\t' << a.nsub << '\t'
               << a.nOn << '\t' << a.nOff << '\t' << TString::Format("%.2f", nAcci) << '\t' << TString::Format("%.2f", nCand) << '\t'
               << TString::Format("%.2f", err) << '\t' << TString::Format("%.2f", day > 0 ? nCand / day : 0) << '\t'
               << TString::Format("%.2f", day > 0 ? err / day : 0) << '\t' << a.nSide << '\t'
               << TString::Format("%.2f", fnNormMode == 1 ? (liveTot[k] > 0 ? nFnUse[k] * a.live / liveTot[k] : 0) : a.nSide * fnScale[k]) << '\t'
               << a.nShower << '\t' << TString::Format("%.2f", a.nLihe) << '\t' << TString::Format("%.2f", a.eLihe) << '\t' << a.liheStat << '\t' << runs
-              << '\t' << a.nPsdRej << '\t' << fnNormMode << '\t' << a.nMuRej << '\n';
+              << '\t' << a.nPsdRej << '\t' << fnNormMode << '\t' << a.nMuRej
+              << '\t' << a.nOnW << '\t' << a.nOffW << '\t' << TString::Format("%.2f", a.candW) << '\t' << TString::Format("%.2f", a.errW) << '\t'
+              << TString::Format("%.2f", day > 0 ? a.candW / day : 0) << '\t' << TString::Format("%.2f", day > 0 ? a.errW / day : 0) << '\t'
+              << TString::Format("%.2f", winL[k]) << '\t' << TString::Format("%.2f", winH[k]) << '\n';
          }
       }
    }
@@ -429,6 +497,12 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                        Form("IBD candidates per calendar day, %s (accidental subtracted)", chanName[k]), "Candidates / day", vc, "", o);
          DrawTrendPage(nopdf, out, Form("%02d_daily_rate_%s", 35 + k, fileTag[k]),
                        Form("IBD candidate rate per calendar day, %s (= candidates / live time)", chanName[k]), "Rate [/day]", vr, "", o);
+         //  62·63 원자로 참조 신호창 [win_lo, win_hi) 의 후보 rate (배경 전부 뺀 뒤). 기대는 이 거리에서 ≲ 1 /day × 창 효율
+         TrendSeries sw; sw.label = Form("%s, prompt %.1f-%.1f MeV, all bg subtracted", chanName[k], winL[k], winH[k]); sw.color = sr.color; sw.marker = sr.marker;
+         for (auto &kv : acc[k]) { const DayAcc &a = kv.second; if (a.live <= 0) continue; double day = a.live / 86400.0; sw.add(a.dayStart + 43200, a.candW / day, a.errW / day); }
+         std::vector<TrendSeries> vw{sw}; TrendPageOpt ow; ow.logInset = false;
+         DrawTrendPage(nopdf, out, Form("%02d_daily_rate_window_%s", 62 + k, fileTag[k]),
+                       Form("Candidate rate per day in the reactor-referenced prompt window %.1f-%.1f MeV, %s (acc., fast-n, Li/He subtracted)", winL[k], winH[k], chanName[k]), "Rate [/day]", vw, "", ow);
       }
    }
 
@@ -467,6 +541,68 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                    Form("Prompt energy spectrum of all IBD pairs, %s (all days)", chanName[k]), pAll, pSub, parts);
       DrawSpectrum(out, Form("%02d_spectrum_delayed_%s", 38 + 2 * k, fileTag[k]),
                    Form("Delayed energy spectrum of all IBD pairs, %s (all days)", chanName[k]), dAll, dSub, parts);
+      //  ---- 60·61 원자로 참조 신호창 검수 (2026-09-15) : 배경 뺀 prompt 스펙트럼 위에 원자로 IBD prompt 참조 모양과 창을 겹치고,
+      //       창 안 후보의 통계를 이 거리에서의 기대(≲ 1 /day × 창 효율)와 나란히 둔다. inset 은 창 안 쌍의 Δt (상관이면 exp, 우발이면 평평)
+      {
+         long long onW = 0, offW = 0; double liveW = 0, candW = 0, liW = 0;
+         for (auto &kv : acc[k]) { const DayAcc &a = kv.second; if (a.live <= 0) continue; onW += a.nOnW; offW += a.nOffW; liveW += a.live; candW += a.candW; if (a.nLihe > 0) liW += a.nLihe; }
+         double accW = acciScale[k] * offW, fnW = nFn * fnFracW[k], liWw = liW * liFracW[k], errW = std::sqrt((double)onW + acciScale[k] * acciScale[k] * offW);
+         double days = liveW / 86400.0;
+         TH1D *tpl = (TH1D *)pSub->Clone(Form("prompt_%s_reactor_template", fileTag[k])); ReactorPromptShape(tpl);
+         int bW1 = tpl->FindBin(winL[k]), bW2 = tpl->FindBin(std::min(winH[k], eHi) - 1e-6), bS1 = tpl->FindBin(s1lo), bS2 = tpl->FindBin(std::min(s1hi, eHi) - 1e-6);
+         double effW = tpl->Integral() > 0 ? tpl->Integral(bW1, bW2) / tpl->Integral() : 0, effS1 = tpl->Integral() > 0 ? tpl->Integral(bS1, bS2) / tpl->Integral() : 0;
+         const double expPerDay = 1.0;                       // 사용자 기대 : 이 거리에서 하루 ~1 개 (검출기 전체, 컷 전)
+         double expW = expPerDay * days * effW;
+         TH1D *tA = (TH1D *)tpl->Clone(Form("prompt_%s_reactor_scaled", fileTag[k]));   // 창 안 후보 수로 규격화 (모양 비교)
+         if (tpl->Integral(bW1, bW2) > 0) tA->Scale(std::max(candW, errW) / tpl->Integral(bW1, bW2));
+         TH1D *tB = (TH1D *)tpl->Clone(Form("prompt_%s_reactor_expected", fileTag[k]));  // 1 IBD/day 기대로 규격화
+         if (tpl->Integral() > 0) tB->Scale(expPerDay * days / tpl->Integral());
+         printf("[WIN ] %s : window %.1f-%.1f MeV  on %lld  acc %.1f  fast-n %.1f  Li/He %.1f  -> cand %.1f +- %.1f  (%.2f +- %.2f /day over %.1f live days)  "
+                "reactor template eff(window) %.3f eff(S1) %.3f  expected at %.0f IBD/day : %.1f\n",
+                chanName[k], winL[k], winH[k], onW, accW, fnW, liWw, candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days, effW, effS1, expPerDay, expW);
+         TCanvas *c = new TCanvas(Form("c_win_%s", fileTag[k]), "", 1400, 700);
+         c->SetLeftMargin(0.09); c->SetBottomMargin(0.13); c->SetRightMargin(0.03); c->SetGridx(); c->SetGridy();
+         TH1D *r = (TH1D *)pSub->Clone(Form("prompt_%s_residual_draw", fileTag[k]));
+         r->SetTitle(Form("Signal-window audit, %s : prompt after all subtractions vs reactor IBD prompt shape;Prompt energy [MeV];Pairs / %.2f MeV", chanName[k], r->GetBinWidth(1)));
+         r->SetStats(0); r->SetLineColor(kRed + 1); r->SetLineWidth(3); r->SetFillStyle(0);
+         tA->SetLineColor(kBlue + 1); tA->SetLineWidth(2); tB->SetLineColor(kGreen + 2); tB->SetLineWidth(2); tB->SetLineStyle(2);
+         double ymax = std::max({r->GetMaximum(), tA->GetMaximum(), tB->GetMaximum()}), ymin = std::min(0.0, r->GetMinimum());
+         r->SetMinimum(ymin * 1.1 - 1); r->SetMaximum(ymax * 1.45 + 1); r->GetXaxis()->SetTitleSize(0.045); r->GetYaxis()->SetTitleSize(0.045);
+         r->Draw("HIST");
+         TBox *box = new TBox(winL[k], ymin * 1.1 - 1, std::min(winH[k], eHi), ymax * 1.45 + 1); box->SetFillColorAlpha(kGray + 1, 0.18); box->SetLineColor(kGray + 2); box->Draw("SAME");
+         r->Draw("HIST SAME"); tA->Draw("HIST SAME"); tB->Draw("HIST SAME");
+         TLegend *lg = new TLegend(0.38, 0.56, 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.026);
+         lg->AddEntry(r, Form("prompt after acc./fast-n/Li-He subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
+         lg->AddEntry(box, Form("reactor-referenced prompt window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
+         lg->AddEntry((TObject *)nullptr, Form("candidates in window = %.1f #pm %.1f  =  %.2f #pm %.2f /day  (%.1f live days)", candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days), "");
+         lg->AddEntry(tA, Form("reactor IBD prompt shape (Mueller 2011 flux #times #sigma_{IBD}, #sigma_{E}=0.12#sqrt{E}), scaled to the window candidates"), "l");
+         lg->AddEntry(tB, Form("same shape at %.0f IBD/day (expectation at this baseline) : window eff. %.2f #rightarrow %.1f expected, S1-window eff. %.2f", expPerDay, effW, expW, effS1), "l");
+         lg->AddEntry((TObject *)nullptr, Form("window / expectation = %.1f  (#gg 1 means correlated background survives : add cuts)", expW > 0 ? candW / expW : 0), "");
+         lg->Draw();
+         //  inset : 창 안 쌍의 Δt
+         TPad *pin = new TPad(Form("pin_win_%s", fileTag[k]), "", 0.12, 0.50, 0.40, 0.88); pin->SetFillColor(kWhite); pin->SetBorderSize(1); pin->Draw(); pin->cd();
+         pin->SetLeftMargin(0.16); pin->SetBottomMargin(0.18); pin->SetRightMargin(0.03); pin->SetTopMargin(0.10);
+         TH1D *don = (TH1D *)hDtW[k][0]->Clone(Form("dt_%s_win_on_draw", fileTag[k])); TH1D *dof = (TH1D *)hDtW[k][1]->Clone(Form("dt_%s_win_off_draw", fileTag[k])); dof->Scale(acciScale[k]);
+         don->SetTitle(Form("#Deltat of window pairs;#Deltat [#mus];pairs / %.0f #mus", don->GetBinWidth(1))); don->SetStats(0); don->SetLineColor(kBlack); don->SetLineWidth(2);
+         dof->SetLineColor(kBlue + 1); dof->SetLineStyle(2); dof->SetLineWidth(2); don->SetMinimum(0); don->SetMaximum(std::max(don->GetMaximum(), dof->GetMaximum()) * 1.3 + 1);
+         don->GetXaxis()->SetTitleSize(0.07); don->GetYaxis()->SetTitleSize(0.07); don->GetXaxis()->SetLabelSize(0.06); don->GetYaxis()->SetLabelSize(0.06); don->GetXaxis()->SetTitleOffset(1.1);
+         don->Draw("HIST"); dof->Draw("HIST SAME");
+         double nCorrW = 0;
+         if (don->Integral() >= 10) {
+            double flat = dof->Integral() / don->GetNbinsX(), bw = don->GetBinWidth(1);
+            TF1 *fw = new TF1(Form("fdtw_%s", fileTag[k]), "[0] + [1]*exp(-x/[2])", w.dtMin, w.dtMax);
+            fw->SetParameters(flat, don->GetBinContent(1), kDailyTauGdUs); fw->FixParameter(0, flat); fw->FixParameter(2, kDailyTauGdUs); fw->SetParLimits(1, 0, 1e6);
+            don->Fit(fw, "QRLN0"); fw->SetLineColor(kRed + 1); fw->SetLineWidth(2); fw->Draw("SAME");
+            nCorrW = fw->GetParameter(1) * kDailyTauGdUs * (std::exp(-w.dtMin / kDailyTauGdUs) - std::exp(-w.dtMax / kDailyTauGdUs)) / bw;
+            TLegend *l2 = new TLegend(0.35, 0.62, 0.97, 0.89); l2->SetBorderSize(0); l2->SetFillStyle(0); l2->SetTextSize(0.055);
+            l2->AddEntry(don, Form("on  N=%.0f", don->Integral()), "l"); l2->AddEntry(dof, Form("acc (scaled)  N=%.1f", dof->Integral()), "l");
+            l2->AddEntry(fw, Form("flat(fixed)+exp(#tau=%.0f#mus) : corr %.0f", kDailyTauGdUs, nCorrW), "l"); l2->Draw();
+            printf("[WIN ] %s : window pairs dt fit (flat fixed to acc, tau %.0f us fixed) : correlated %.1f\n", chanName[k], kDailyTauGdUs, nCorrW);
+         }
+         c->cd();
+         c->Print(out + Form("%02d_signal_window_%s.png", 60 + k, fileTag[k]));
+         tpl->SetDirectory(fs); tA->SetDirectory(fs); tB->SetDirectory(fs); hDtW[k][0]->SetDirectory(fs); hDtW[k][1]->SetDirectory(fs);
+      }
       //  ---- 배경 성분별 스펙트럼 (41~44) 와 신호창 분해 (45~48) ----
       TH1D *pAcc = (TH1D *)hP[k][1]->Clone(Form("prompt_%s_accidental_scaled", fileTag[k])); pAcc->Scale(acciScale[k]);
       TH1D *dAcc = (TH1D *)hD[k][1]->Clone(Form("delayed_%s_accidental_scaled", fileTag[k])); dAcc->Scale(acciScale[k]);
@@ -683,5 +819,5 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
              chanName[k], pAll->Integral(), acciScale[k] * hP[k][1]->Integral(), nFn, nLi, pSub->Integral(), dSub->Integral());
    }
    fs->Close();
-   printf("[SAVED] %sdaily_spectra.root + %s32..58_*.png\n", out.Data(), out.Data());
+   printf("[SAVED] %sdaily_spectra.root + %s32..63_*.png\n", out.Data(), out.Data());
 }

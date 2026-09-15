@@ -23,7 +23,8 @@
 //                 실측 분리력이 약해(FoM 0.5) 사건별 컷이 아니라 **추이**로 본다
 //
 //  무엇을 읽나
-//     <OutDir>/dst/DST_<NNNNNN>.root   (BuildMonitorDst.C 산출물, schema 1 또는 2)
+//     <OutDir>/<dstSub>/DST_<NNNNNN>.root   (BuildMonitorDst.C 산출물, schema 1 또는 2. dstSub 기본 dst = 분석 코드의 패널 AND veto,
+//                                        dst_m2 = 강한 veto — monitorcuts.params 의 metrics_dst_subdir, 2026-09-15 사용자 지시)
 //                                      T_Singles(evt_id/sub_id/t_us/pe[/psd])
 //                                      T_Sat(sub_id/t_us/pe)        schema 2 만
 //                                      T_Muons(sub_id/t_us/pe/sat)
@@ -376,7 +377,7 @@ static bool LinearExtrap(const std::vector<double> &promptMev, double lo, double
 static void Impl(const std::vector<int> &runs, const TString &out,
                  double muShowerNpe, double liheFitLoS, double liheFitHiS,
                  int liheMinCand, double fnELoMev, double fnEHiMev,
-                 double liheLiFrac, double psdNsig, bool force, const TString &ibdOvr) {
+                 double liheLiFrac, double psdNsig, bool force, const TString &ibdOvr, const char *dstSub) {
    TString tsvPath = out + "metrics_summary.tsv";
 
    bool schemaOld = false;
@@ -385,7 +386,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
       printf("[WARN] 기존 metrics_summary.tsv 가 옛 스키마다. 버리고 새로 만든다.\n");
    }
    printf("[INFO] 기존 metrics_summary : %zu 행 (%s)\n", rows.size(), tsvPath.Data());
-   printf("[INFO] 입력 : %sdst/DST_<run>.root\n", out.Data());
+   printf("[INFO] 입력 : %s%s/DST_<run>.root\n", out.Data(), dstSub);
 
    std::map<int, std::string> rtype = LoadRunTypes(out + "runtype.tsv");
    printf("[INFO] 선원 정보를 아는 런 : %zu 개 (runtype.tsv)\n", rtype.size());
@@ -410,7 +411,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
          SetChannel(ch);
          if (!rows.count(RowKey(run, ChannelTag(ch).Data()))) haveAll = false;
       }
-      TString dst = out + TString::Format("dst/DST_%s.root", ReneRunStr(run).Data());
+      TString dst = out + TString::Format("%s/DST_%s.root", dstSub, ReneRunStr(run).Data());
       bool stale = false;
       if (!force && haveAll) {
          double rowLive = -1;
@@ -682,7 +683,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
 void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
                   double liheFitLoS, double liheFitHiS, int liheMinCand,
                   double fnELoMev, double fnEHiMev, double liheLiFrac, double psdNsig,
-                  bool force = false, const char *ibdOverrides = "") {
+                  bool force = false, const char *ibdOverrides = "", const char *dstSub = "dst") {
    TString out(outDir);
    if (!out.EndsWith("/")) out += "/";
    if (gSystem->mkdir(out, kTRUE) != 0 && gSystem->AccessPathName(out, kWritePermission)) {
@@ -701,5 +702,5 @@ void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
    TString ovr = ibdOverrides ? ibdOverrides : "";
    ovr = ovr.Strip(TString::kBoth);
    Impl(runs, out, muShowerNpe, liheFitLoS, liheFitHiS, liheMinCand,
-        fnELoMev, fnEHiMev, liheLiFrac, psdNsig, force, ovr);
+        fnELoMev, fnEHiMev, liheLiFrac, psdNsig, force, ovr, dstSub);
 }

@@ -56,12 +56,12 @@ RON=$(sed -n 's/.*on=\([0-9]*\).*/\1/p' "$T/cnt.txt"); ROFF=$(sed -n 's/.*off=\(
 DON=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); DOFF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$7} END{print s+0}' "$TSV")
 [ "$DON" = "$RON" ] && [ "$DOFF" = "$ROFF" ] && ok "★ 날짜별 IBD/우발 합 = 런별 PairAndCountW (on $RON, off $ROFF)" || bad "쌍 개수 불일치" "daily on=$DON off=$DOFF / run on=$RON off=$ROFF"
 #  ③ 산출물
-N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-8]_*.png 2>/dev/null | wc -l)
-[ "$N" -eq 27 ] && ok "그림 32~58 스물일곱 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2 · 다중도 2 · 모양 대조 2 · Δt 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
+N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-8]_*.png "$T/out"/6[0-3]_*.png 2>/dev/null | wc -l)
+[ "$N" -eq 31 ] && ok "그림 32~63 서른한 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2 · 다중도 2 · 모양 대조 2 · Δt 2 · 신호창 검수 2 · 창 rate 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
 echo "$OUT" | grep -qE '^\s*\[DT  \] n-Gd all : tau [0-9.]+ us' && ok "[DT] 줄 : Δt 적합" || bad "[DT] 줄" "$(echo "$OUT" | grep 'DT  ')"
 echo "$OUT" | grep -qE '^\s*\[MULT\] n-Gd : N\(0\)=[0-9.]+ N\(1\)=' && ok "[MULT] 줄 : 다중도 N(0)·N(1)·N(2) 와 포아송 외삽" || bad "[MULT] 줄" "$(echo "$OUT" | grep MULT)"
-head -5 "$TSV" | grep -q $'\tn_psd_rej\tfn_mode\tn_mu_rej$' && ok "표 머리에 n_psd_rej · fn_mode · n_mu_rej 열" || bad "표 머리" "$(grep '^#date' "$TSV")"
-FM=$(awk -F'\t' '!/^#/ {print $(NF-1)}' "$TSV" | sort -u | tr '\n' ' ')
+head -5 "$TSV" | grep -q $'\tn_psd_rej\tfn_mode\tn_mu_rej\tn_on_win\tn_off_win\tn_cand_win\tcand_win_err\trate_win\trate_win_err\twin_lo_mev\twin_hi_mev$' && ok "표 머리에 n_psd_rej · fn_mode · n_mu_rej + 신호창 8 열" || bad "표 머리" "$(grep '^#date' "$TSV")"
+FM=$(awk -F'\t' '!/^#/ {print $21}' "$TSV" | sort -u | tr '\n' ' ')
 [ "$FM" = "0 " ] && ok "기본은 fn_mode 0 (사이드밴드) · PSD 컷 끔" || bad "fn_mode 열 '$FM'"
 [ -s "$T/out/daily_spectra.root" ] && ok "daily_spectra.root" || bad "스펙트럼 파일 없음"
 #  ④ 픽스처의 뮤온 상관 쌍(런당 500) 은 Li/He 적합이 잡아 빼고, 시간 무관 쌍(런당 1000, on-window 라 우발로는 안 빠진다) 이 남는다.
@@ -73,20 +73,33 @@ awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 �
 #  ⑤ 추가 컷 · 대안 규격화 (2026-09-14) : monitorcuts 키 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev 가 그대로 넘어가고,
 #     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
 DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
-echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst)" || bad "dry-run 인자" "$DRY"
+echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1, -1, -1)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst · iso -1/-1 · window -1/-1)" || bad "dry-run 인자" "$DRY"
 cp "$TSV" "$T/daily_default.tsv"
 printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
 OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
 [ "$RC2" -eq 0 ] && ok "PSD 컷 + 꼬리 규격화 rc=0" || bad "rc=$RC2" "$(echo "$OUT2" | grep -E 'rror|FATAL' | head -3)"
 echo "$OUT2" | grep -qE '^\[FN  \] n-Gd : sideband [0-9.]+  used [0-9.]+  \(flat, normalized to the 8.5-12 MeV tail' && ok "[FN] 줄 : 꼬리 규격화 문구" || bad "[FN] 줄" "$(echo "$OUT2" | grep FN)"
-FM=$(awk -F'\t' '!/^#/ {print $(NF-1)}' "$TSV" | sort -u | tr '\n' ' ')
+FM=$(awk -F'\t' '!/^#/ {print $21}' "$TSV" | sort -u | tr '\n' ' ')
 [ "$FM" = "1 " ] && ok "fn_mode 열 = 1" || bad "fn_mode 열 '$FM'"
-NR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$(NF-2)+$NF} END{print s+0}' "$TSV")
+NR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$20+$22} END{print s+0}' "$TSV")
 awk -v x="$NR" 'BEGIN{exit !(x >= 0 && x < 2998)}' && ok "PSD·뮤온 veto 로 버린 on 쌍 수가 표에 있다 ($NR, 합성 자료라 뜻은 없다)" || bad "n_psd_rej+n_mu_rej $NR"
-MR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$NF} END{print s+0}' "$TSV")
+MR=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$22} END{print s+0}' "$TSV")
 [ "$MR" -gt 0 ] && ok "뮤온 veto 300 µs 가 실제로 쌍을 버린다 ($MR)" || bad "n_mu_rej $MR"
 LV=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%.2f", s}' "$TSV"); SUMF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$3} END{printf "%.2f", s}' "$T/daily_default.tsv")
 awk -v a="$LV" -v b="$SUMF" 'BEGIN{exit !(a+0 < b+0)}' && ok "늘린 veto 만큼 라이브타임이 준다 ($LV < $SUMF; 픽스처 뮤온 0.2 Hz 라 차이는 작다)" || bad "라이브타임 보정" "$LV vs $SUMF"
 DON2=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV")
 [ "$((DON2 + NR))" = "$RON" ] && ok "★ on 쌍 = 남은 것 + PSD·뮤온 veto 로 버린 것 ($DON2 + $NR = $RON)" || bad "컷 회계" "on $DON2 + rej $NR != $RON"
+#  ⑥ 원자로 참조 신호창 (2026-09-15) : daily_prompt_lo/hi_mev 가 넘어가고, 창 안 쌍 수 ≤ 전체, 창 밖으로 두면 창 열 = 전체, 그림 60~63 과 [WIN] 줄
+WON=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$23} END{print s+0}' "$TSV"); DON3=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV")
+[ "$WON" = "$DON3" ] && ok "창을 안 주면 n_on_win = n_ibd ($WON)" || bad "창 기본값" "n_on_win $WON vs n_ibd $DON3"
+printf 'daily_prompt_lo_mev = 3.0\ndaily_prompt_hi_mev = 7.0\n' > "$T/cuts2.params"
+OUT3=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts2.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC3=$?
+[ "$RC3" -eq 0 ] && ok "신호창 3.0-7.0 rc=0" || bad "rc=$RC3" "$(echo "$OUT3" | grep -E 'rror|FATAL' | head -3)"
+echo "$OUT3" | grep -qE '^\[WIN \] n-Gd : window 3.0-7.0 MeV  on [0-9]+  acc [0-9.]+  fast-n [0-9.]+  Li/He [0-9.]+  -> cand -?[0-9.]+ \+- [0-9.]+ .* reactor template eff\(window\) 0\.[0-9]+ eff\(S1\) 0\.[0-9]+' \
+   && ok "[WIN] 줄 : 창 통계 + 템플릿 효율" || bad "[WIN] 줄" "$(echo "$OUT3" | grep 'WIN ')"
+EFFW=$(echo "$OUT3" | sed -n 's/.*eff(window) \([0-9.]*\) eff(S1) \([0-9.]*\).*/\1 \2/p' | head -1)
+awk -v e="$EFFW" 'BEGIN{split(e,a," "); exit !(a[1] > 0.45 && a[1] < 0.80 && a[2] > 0.90)}' && ok "원자로 템플릿 효율 : 3-7 MeV 0.45~0.80, 1.2-12 MeV > 0.90 ($EFFW)" || bad "템플릿 효율 $EFFW"
+WON3=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$23} END{print s+0}' "$TSV"); DON3=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); WLO=$(awk -F'\t' '!/^#/ {print $29"-"$30}' "$TSV" | sort -u | tr '\n' ' ')
+[ "$WON3" -le "$DON3" ] && [ "$WLO" = "3.00-7.00 " ] && ok "창 안 on 쌍 $WON3 ≤ 전체 $DON3, win 열 $WLO" || bad "창 열" "on_win $WON3 / $DON3, win $WLO"
+[ -s "$T/out/60_signal_window_nGd.png" ] && [ -s "$T/out/62_daily_rate_window_nGd.png" ] && ok "그림 60 (신호창 검수) · 62 (창 rate)" || bad "그림 60/62 없음"
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]

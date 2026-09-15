@@ -60,3 +60,9 @@ dst_subdir     = dst    # 4d(daily.sh) 가 읽을 DST 폴더. dst = 분석 코�
                         #   veto PMT 하나라도 트리거 또는 S_ADC > 50 이면 뮤온, 150 µs 데드). websummary 가 새 런마다 같은 판을 만든다
 daily_iso_pre_us  = -1  # 4d 만. > 0 이면 multiplicity 창(prompt 앞 / delayed 뒤)을 이 µs 로. 기본 -1 = AnalysisCondition.h 의 200/400 (n-H 600/1000).
 daily_iso_post_us = -1  #   다중중성자 가족을 더 걸러내려면 1000/1000 쯤 (single 88 Hz × 2 ms ≈ 16 % 손실). 효과는 그림 53~56 으로 본다
+metrics_dst_subdir = dst   # 런별 지표(metrics.sh → metrics_summary.tsv, 추이 18~28·59, 웹 표)가 읽을 DST 폴더. dst_m2 로 두면 런별도 강한 veto
+                        #   (2026-09-15 사용자 지시). dst 가 아니면 legacy(PRD 재독, 패널 AND veto) 와의 대조(--verify) 는 뜻이 없어 건너뛴다
+daily_prompt_lo_mev = -1   # 4d 만. 원자로 참조 신호창 [MeV] : 후보 수(n_cand_win · rate_win, 그림 60~63)를 이 prompt 창으로 센다. -1 = S1 창(1.2~12).
+daily_prompt_hi_mev = -1   #   근거 : 원자로 ν̄ IBD prompt 스펙트럼(Daya Bay PRL 116 061801 · RENO PRL 116 211801)은 3~4 MeV 에서 최대, 8 MeV 위는 ~1 %.
+                        #   실측 잔여 '신호' 는 1.2~2.8 MeV(n-H 2.2 MeV 포획 γ + 그 Compton) 와 7.6~9.4 MeV(n-Gd 8 MeV) 에만 있고 3~7 MeV 는 비어 있다
+                        #   = 두 중성자 가족. 3.0 / 7.0 으로 두면 그 둘을 창 밖으로 내고 IBD 효율 ~0.6 을 남긴다 (템플릿 효율은 그림 60/61 에 찍힌다)

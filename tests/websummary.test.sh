@@ -70,6 +70,7 @@ mk_fake_mon() {
       cat > "$mon/$s" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s %s %s\n' "$(date '+%s.%N')" "$(basename "$0")" "$*" >> "${WS_TEST_CALLS:-/dev/null}"
+case " $* " in *" --muon-mode "*) exit "${WS_TEST_DSTM_RC:-0}" ;; esac
 exit 0
 FAKE
       chmod +x "$mon/$s"
@@ -514,10 +515,34 @@ if [ "$RC14" -eq 0 ] && [ "$SLR14" = "4280" ] && [ "$W14" -eq 2 ] && [ "${N14:-0
 CHK old_run_warn_notify_once=1"; else R="$R
 CHK old_run_warn_notify_once=0"; echo "[13b] 진단 : rc=$RC14 last_run=[$SLR14] warn=$W14 notify=$N14 heal=$HL14"; cat "$T/14/log"; cat "$T/14/notify" 2>/dev/null; fi
 
+# ==== [15] 런별 지표가 강한 veto DST 를 읽는다 (metrics_dst_subdir=dst_m2, 2026-09-15) : mode-2 빌드는 발행을 막는 단계,
+#           legacy 대조(--verify-runs / --verify) 는 건너뛴다. 빌드가 실패하면 exit 1 + 알림 ===
+mkdir -p "$T/15/tsv" "$T/15/mon"; mk_fake_mon "$T/15/mon"; seed_pngs "$T/15/tsv"
+mkrun "$T/15/RAW" 004280 3 3
+mkparams "$T/15/params" "$T/15/tsv" 4280 0; sed -i 's/metrics_source = legacy/metrics_source = dst/' "$T/15/params"
+printf 'dst_subdir = dst_m2   # daily\nmetrics_dst_subdir = dst_m2\n' > "$T/15/cuts"
+run15() { WEBSUMMARY_ROOTS="$T/15/RAW" WEBSUMMARY_LOCK="$T/15/.lock" WEBSUMMARY_STATE="$T/15/state" WEBSUMMARY_LOG="$T/15/log" \
+   WEBSUMMARY_MON_DIR="$T/15/mon" WEBSUMMARY_NOTIFY="$T/15/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/15/failstate" WEBSUMMARY_MONITORCUTS="$T/15/cuts" \
+   WS_TEST_CALLS="$T/15/calls" WS_TEST_NOTIFY="$T/15/notify" WS_TEST_VERIFY_RUNS_RC=1 WS_TEST_VERIFY_RC=1 "$@" "$SUT" --params "$T/15/params" >/dev/null 2>&1; }
+run15 env; RC15=$?
+SLR15=$(awk -F= '$1=="last_run"{print $2}' "$T/15/state" 2>/dev/null)
+M15=$(grep -c 'dst-build.sh --list 4280 --muon-mode 2' "$T/15/calls"); V15=$(grep -c -- '--verify' "$T/15/calls"); S15=$(grep -c '\[SKIP\] metrics-verify' "$T/15/log")
+MB15=$(grep -c 'metrics.sh --list 4280' "$T/15/calls")
+if [ "$RC15" -eq 0 ] && [ "$SLR15" = "4280" ] && [ "$M15" -eq 1 ] && [ "$V15" -eq 0 ] && [ "$S15" -eq 1 ] && [ "$MB15" -eq 1 ]; then R="$R
+CHK metrics_dst_m2_skips_verify=1"; else R="$R
+CHK metrics_dst_m2_skips_verify=0"; echo "[15] 진단 : rc=$RC15 last_run=[$SLR15] m2build=$M15 verify=$V15 skip=$S15 metrics=$MB15"; cat "$T/15/log"; fi
+rm -f "$T/15/state" "$T/15/calls" "$T/15/log" "$T/15/notify" "$T/15/failstate"
+run15 env WS_TEST_DSTM_RC=3; RC15b=$?
+SLR15b=$(awk -F= '$1=="last_run"{print $2}' "$T/15/state" 2>/dev/null); MB15b=$(grep -c 'metrics.sh --list' "$T/15/calls"); N15b=$(grep -c dst-build-m2 "$T/15/notify" 2>/dev/null || echo 0)
+if [ "$RC15b" -ne 0 ] && [ -z "$SLR15b" ] && [ "$MB15b" -eq 0 ] && [ "${N15b:-0}" -ge 1 ]; then R="$R
+CHK metrics_dst_m2_build_fail_blocks=1"; else R="$R
+CHK metrics_dst_m2_build_fail_blocks=0"; echo "[15b] 진단 : rc=$RC15b last_run=[$SLR15b] metrics=$MB15b notify=$N15b"; cat "$T/15/log"; cat "$T/15/notify" 2>/dev/null; fi
+
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
          publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny \
-         gate_new_runs_notify_once gate_after_ibd old_run_selfheal_no_block old_run_warn_notify_once; do
+         gate_new_runs_notify_once gate_after_ibd old_run_selfheal_no_block old_run_warn_notify_once \
+         metrics_dst_m2_skips_verify metrics_dst_m2_build_fail_blocks; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -526,4 +551,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (16/16)"
+echo "PASS websummary (18/18)"

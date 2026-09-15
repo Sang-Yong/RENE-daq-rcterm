@@ -66,6 +66,7 @@ FN_E_LO_MEV=$(getp fn_e_lo_mev 12.0)
 FN_E_HI_MEV=$(getp fn_e_hi_mev 50.0)
 LIHE_LI_FRAC=$(getp lihe_li_frac 1.0)
 PSD_NSIG=$(getp psd_nsig 3.0)
+METRICS_DSTSUB=$(getp metrics_dst_subdir dst)   # 런별 지표가 읽을 DST 폴더. dst = 패널 AND veto(legacy 와 같다) · dst_m2 = 강한 veto (2026-09-15)
 [ -n "$(getp fn_tag_s "")" ] && echo "[WARN] fn_tag_s 는 v2 에서 쓰지 않는다. 무시한다 ($CUTS)"
 
 #  IBD 컷 오버라이드 : 기본값이 없다. params 에 있는 것만 모은다
@@ -83,6 +84,10 @@ done
    exit 1; }
 
 verify() {
+   if [ "$METRICS_DSTSUB" != dst ]; then
+      echo "[VERIFY] metrics_dst_subdir=$METRICS_DSTSUB : legacy(pair_summary) 는 패널 AND veto 라 대조가 뜻이 없다 -- 건너뛴다 (불일치 0 으로 본다)"
+      return 0
+   fi
    local mfile pfile
    mfile="$OUT/metrics_summary.tsv"
    pfile="$OUT/pair_summary.tsv"
@@ -117,10 +122,10 @@ if [ -n "$LIST" ]; then
    [ -d "$OUT" ] || { echo "출력 디렉터리가 없다 : $OUT (/scratch 마운트 확인)"; exit 1; }
    command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh
    command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
-   echo "지표  : $OUT/metrics_summary.tsv   런 : $LIST"
+   echo "지표  : $OUT/metrics_summary.tsv   런 : $LIST   DST : $OUT/$METRICS_DSTSUB/"
    if [ -r "$CUTS" ]; then echo "컷    : $CUTS"; else echo "컷    : 기본값 ($CUTS 없음)"; fi
    [ -n "$IBD_OVR" ] && echo "★ IBD 오버라이드 : $IBD_OVR  (--verify 는 거부된다)"
-   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $LIHE_LI_FRAC, $PSD_NSIG, $FORCE, \"$IBD_OVR\""
+   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $LIHE_LI_FRAC, $PSD_NSIG, $FORCE, \"$IBD_OVR\", \"$METRICS_DSTSUB\""
    if [ "$DRY" = 1 ]; then
       echo "(dry-run) root -l -b -q '$DIR/BuildMetrics.C+($ARGS)'"
    else
