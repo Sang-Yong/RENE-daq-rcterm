@@ -934,6 +934,10 @@ adc_excl_channels`, `[ADC ]` 로그 줄. 실측 4237 sub 3000 : mode 0 single 5,
 재생성 `/Data_ssd/LOG/m2-rebuild.sh` (24 런 + 대조 4345, 3 병렬 `--force`, 약 9 h) → 끝나면 metrics·bg/rate-trend·daily 를 다시 만들고 웹에 복사한다.
 **그 전까지 위 ③ 의 수치(1.8 ± 0.6 /day 등)는 4313 이후 런이 주도한 값이고, 6~8 월 런의 몫은 과소다** — 재생성 뒤 다시 읽을 것 (`m2-rebuild.log` 의 [WIN] 줄).
 시험 : websummary 18 · monitor-daily 28 · monitor-metrics(4346) · monitor-dst 9.
+**밟은 것 둘 (재생성 배치)** — ① 병렬 워커 셋이 같은 `BuildMonitorDst.C` 를 동시에 ACLiC 컴파일해 `_dict.cxx` 를 서로 지워 셋 다 4 초 만에 죽었다 →
+**병렬로 띄우기 전에 `dst-build.sh --list 999999 --muon-mode 2` 한 번으로 .so 를 먼저 만들 것.** ② `dst-build.sh --force` 는 DST 만 다시 쓰고
+**서브런 캐시(cache_m<N>/)는 그대로 읽는다** (`캐시 1440 / 새로 0`). 파형부터 다시 만들려면 그 런의 캐시 파일을 치워야 한다 —
+24 런 28,117 개(9.7 GB)를 `/scratch/RunSummary/cache_m2.noguard-20260915/` 로 옮겨 두고 다시 띄웠다 (15:5x). 확인이 끝나면 지워도 된다.
 
 #### 11.199 ★★ 문턱 80 % 데이터(run 4347)로 그림 58 장을 다 그려 본 결과와 코드 개선 (사용자 지시, 09-15 04:1x ~ 05:xx)
 
