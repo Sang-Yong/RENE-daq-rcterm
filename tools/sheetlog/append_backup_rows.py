@@ -232,6 +232,11 @@ def main():
     no = max(nos) if nos else 0
 
     new = []; new_labels = []
+    if a.fill_labels:                                 # ★ 먼저 옛 기록의 하드부터 시간순으로 정본에 올린다 (번호가 처음 담은 순서가 되게)
+        for r in recs:
+            lab, fresh = label_for(r, a.disks_tsv, a.disks_md, commit=a.commit)
+            if fresh:
+                print(f"[LABEL] 새 하드 {r['serial']} -> {lab} ({r.get('cat', '') or '?'}) -- 정본에 적었다. 스티커 : {lab} / {r['serial']}")
     for r in recs:
         if r["ts"] <= last_ts:
             continue
@@ -250,10 +255,6 @@ def main():
     # ---- 빈 라벨 채우기 (--fill-labels) : 정본에 있는 시리얼/UUID 의 빈 Disk Label 칸만. 다른 칸은 안 건드린다 ----
     fills = []
     if a.fill_labels:
-        for r in recs:                                    # 기록에 나온 모든 하드를 정본에 올린다 (옛 세션의 하드도)
-            lab, fresh = label_for(r, a.disks_tsv, a.disks_md, commit=a.commit)
-            if fresh:
-                print(f"[LABEL] 새 하드 {r['serial']} -> {lab} ({r.get('cat', '') or '?'}) -- 정본에 적었다. 스티커 : {lab} / {r['serial']}")
         labels = backup_labels.labels_of(backup_labels.load_rows(a.disks_tsv))
         for i, row in enumerate(grid):
             if i == 0 or len(row) <= 16 or row[12].strip():
