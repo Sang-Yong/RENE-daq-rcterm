@@ -20,6 +20,8 @@
     * --sheet-tsv 를 주면 구글 대신 그 TSV 를 읽고(기존 행) 거기에 덧붙인다 -- 시험용. 네트워크에 닿지 않는다.
 """
 import argparse, glob, os, re, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import backup_labels   # noqa: E402  라벨 정본 (docs/backup-disks/disks.tsv). 새 시리얼은 여기서 자동으로 번호를 받는다 (2026-09-16)
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
 GID = 219954027                       # 탭 back_up_hdd_log
@@ -124,7 +126,21 @@ def type_of(r):
     return f"{r['mode']}·{c.upper()}" if c in ("raw", "prd") else r["mode"]
 
 
-def make_row(no, r, uuid_mount, mounted, srcdirs):
+def label_for(r, disks_tsv, disks_md, commit):
+    """행의 하드 라벨. 정본에 있으면 그것, 시리얼이 있는 새 하드면 종류(raw/prd)의 다음 번호를 정본에 적는다. commit=False 면 예상만."""
+    if not (r.get("serial") or r.get("uuid")):
+        return "", False
+    cap = ""
+    if r.get("capkb"):
+        try: cap = f"{int(r['capkb']) / 1073741824:.2f} TB"
+        except ValueError: pass
+    if not r.get("serial"):                       # UUID 만 아는 옛 기록 : 정본에 있을 때만 (새 번호를 UUID 에 주지 않는다 -- 스캔 때 시리얼로 받는다)
+        return backup_labels.labels_of(backup_labels.load_rows(disks_tsv)).get(r["uuid"], ""), False
+    return backup_labels.ensure_label(r["serial"], r.get("uuid", ""), r.get("model", ""), r.get("cat", ""), r["ts"], cap=cap,
+                                      path=disks_tsv, md_path=disks_md, commit=commit)
+
+
+def make_row(no, r, uuid_mount, mounted, srcdirs, label=""):
     date, tm = (r["ts"].split(" ") + [""])[:2]
     mount = r["mount"] or uuid_mount.get(r["uuid"], "")
     lo, hi = subrun_of(r["first"]), subrun_of(r["last"])
@@ -155,7 +171,7 @@ def make_row(no, r, uuid_mount, mounted, srcdirs):
         notes += "; full move recorded from backup_log.txt (not in index) — file count/size not available"
     dest = f"{mount}/RENE_data_backup/{r['run']}" if mount else ""
     return [str(no), date, tm, r["run"], type_of(r), r["files"], gb(r["bytes"]), rng, r["first"], r["last"],
-            left, status, "", mount, r["uuid"], r["model"], r["serial"], cap, dest,
+            left, status, label, mount, r["uuid"], r["model"], r["serial"], cap, dest,
             "count+bytes" if r["files"] else "", deleted, "", "code9", "", notes]
 
 
@@ -177,6 +193,9 @@ def main():
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--creds", default="")
     ap.add_argument("--backup-dir", default="/Data_ssd/LOG/backup-sheetlog")
+    ap.add_argument("--disks-tsv", default=backup_labels.DISKS_TSV, help="라벨 정본 (읽고, 새 하드면 붙인다)")
+    ap.add_argument("--disks-md", default=backup_labels.DISKS_MD)
+    ap.add_argument("--fill-labels", action="store_true", help="이미 있는 행 중 Disk Label 이 빈 것을 정본으로 채운다 (우리 탭이라 허용)")
     a = ap.parse_args()
 
     recs = parse_index(read_lines(a.index))
@@ -212,7 +231,7 @@ def main():
     nos = [int(r[0]) for r in body if r and r[0].strip().isdigit()]
     no = max(nos) if nos else 0
 
-    new = []
+    new = []; new_labels = []
     for r in recs:
         if r["ts"] <= last_ts:
             continue
@@ -220,19 +239,48 @@ def main():
         if key in have:
             continue
         no += 1
-        new.append(make_row(no, r, uuid_mount, mounted, srcdirs))
+        lab, fresh = label_for(r, a.disks_tsv, a.disks_md, commit=a.commit)
+        if fresh:
+            new_labels.append((r["serial"], lab, r.get("cat", "")))
+        new.append(make_row(no, r, uuid_mount, mounted, srcdirs, lab))
         have.add(key)
+    for serial, lab, cat in new_labels:
+        print(f"[LABEL] 새 하드 {serial} -> {lab} ({cat or '?'}) -- 정본 {a.disks_tsv} 에 적었다. 스티커 : {lab} / {serial}")
+
+    # ---- 빈 라벨 채우기 (--fill-labels) : 정본에 있는 시리얼/UUID 의 빈 Disk Label 칸만. 다른 칸은 안 건드린다 ----
+    fills = []
+    if a.fill_labels:
+        for r in recs:                                    # 기록에 나온 모든 하드를 정본에 올린다 (옛 세션의 하드도)
+            lab, fresh = label_for(r, a.disks_tsv, a.disks_md, commit=a.commit)
+            if fresh:
+                print(f"[LABEL] 새 하드 {r['serial']} -> {lab} ({r.get('cat', '') or '?'}) -- 정본에 적었다. 스티커 : {lab} / {r['serial']}")
+        labels = backup_labels.labels_of(backup_labels.load_rows(a.disks_tsv))
+        for i, row in enumerate(grid):
+            if i == 0 or len(row) <= 16 or row[12].strip():
+                continue
+            lab = labels.get(row[16].strip()) or labels.get(row[14].strip())
+            if lab:
+                fills.append((i + 1, lab, row[16].strip() or row[14].strip()))
+        print(f"[FILL] 빈 Disk Label {len(fills)} 칸을 채운다" + (f" : " + ", ".join(sorted({f'{s}->{l}' for _, l, s in fills})) if fills else ""))
 
     print(f"[INFO] 시트 기존 {len(body)} 행 (마지막 {last_ts or '-'}) · 서버 기록 {len(recs)} 건 · 새 행 {len(new)}")
     for row in new:
         print("  " + " | ".join(row[:8]) + f" | {row[13]} {row[16]} | {row[11]}")
-    if not new:
+    if not new and not fills:
         return 0
     if not a.commit:
         print("[DRY] --commit 이 없어 쓰지 않는다")
         return 0
 
     if a.sheet_tsv:
+        if fills:
+            lines = load_sheet_tsv(a.sheet_tsv)
+            for rowno, lab, _ in fills:
+                lines[rowno - 1][12] = lab
+            with open(a.sheet_tsv, "w", encoding="utf-8") as fh:
+                for row in lines:
+                    fh.write("\t".join(row) + "\n")
+            print(f"[SHEET-TSV] Disk Label {len(fills)} 칸 채움 -> {a.sheet_tsv}")
         with open(a.sheet_tsv, "a", encoding="utf-8") as fh:
             for row in new:
                 fh.write("\t".join(row) + "\n")
@@ -244,7 +292,13 @@ def main():
     with open(bak, "w", encoding="utf-8") as fh:
         for r in grid:
             fh.write("\t".join(r) + "\n")
-    ws.append_rows(new, value_input_option="RAW")
+    if fills:
+        ws.batch_update([{"range": f"M{rowno}", "values": [[lab]]} for rowno, lab, _ in fills], value_input_option="RAW")
+        for rowno, lab, _ in fills:                      # 되대조 기준도 같이 고친다 (그 칸만 바뀌어야 한다)
+            grid[rowno - 1][12] = lab
+        print(f"[SHEET] Disk Label {len(fills)} 칸 채움")
+    if new:
+        ws.append_rows(new, value_input_option="RAW")
     after = ws.get_all_values()
     kept = [r for r in after[:len(grid)]]
     if [[c.strip() for c in x] for x in kept] != [[c.strip() for c in x] for x in grid]:

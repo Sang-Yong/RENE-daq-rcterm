@@ -3,7 +3,7 @@
 #  backup-sheetlog.sh - 저장소 서버의 외장하드 백업 기록을 구글시트 back_up_hdd_log 탭에 자동 등재한다.
 #
 #  사용 :
-#     backup-sheetlog.sh [--dry-run] [--status] [--no-notify]
+#     backup-sheetlog.sh [--dry-run] [--status] [--no-notify] [--fill-labels]
 #
 #  어떻게 (2026-09-12, 사용자 지시)
 #     저장소 서버에는 인터넷이 없다 (§11.144). 그래서 메일 큐와 같은 방향으로, 이 PC 가
@@ -39,6 +39,7 @@ while [ $# -gt 0 ]; do
       --dry-run)   DRY=1; shift ;;
       --status)    STATUS=1; shift ;;
       --no-notify) NONOTIFY=1; shift ;;
+      --fill-labels) FILL=1; shift ;;      # 이미 있는 행의 빈 Disk Label 을 라벨 정본으로 채운다 (2026-09-16)
       -h|--help)   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *) echo "모르는 옵션 : $1" >&2; exit 0 ;;
    esac
@@ -98,6 +99,7 @@ if [ "${SESS_PID:-}" != "${PREV_PID:-}" ]; then
 fi
 
 ARGS=(--index "$T/index" --log "$T/log" --mounts "$T/mounts" --source-dirs "$T/srcdirs")
+[ "${FILL:-0}" -eq 1 ] && ARGS+=(--fill-labels)
 [ "$DRY" -eq 1 ] || ARGS+=(--commit)
 out=$(cd "$DIR" && timeout 600 python3 "$TOOL" "${ARGS[@]}" 2>&1); rc=$?
 printf '%s\n' "$out" | grep -E '^\[' | while read -r l; do log "$l"; done

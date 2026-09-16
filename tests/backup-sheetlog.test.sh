@@ -3,6 +3,7 @@
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd); TOOL=$DIR/tools/sheetlog/append_backup_rows.py
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+export BACKUP_DISKS_TSV="$T/disks.tsv" BACKUP_DISKS_MD="$T/disks.md"     # 라벨 정본은 임시 파일 (실제 docs/ 를 건드리지 않는다)
 PASS=0; FAIL=0; ok(){ PASS=$((PASS+1)); echo "  ✅ $1"; }; bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; [ $# -gt 1 ] && echo "       $2"; }
 chk(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "기대 '$3' / 실제 '$2'"; fi; }
 col(){ awk -F'\t' -v r="$2" -v c="$3" 'NR==r{print $c}' "$1"; }
@@ -134,4 +135,35 @@ grep -q '종료 : \[Sun Sep 13 02:00:00' "$NOTIFY_CALLS" && ok "세션 뒤의 co
 grep -q 'st -ge \\$mt' "$DIR/scripts/backup-sheetlog.sh" && ok "★ 판 판정은 세션 시작 시각 vs 파일 mtime (내용을 읽지 않는다)" || bad "내용으로 판정한다 (제자리 덮어쓰기에 오판)"
 [ ! -e "$T/../backup-sheetlog.state" ] && ok "state 는 환경변수로 준 자리에만 쓴다" || bad "state 가 엉뚱한 곳에"
 
+echo "[L] 라벨 자동 부여 (2026-09-16) : 새 시리얼은 parts_index 의 종류로 다음 번호를 받아 정본에 적히고 Disk Label 열에 실린다"
+printf "$H\n" > "$T/sheetL.tsv"
+printf 'Z4ZBZE7F\tRENE-RAW-004\tZ4ZBZE7F\tST2000DM006-2DM164\t\tU-7F\t1.8 TB\t2026-09-15 00:20:00\t2026-09-15 10:32:00\t\t\t\t\tseed\n' > "$T/disks.tsv"
+cat > "$T/indexL" <<'IDX'
+002600	U-3M	2026-09-16 16:20:00	40	3000000000	FADC_002600.root.00000	SADC_002600.root.00019	part	/backup_hdd	ST2000DM006-2DM164	Z4ZBZE3M	1953514584	raw
+002600	U-7F	2026-09-15 00:30:00	40	3000000000	FADC_002600.root.00000	SADC_002600.root.00019	part	/backup_hdd	ST2000DM006-2DM164	Z4ZBZE7F	1953514584	raw
+002601	U-5Y	2026-09-17 03:00:00	20	1000000000	PNG/a.png	PRD/Run002601_DLY_THR.log	full	/backup_hdd_2	ST2000DM006-2DM164	Z4ZBXG5Y	1953514584	prd
+002602	U-OLD	2026-09-14 00:00:00	5	100	FADC_002602.root.00000	SADC_002602.root.00004
+IDX
+outL=$(python3 "$TOOL" --index "$T/indexL" --sheet-tsv "$T/sheetL.tsv" 2>&1)
+printf '%s' "$outL" | grep -q 'Z4ZBZE3M -> RENE-RAW-005' && ok "미리보기 : 새 RAW 하드는 RAW-005 (정본의 RAW-004 다음)" || bad "RAW-005" "$(printf '%s' "$outL" | grep LABEL)"
+printf '%s' "$outL" | grep -q 'Z4ZBXG5Y -> RENE-PRD-001' && ok "미리보기 : PRD 하드는 PRD-001 (정본에 PRD 가 없으므로)" || bad "PRD-001" "$(printf '%s' "$outL" | grep LABEL)"
+chk "미리보기는 정본을 안 건드린다" "$(wc -l < "$T/disks.tsv")" "1"
+python3 "$TOOL" --index "$T/indexL" --sheet-tsv "$T/sheetL.tsv" --commit >/dev/null 2>&1
+chk "정본 3 줄 (seed + RAW-005 + PRD-001)" "$(grep -vc '^#' "$T/disks.tsv")" "3"
+chk "정본 Z4ZBZE3M 라벨" "$(awk -F'\t' '$1=="Z4ZBZE3M"{print $2}' "$T/disks.tsv")" "RENE-RAW-005"
+chk "시트 행의 Disk Label (Z4ZBZE7F = 정본 그대로)" "$(awk -F'\t' '$17=="Z4ZBZE7F"{print $13}' "$T/sheetL.tsv" | sort -u)" "RENE-RAW-004"
+chk "시트 행의 Disk Label (Z4ZBXG5Y)" "$(awk -F'\t' '$17=="Z4ZBXG5Y"{print $13}' "$T/sheetL.tsv")" "RENE-PRD-001"
+chk "UUID 만 아는 옛 기록에는 새 번호를 주지 않는다" "$(awk -F'\t' '$15=="U-OLD"{print "["$13"]"}' "$T/sheetL.tsv")" "[]"
+[ -s "$T/disks.md" ] && grep -q 'RENE-RAW-005' "$T/disks.md" && ok "BACKUP-DISKS.md 재생성" || bad "md"
+python3 "$TOOL" --index "$T/indexL" --sheet-tsv "$T/sheetL.tsv" --commit >/dev/null 2>&1
+chk "두 번 돌려도 정본 그대로 (번호 불변)" "$(grep -vc '^#' "$T/disks.tsv")" "3"
+echo "[M] --fill-labels : 이미 있는 행의 빈 Disk Label 을 정본으로 채운다 (다른 칸은 그대로)"
+printf "$H\n" > "$T/sheetM.tsv"
+printf '1\t2026-09-15\t00:30:00\t002600\tpart·RAW\t40\t3.0\t\tFADC_002600.root.00000\tSADC_002600.root.00019\t\t\t\t/backup_hdd\tU-7F\tST2000DM006-2DM164\tZ4ZBZE7F\t1.8 TB\t\tcount+bytes\tmoved files only\t\tcode9\tLAB-A\tauto\n' >> "$T/sheetM.tsv"
+printf '2\t2026-09-15\t00:40:00\t002600\tpart·RAW\t40\t3.0\t\tFADC_002600.root.00000\tSADC_002600.root.00019\t\t\t\t/backup_hdd\tU-ZZ\tST2000DM006-2DM164\tZZZZZZZZ\t1.8 TB\t\tcount+bytes\tmoved files only\t\tcode9\t\tauto\n' >> "$T/sheetM.tsv"
+outM=$(python3 "$TOOL" --index "$T/indexL" --sheet-tsv "$T/sheetM.tsv" --fill-labels --commit 2>&1)
+chk "1 행 라벨 채움" "$(col "$T/sheetM.tsv" 2 13)" "RENE-RAW-004"
+chk "정본에 없는 시리얼은 비워 둔다" "[$(col "$T/sheetM.tsv" 3 13)]" "[]"
+chk "다른 칸(Storage Location)은 그대로" "$(col "$T/sheetM.tsv" 2 24)" "LAB-A"
+printf '%s' "$outM" | grep -q 'FILL\] 빈 Disk Label 1 칸' && ok "[FILL] 줄" || bad "[FILL]" "$(printf '%s' "$outM" | grep FILL)"
 echo; echo "=========================================================="; printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"; echo "=========================================================="; [ "$FAIL" -eq 0 ]
