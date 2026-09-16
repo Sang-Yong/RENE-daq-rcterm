@@ -96,6 +96,22 @@ def touch_last(key, last_ts, path=DISKS_TSV):
         write_rows(rows, path)
 
 
+def update_stats(stats, path=DISKS_TSV, md_path=DISKS_MD):
+    """stats : key -> (runs, files, gb, last_ts). 정본의 runs/files/GB/last_ts 를 기록 합으로 채운다 (스캔 값이 있으면 큰 쪽을 남긴다). 라벨은 안 건드린다."""
+    rows = load_rows(path); hit = False
+    for r in rows:
+        st = stats.get(r[0])
+        if not st:
+            continue
+        runs, files, gb, last = st
+        new = [str(max(int(r[9] or 0), runs)), str(max(int(r[10] or 0), files)), f"{max(float(r[11] or 0), gb):.1f}", max(r[8], last or "")]
+        if new != [r[9], r[10], r[11], r[8]]:
+            r[9], r[10], r[11], r[8] = new; hit = True
+    if hit:
+        write_rows(rows, path); regen_md(path, md_path)
+    return hit
+
+
 def regen_md(path=DISKS_TSV, md_path=DISKS_MD):
     rows = load_rows(path)
     md = ["# 외장하드 백업 — 하드 목록과 라벨\n",

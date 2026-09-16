@@ -25,6 +25,11 @@ description: Use when working on the RENE DAQ data archive to USB disks on the s
 
 `RENE-<종류>-NNN` · 종류 = **RAW**(최상위 FADC·SADC 만) · **PRD**(PRD·PNG 만) · **MERGED**(Merged 만, 재처리 캐시) · **ALL**(섞임, 나누기 전 옛 하드).
 번호는 종류별로 처음 담은 날짜 순. **한 번 준 라벨은 `disks.tsv` 에 남아 바뀌지 않는다** — 도구가 지키고, 사람이 고치면 그것이 이긴다.
+**★ 2026-09-16 부터 라벨은 자동이다** — 매시 37 분 cron(`backup-sheetlog.sh` → `append_backup_rows.py`)이 parts_index 에 새 시리얼이 보이면
+그 종류(raw/prd)의 다음 번호를 `tools/sheetlog/backup_labels.py` 로 정본에 적고 시트의 Disk Label 열에 실으며, `[LABEL]` 줄과 메일로 알린다.
+(그 전에는 `rebuild --scan` 을 사람이 돌려야만 라벨이 붙어 09-15 의 두 장이 108 행 빈 라벨로 남았다.) 빈 라벨을 나중에 채우려면
+`scripts/backup-sheetlog.sh --fill-labels`, 아직 안 담은 하드에 번호를 미리 주려면 `python3 tools/sheetlog/backup_labels.py --reserve <시리얼> <모델> <raw|prd>`.
+정본은 **운영 디렉터리의** `docs/backup-disks/disks.tsv` 가 바뀌므로, 바뀌면 work 클론에 복사해 커밋하고 운영 쪽은 `git checkout -- docs` 뒤 pull.
 시리얼은 `udevadm info --query=property --name=/dev/sdX` 의 `ID_SERIAL_SHORT` (lsblk 의 `RANDOM__…` 은 USB 브리지 값, 쓰지 말 것).
 스티커에는 라벨 + 시리얼을 함께 적는다.
 

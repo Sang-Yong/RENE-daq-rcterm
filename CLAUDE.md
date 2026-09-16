@@ -891,6 +891,35 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.204 ★★ 백업 5 회차 시작 + 라벨이 자동으로 안 붙던 이유와 수정 (사용자 지시, 09-16 16:0x)
+
+사용자 : "새 하드 두 장 마운트했다. 백업 시작. 백업 로그를 확인·갱신하고, 라벨이 제대로 안 적힌 것 같으니 기록을 면밀히 검토해 통합적·체계적으로
+라벨링하라 — 그 기록대로 스티커를 붙이겠다. 자동 기록이 안 된 이유도 파악해 고쳐라."
+
+**상태 (16:0x)** — 4 회차(09-15 00:17 ~ 20:48)는 RAW 하드 Z4ZBZE7F · PRD 하드 Z4ZBZEBA 가 가득 차 code=3 으로 끝났고(남은 런 RAW 1,630 · PRD 1,378),
+시트에는 그 회차의 108 행이 **Disk Label 이 빈 채** 붙어 있었다. 새 하드 : /backup_hdd = Z4ZBZE3M (sdb1) · /backup_hdd_2 = Z4ZBXG5Y (sdc1), 둘 다 비어 있고
+`RENE_data_backup` 이 frontend 소유(쓰기 가능). 5 회차를 같은 사슬로 띄웠다 : `backup_raw_then_prd.sh` (16:13, RAW → 끝나면 PRD), 첫 런 002529 부터 50 MB/s.
+
+**★ 라벨이 안 붙은 이유** — 라벨을 주는 코드가 `rebuild_backup_sheet.py --scan` 에만 있었다. 매시 cron(`append_backup_rows.py`)은 행을 붙이면서
+'Disk Label' 을 사람 열로 보고 비워 두었고, 하드를 꽂을 때마다 사람이 `--scan` 을 돌려야만 정본(`disks.tsv`)에 번호가 생겼다. 09-15 의 두 장은 아무도
+스캔하지 않았다. 즉 **기록은 자동이었지만 라벨은 수동이었다.**
+**고침 (commit aa59486 · a309e19 + 후속)** — `tools/sheetlog/backup_labels.py`(정본 읽기 · `ensure_label` 자동 부여 · `--reserve` 예약 · `update_stats` ·
+`regen_md`) 를 두고, `append_backup_rows.py` 가 새 시리얼을 보면 parts_index 의 종류(raw/prd)로 **그 자리에서 다음 번호를 주고** Disk Label 에 싣는다
+(`[LABEL]` 줄 → cron 로그·메일). UUID 만 아는 옛 기록에는 새 번호를 주지 않는다(스캔 때 시리얼로). `--fill-labels` 가 이미 있는 행의 빈 칸을 정본으로
+채운다(우리 탭, 그 칸만 batch_update, 되대조). 정본의 런 수·파일·GB·마지막 시각도 기록 합으로 채운다. 시험 backup-sheetlog 45 → 60.
+실행 : `backup-sheetlog.sh --fill-labels` → 정본에 RAW-004 (Z4ZBZE7F) · PRD-003 (Z4ZBZEBA) · RAW-005 (Z4ZBZE3M, 5 회차 첫 행) 추가, 시트 108 칸 채움 + 1 행.
+`--reserve Z4ZBXG5Y … prd` → **PRD-004** (베이 2, PRD 세션이 시작되면 그대로 쓴다).
+**★ 밟은 것** — `--dry-run` 은 정본을 안 쓰므로 새 하드 셋이 전부 '다음 번호'로 같게 보인다(RAW-004 가 둘). 실제 실행은 시간순으로 번호가 갈린다.
+그리고 fill 모드에서 옛 기록의 하드를 새 행보다 **먼저** 올려야 번호가 처음 담은 순서가 된다 (첫 판은 오늘 하드가 RAW-004 를 받을 뻔했다).
+
+**라벨 체계 (스티커, 정본 `docs/BACKUP-DISKS.md` 32 장)** — `RENE-<종류>-NNN` + 시리얼. 종류는 담은 것(RAW / PRD / MERGED / ALL), 번호는 종류별 처음 담은 순서.
+```
+RAW  001 ZK206JXR (05-11) · 002 ZK2060HX (08-27) · 003 Z4ZBXG5B (09-13) · 004 Z4ZBZE7F (09-15) · 005 Z4ZBZE3M (09-16, 지금 베이 1)
+PRD  001 ZK206L7N (08-26) · 002 Z4ZBZE6T (09-13) · 003 Z4ZBZEBA (09-15) · 004 Z4ZBXG5Y (09-16 예약, 지금 베이 2)
+MERGED 001 ZK205ZZF · ALL 001~022 (§11.188 표 그대로)
+```
+정본은 운영 디렉터리의 파일이 바뀌므로 work 클론에 복사해 커밋했다(운영 쪽 `git checkout -- docs` 뒤 pull). 라벨을 손으로 바꾸려면 `disks.tsv` 만 고친다 — 도구는 있는 라벨을 지킨다.
+
 #### 11.203 ★ fast-n prompt 모양을 평평 대신 지수로 (fn_norm_mode 2, 사용자 지시, 09-16 03:3x)
 
 사용자 : "fast-n 모양 지수 적합으로 바꿔서 다시 그려 달라" (§11.200 재생성 뒤 판정의 다음 손잡이 ①). commit 49f85b0.
@@ -3784,6 +3813,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.204         ★★ 백업 5 회차(RAW-005 Z4ZBZE3M → PRD-004 Z4ZBXG5Y) 시작. 라벨이 안 붙던 이유 = rebuild --scan 에만 있던 코드 → cron 이 자동 부여
+                (backup_labels.py, --fill-labels). RAW-004 Z4ZBZE7F · PRD-003 Z4ZBZEBA 되메움, 시트 108 칸
 §11.203         ★ fast-n prompt 모양을 지수로 (fn_norm_mode 2, λ = 7.1 MeV) → 창 후보 3.4 → 2.0 ± 0.7 /day (기대 0.2 의 10 배)
 §11.202         ★★ 한빛 호기별 출력 시간별 기록 (cron 47 분 + @reboot) → /Data_ssd/LOG/reactor-power/reactor_power.tsv + 시트 KHNP_daily_power 탭.
                 실패 2 회면 책임자 메일. 매뉴얼 docs/REACTOR-POWER-LOG.md

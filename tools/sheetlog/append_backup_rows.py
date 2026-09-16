@@ -264,6 +264,15 @@ def main():
                 fills.append((i + 1, lab, row[16].strip() or row[14].strip()))
         print(f"[FILL] 빈 Disk Label {len(fills)} 칸을 채운다" + (f" : " + ", ".join(sorted({f'{s}->{l}' for _, l, s in fills})) if fills else ""))
 
+    if a.commit:                                      # 정본의 런 수·파일·GB·마지막 시각을 기록 합으로 채운다 (시리얼을 아는 하드만)
+        agg = {}
+        for r in recs:
+            if not r.get("serial"):
+                continue
+            g = agg.setdefault(r["serial"], [set(), 0, 0.0, ""])
+            g[0].add(r["run"]); g[1] += int(r["files"] or 0); g[2] += float(r["bytes"] or 0) / 1e9; g[3] = max(g[3], r["ts"])
+        backup_labels.update_stats({k: (len(v[0]), v[1], v[2], v[3]) for k, v in agg.items()}, a.disks_tsv, a.disks_md)
+
     print(f"[INFO] 시트 기존 {len(body)} 행 (마지막 {last_ts or '-'}) · 서버 기록 {len(recs)} 건 · 새 행 {len(new)}")
     for row in new:
         print("  " + " | ".join(row[:8]) + f" | {row[13]} {row[16]} | {row[11]}")

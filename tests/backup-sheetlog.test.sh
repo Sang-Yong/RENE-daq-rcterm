@@ -157,6 +157,7 @@ chk "UUID 만 아는 옛 기록에는 새 번호를 주지 않는다" "$(awk -F'
 [ -s "$T/disks.md" ] && grep -q 'RENE-RAW-005' "$T/disks.md" && ok "BACKUP-DISKS.md 재생성" || bad "md"
 python3 "$TOOL" --index "$T/indexL" --sheet-tsv "$T/sheetL.tsv" --commit >/dev/null 2>&1
 chk "두 번 돌려도 정본 그대로 (번호 불변)" "$(grep -vc '^#' "$T/disks.tsv")" "3"
+chk "정본의 런 수·파일·GB 가 기록 합으로 채워진다 (Z4ZBZE3M : 1 런 40 파일 3.0 GB)" "$(awk -F'\t' '$1=="Z4ZBZE3M"{print $10"/"$11"/"$12}' "$T/disks.tsv")" "1/40/3.0"
 echo "[M] --fill-labels : 이미 있는 행의 빈 Disk Label 을 정본으로 채운다 (다른 칸은 그대로)"
 printf "$H\n" > "$T/sheetM.tsv"
 printf '1\t2026-09-15\t00:30:00\t002600\tpart·RAW\t40\t3.0\t\tFADC_002600.root.00000\tSADC_002600.root.00019\t\t\t\t/backup_hdd\tU-7F\tST2000DM006-2DM164\tZ4ZBZE7F\t1.8 TB\t\tcount+bytes\tmoved files only\t\tcode9\tLAB-A\tauto\n' >> "$T/sheetM.tsv"
