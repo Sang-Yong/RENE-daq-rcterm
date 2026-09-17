@@ -1,7 +1,7 @@
 // MuonSpec.C — 타겟에서 보이는 뮤온(고에너지 사건) NPE 스펙트럼을 veto 태그 유무로 갈라 그린다 (2026-09-18, 사용자 지시).
 //
 //   root -l -b -q 'MuonSpec.C+("/scratch/RunSummary/", "dst", 4237, 4348)'
-//   → <outDir>/muspec/<dstSub>/  muspec_all.png · muspec_month_<YYYY-MM>.png · muspec_week_<YYYY-Www>.png · muspec_run_<NNNNNN>.png
+//   → <outDir>/muspec/<dstSub>/  (기본 = 선형축, 5,000 NPE 아래 γ 는 위로 잘림 · 같은 이름 + _log = log-log 전체)  muspec_all_all.png · muspec_month_<YYYY-MM>.png · muspec_week_<YYYY-Www>.png · muspec_run_<NNNNNN>.png
 //                                 muspec_overlay_months.png · muspec_overlay_weeks.png (태그 비율 곡선 겹침) · muspec_trend.png (주별 태그 비율 추이)
 //                                 muspec_summary.tsv · muspec.root
 //   입력 : DST (BuildMonitorDst.C). dst/ = 분석 코드의 패널 AND veto, dst_m2/ = 강한 veto (PMT 하나라도 or S_ADC > 50).
@@ -37,8 +37,9 @@
 namespace {
 const int    kNb = 50; const double kLo = 620, kHi = 6e4;      // log 축 빈 (single 문턱 610.6 NPE 위부터, 포화 상한 ~3.5e4 까지)
 struct Meta { int run = 0, nsub = 0; double es = -1, span = -1, live = -1; };
+const int    kNbL = 72; const double kLoL = 620, kHiL = 36620;   // 선형 축 빈 (500 NPE 씩. 포화 상한 ~3.5e4 까지)
 struct Per {
-   std::string key, kind; TH1D *tag = nullptr, *un = nullptr; double live = 0; std::set<int> runs; double tmin = 1e18, tmax = 0;
+   std::string key, kind; TH1D *tag = nullptr, *un = nullptr, *tagL = nullptr, *unL = nullptr; double live = 0; std::set<int> runs; double tmin = 1e18, tmax = 0;
    long long nTag[3] = {0, 0, 0}, nUn[3] = {0, 0, 0};           // > 610 / > 3000 / > 20000 NPE
 };
 std::map<std::string, Meta> LoadMeta(const TString &p) {
@@ -59,26 +60,32 @@ Per &Get(std::map<std::string, Per> &m, const std::string &key, const std::strin
    Per p; p.key = key; p.kind = kind;
    p.tag = new TH1D(Form("tag_%s", key.c_str()), "", kNb, edges); p.tag->SetDirectory(nullptr);
    p.un  = new TH1D(Form("un_%s", key.c_str()), "", kNb, edges);  p.un->SetDirectory(nullptr);
+   p.tagL = new TH1D(Form("tagL_%s", key.c_str()), "", kNbL, kLoL, kHiL); p.tagL->SetDirectory(nullptr);
+   p.unL  = new TH1D(Form("unL_%s", key.c_str()), "", kNbL, kLoL, kHiL);  p.unL->SetDirectory(nullptr);
    return m.emplace(key, p).first->second;
 }
 void Count(long long *n, double pe) { if (pe > kLo) n[0]++; if (pe > 3000) n[1]++; if (pe > 20000) n[2]++; }
 
-void DrawOne(const TString &dir, const Per &p, const char *dstSub) {
+void DrawOne(const TString &dir, const Per &p, const char *dstSub, bool logMode) {
+   //  logMode=false (기본 그림) : 선형 x·y, 5,000 NPE 아래의 γ 봉우리는 위로 잘라 뮤온 영역이 보이게 (범례에 적는다)
+   //  logMode=true  (_log 그림) : log-log, 620 NPE 부터 전부
    double days = p.live / 86400.0; if (days <= 0) return;
-   TH1D *t = (TH1D *)p.tag->Clone(Form("d_tag_%s", p.key.c_str())), *u = (TH1D *)p.un->Clone(Form("d_un_%s", p.key.c_str()));
+   TH1D *t = (TH1D *)(logMode ? p.tag : p.tagL)->Clone(Form("d_tag_%s", p.key.c_str())), *u = (TH1D *)(logMode ? p.un : p.unL)->Clone(Form("d_un_%s", p.key.c_str()));
    TH1D *s = (TH1D *)t->Clone(Form("d_sum_%s", p.key.c_str())); s->Add(u);
    for (TH1D *h : {t, u, s}) { h->Scale(1.0 / days); h->SetDirectory(nullptr); }
    TCanvas *c = new TCanvas(Form("c_%s", p.key.c_str()), "", 1400, 950);
    TPad *pt = new TPad("pt", "", 0, 0.34, 1, 1), *pb = new TPad("pb", "", 0, 0, 1, 0.34);
-   pt->SetBottomMargin(0.02); pt->SetLeftMargin(0.09); pt->SetRightMargin(0.03); pt->SetLogx(); pt->SetLogy(); pt->SetGridx(); pt->SetGridy();
-   pb->SetTopMargin(0.03); pb->SetBottomMargin(0.28); pb->SetLeftMargin(0.09); pb->SetRightMargin(0.03); pb->SetLogx(); pb->SetGridx(); pb->SetGridy();
+   pt->SetBottomMargin(0.02); pt->SetLeftMargin(0.09); pt->SetRightMargin(0.03); pt->SetGridx(); pt->SetGridy(); if (logMode) { pt->SetLogx(); pt->SetLogy(); }
+   pb->SetTopMargin(0.03); pb->SetBottomMargin(0.28); pb->SetLeftMargin(0.09); pb->SetRightMargin(0.03); pb->SetGridx(); pb->SetGridy(); if (logMode) pb->SetLogx();
    pt->Draw(); pb->Draw(); pt->cd();
    std::string runs; int nr = 0; for (int r : p.runs) { if (nr++ < 6) runs += (runs.empty() ? "" : ",") + std::to_string(r); } if (p.runs.size() > 6) runs += ",...";
    s->SetTitle(Form("Target muon (high-energy event) spectrum, %s %s  [%s : %s ~ %s, %zu run(s), %.2f live days]", p.kind.c_str(), p.key.c_str(), dstSub,
                     Fmt(p.tmin, "%m-%d %H:%M").c_str(), Fmt(p.tmax, "%m-%d %H:%M").c_str(), p.runs.size(), days));
    s->GetYaxis()->SetTitle("Events / day / bin"); s->GetYaxis()->SetTitleSize(0.045); s->GetYaxis()->SetTitleOffset(0.95); s->GetXaxis()->SetLabelSize(0);
    s->SetLineColor(kBlack); s->SetLineWidth(2); t->SetLineColor(kRed + 1); t->SetLineWidth(2); u->SetLineColor(kBlue + 1); u->SetLineWidth(2);
-   s->SetStats(0); double ymax = s->GetMaximum() * 3; s->SetMaximum(ymax > 0 ? ymax : 1); s->SetMinimum(std::max(1e-3, s->GetMinimum(0) * 0.3));
+   s->SetStats(0);
+   if (logMode) { double ymax = s->GetMaximum() * 3; s->SetMaximum(ymax > 0 ? ymax : 1); s->SetMinimum(std::max(1e-3, s->GetMinimum(0) * 0.3)); }
+   else { double ymax = 0; for (int b = s->FindBin(5000); b <= s->GetNbinsX(); ++b) ymax = std::max(ymax, s->GetBinContent(b)); s->SetMaximum(ymax * 1.45 + 1); s->SetMinimum(0); }
    s->Draw("HIST"); t->Draw("HIST SAME"); u->Draw("HIST SAME");
    for (double x : {3000.0, 7265.0, 20000.0}) { TLine *l = new TLine(x, s->GetMinimum(), x, s->GetMaximum()); l->SetLineStyle(3); l->SetLineColor(kGray + 2); l->Draw(); }
    TLegend *lg = new TLegend(0.47, 0.58, 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.028);
@@ -87,36 +94,38 @@ void DrawOne(const TString &dir, const Per &p, const char *dstSub) {
    lg->AddEntry(u, Form("untagged (T_Sat #cup T_Singles) : %.3g /day, >3k %.0f, >20k %.0f /day", p.nUn[0] / days, p.nUn[1] / days, p.nUn[2] / days), "l");
    double f3 = (p.nTag[1] + p.nUn[1]) > 0 ? 100.0 * p.nTag[1] / (p.nTag[1] + p.nUn[1]) : 0, f20 = (p.nTag[2] + p.nUn[2]) > 0 ? 100.0 * p.nTag[2] / (p.nTag[2] + p.nUn[2]) : 0;
    lg->AddEntry((TObject *)nullptr, Form("tagged fraction : > 3000 NPE %.1f %%,  > 20000 NPE %.1f %%", f3, f20), "");
-   lg->AddEntry((TObject *)nullptr, "dotted : 3000 / 7265 (= 12 MeV) / 20000 NPE (shower threshold)", "");
+   lg->AddEntry((TObject *)nullptr, logMode ? "dotted : 3000 / 7265 (= 12 MeV) / 20000 NPE (shower threshold)" : "dotted : 3000 / 7265 (= 12 MeV) / 20000 NPE.  bins below 5000 NPE (#gamma) clipped at the top", "");
    lg->Draw();
    pb->cd();
-   TH1D *num = (TH1D *)p.tag->Clone("num"), *den = (TH1D *)p.tag->Clone("den"); den->Add(p.un); num->SetDirectory(nullptr); den->SetDirectory(nullptr);
+   TH1D *num = (TH1D *)(logMode ? p.tag : p.tagL)->Clone("num"), *den = (TH1D *)(logMode ? p.tag : p.tagL)->Clone("den"); den->Add(logMode ? p.un : p.unL); num->SetDirectory(nullptr); den->SetDirectory(nullptr);
    TGraphAsymmErrors *fr = new TGraphAsymmErrors(); fr->Divide(num, den, "cl=0.683 b(1,1) mode");
-   TH1D *fa = new TH1D(Form("fa_%s", p.key.c_str()), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNb, s->GetXaxis()->GetXbins()->GetArray()); fa->SetDirectory(nullptr);
+   TH1D *fa = logMode ? new TH1D(Form("fa_%s", p.key.c_str()), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNb, s->GetXaxis()->GetXbins()->GetArray())
+                      : new TH1D(Form("fa_%s", p.key.c_str()), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNbL, kLoL, kHiL); fa->SetDirectory(nullptr);
    fa->SetStats(0); fa->SetMinimum(0); fa->SetMaximum(1.05); fa->GetXaxis()->SetTitleSize(0.10); fa->GetXaxis()->SetLabelSize(0.08); fa->GetXaxis()->SetTitleOffset(1.1);
    fa->GetYaxis()->SetTitleSize(0.09); fa->GetYaxis()->SetLabelSize(0.08); fa->GetYaxis()->SetTitleOffset(0.45); fa->GetYaxis()->SetNdivisions(505);
    fa->Draw(); fr->SetMarkerStyle(20); fr->SetMarkerSize(0.8); fr->SetLineColor(kRed + 1); fr->SetMarkerColor(kRed + 1); fr->Draw("P SAME");
    for (double x : {3000.0, 7265.0, 20000.0}) { TLine *l = new TLine(x, 0, x, 1.05); l->SetLineStyle(3); l->SetLineColor(kGray + 2); l->Draw(); }
-   c->Print(dir + Form("muspec_%s_%s.png", p.kind.c_str(), p.key.c_str()));
+   c->Print(dir + Form("muspec_%s_%s%s.png", p.kind.c_str(), p.key.c_str(), logMode ? "_log" : ""));
    delete c;
 }
 
-void DrawOverlay(const TString &dir, std::vector<const Per *> ps, const char *kind, const char *dstSub) {
+void DrawOverlay(const TString &dir, std::vector<const Per *> ps, const char *kind, const char *dstSub, bool logMode) {
    if (ps.empty()) return;
    std::sort(ps.begin(), ps.end(), [](const Per *a, const Per *b) { return a->key < b->key; });
    const int cols[] = {kRed + 1, kBlue + 1, kGreen + 2, kMagenta + 1, kOrange + 7, kCyan + 2, kGray + 2, kViolet, kSpring - 6, kAzure + 7, kPink + 2, kTeal - 6};
    TCanvas *c = new TCanvas(Form("c_ov_%s", kind), "", 1400, 950);
    TPad *pt = new TPad("pt", "", 0, 0.5, 1, 1), *pb = new TPad("pb", "", 0, 0, 1, 0.5);
-   for (TPad *p : {pt, pb}) { p->SetLeftMargin(0.09); p->SetRightMargin(0.03); p->SetLogx(); p->SetGridx(); p->SetGridy(); }
-   pt->SetBottomMargin(0.02); pb->SetTopMargin(0.03); pb->SetBottomMargin(0.22); pt->SetLogy(); pt->Draw(); pb->Draw();
-   TLegend *lg = new TLegend(0.10, 0.04, 0.62, 0.04 + 0.055 * std::min<size_t>(ps.size(), 12)); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.028);
+   for (TPad *p : {pt, pb}) { p->SetLeftMargin(0.09); p->SetRightMargin(0.03); p->SetGridx(); p->SetGridy(); if (logMode) p->SetLogx(); }
+   pt->SetBottomMargin(0.02); pb->SetTopMargin(0.03); pb->SetBottomMargin(0.22); if (logMode) pt->SetLogy(); pt->Draw(); pb->Draw();
+   TLegend *lg = logMode ? new TLegend(0.10, 0.04, 0.62, 0.04 + 0.055 * std::min<size_t>(ps.size(), 12)) : new TLegend(0.40, 0.89 - 0.055 * std::min<size_t>(ps.size(), 12), 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.028);
    int i = 0; double ymax = 0;
    std::vector<TH1D *> tots; std::vector<TGraphAsymmErrors *> frs;
    for (const Per *p : ps) {
       double days = p->live / 86400.0; if (days <= 0) continue;
-      TH1D *s = (TH1D *)p->tag->Clone(Form("ov_s_%s", p->key.c_str())); s->Add(p->un); s->Scale(1.0 / days); s->SetDirectory(nullptr);
-      s->SetLineColor(cols[i % 12]); s->SetLineWidth(2); tots.push_back(s); ymax = std::max(ymax, s->GetMaximum());
-      TH1D *num = (TH1D *)p->tag->Clone("n"), *den = (TH1D *)p->tag->Clone("d"); den->Add(p->un);
+      TH1D *s = (TH1D *)(logMode ? p->tag : p->tagL)->Clone(Form("ov_s_%s", p->key.c_str())); s->Add(logMode ? p->un : p->unL); s->Scale(1.0 / days); s->SetDirectory(nullptr);
+      s->SetLineColor(cols[i % 12]); s->SetLineWidth(2); tots.push_back(s);
+      if (logMode) ymax = std::max(ymax, s->GetMaximum()); else for (int b = s->FindBin(5000); b <= s->GetNbinsX(); ++b) ymax = std::max(ymax, s->GetBinContent(b));
+      TH1D *num = (TH1D *)(logMode ? p->tag : p->tagL)->Clone("n"), *den = (TH1D *)(logMode ? p->tag : p->tagL)->Clone("d"); den->Add(logMode ? p->un : p->unL);
       TGraphAsymmErrors *fr = new TGraphAsymmErrors(); fr->Divide(num, den, "cl=0.683 b(1,1) mode"); fr->SetLineColor(cols[i % 12]); fr->SetMarkerColor(cols[i % 12]); fr->SetMarkerStyle(20); fr->SetMarkerSize(0.7); frs.push_back(fr);
       double f3 = (p->nTag[1] + p->nUn[1]) > 0 ? 100.0 * p->nTag[1] / (p->nTag[1] + p->nUn[1]) : 0, f20 = (p->nTag[2] + p->nUn[2]) > 0 ? 100.0 * p->nTag[2] / (p->nTag[2] + p->nUn[2]) : 0;
       lg->AddEntry(s, Form("%s : %.1f d, >3k %.0f/day, tagged %.0f %% (>3k) / %.0f %% (>20k)", p->key.c_str(), days, (p->nTag[1] + p->nUn[1]) / days, f3, f20), "l");
@@ -124,16 +133,17 @@ void DrawOverlay(const TString &dir, std::vector<const Per *> ps, const char *ki
    }
    pt->cd();
    for (size_t k = 0; k < tots.size(); ++k) {
-      if (k == 0) { tots[k]->SetTitle(Form("Target muon spectrum per %s (tagged + untagged, per live day) and tagged fraction  [%s]", kind, dstSub)); tots[k]->SetStats(0); tots[k]->GetYaxis()->SetTitle("Events / day / bin"); tots[k]->GetXaxis()->SetLabelSize(0); tots[k]->SetMaximum(ymax * 3); tots[k]->SetMinimum(1.0); tots[k]->Draw("HIST"); }
+      if (k == 0) { tots[k]->SetTitle(Form("Target muon spectrum per %s (tagged + untagged, per live day) and tagged fraction  [%s]", kind, dstSub)); tots[k]->SetStats(0); tots[k]->GetYaxis()->SetTitle("Events / day / bin"); tots[k]->GetXaxis()->SetLabelSize(0); if (logMode) { tots[k]->SetMaximum(ymax * 3); tots[k]->SetMinimum(1.0); } else { tots[k]->SetMaximum(ymax * 1.45 + 1); tots[k]->SetMinimum(0); } tots[k]->Draw("HIST"); }
       else tots[k]->Draw("HIST SAME");
    }
    lg->Draw();
    pb->cd();
-   TH1D *fa = new TH1D(Form("fa_ov_%s", kind), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNb, ps[0]->tag->GetXaxis()->GetXbins()->GetArray()); fa->SetDirectory(nullptr);
+   TH1D *fa = logMode ? new TH1D(Form("fa_ov_%s", kind), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNb, ps[0]->tag->GetXaxis()->GetXbins()->GetArray())
+                      : new TH1D(Form("fa_ov_%s", kind), ";Target NPE (two-PMT sum, 1 #mus window);tagged fraction", kNbL, kLoL, kHiL); fa->SetDirectory(nullptr);
    fa->SetStats(0); fa->SetMinimum(0); fa->SetMaximum(1.05); fa->GetXaxis()->SetTitleSize(0.07); fa->GetXaxis()->SetLabelSize(0.06); fa->GetYaxis()->SetTitleSize(0.07); fa->GetYaxis()->SetLabelSize(0.06); fa->GetYaxis()->SetTitleOffset(0.6);
    fa->Draw(); for (auto *fr : frs) fr->Draw("PL SAME");
    for (double x : {3000.0, 7265.0, 20000.0}) { TLine *l = new TLine(x, 0, x, 1.05); l->SetLineStyle(3); l->SetLineColor(kGray + 2); l->Draw(); }
-   c->Print(dir + Form("muspec_overlay_%ss.png", kind));
+   c->Print(dir + Form("muspec_overlay_%ss%s.png", kind, logMode ? "_log" : ""));
    delete c;
 }
 }  // namespace
@@ -173,7 +183,7 @@ void MuonSpec(const char *outDir = "/scratch/RunSummary/", const char *dstSub = 
             if (needPos && pe <= 0) continue;
             if (pe <= kLo) continue;                      // 두 표본을 같은 문턱(single 문턱 610.6 NPE 바로 위)에서 비교한다
             if (sub < 0 || sub >= nsub) continue;
-            for (Per *p : subPer[sub]) { (tagged ? p->tag : p->un)->Fill(pe); Count(tagged ? p->nTag : p->nUn, pe); }
+            for (Per *p : subPer[sub]) { (tagged ? p->tag : p->un)->Fill(pe); (tagged ? p->tagL : p->unL)->Fill(std::min<double>(pe, kHiL - 1)); Count(tagged ? p->nTag : p->nUn, pe); }
             used++;
          }
          return used;
@@ -185,8 +195,8 @@ void MuonSpec(const char *outDir = "/scratch/RunSummary/", const char *dstSub = 
    if (nRun == 0) { printf("[FATAL] DST 가 없다 (%s%s/, run %d-%d)\n", out.Data(), dstSub, minRun, maxRun); return; }
    //  ---- 그림 ----
    std::vector<const Per *> months, weeks, runs;
-   for (auto &kv : per) { DrawOne(dir, kv.second, dstSub); if (kv.second.kind == "month") months.push_back(&kv.second); else if (kv.second.kind == "week") weeks.push_back(&kv.second); else if (kv.second.kind == "run") runs.push_back(&kv.second); }
-   DrawOverlay(dir, months, "month", dstSub); DrawOverlay(dir, weeks, "week", dstSub);
+   for (auto &kv : per) { DrawOne(dir, kv.second, dstSub, false); DrawOne(dir, kv.second, dstSub, true); if (kv.second.kind == "month") months.push_back(&kv.second); else if (kv.second.kind == "week") weeks.push_back(&kv.second); else if (kv.second.kind == "run") runs.push_back(&kv.second); }
+   for (bool lg : {false, true}) { DrawOverlay(dir, months, "month", dstSub, lg); DrawOverlay(dir, weeks, "week", dstSub, lg); }
    //  주별 · 런별 태그 비율 추이
    {
       TrendSeries w3, w20, r3, r20;
@@ -209,7 +219,7 @@ void MuonSpec(const char *outDir = "/scratch/RunSummary/", const char *dstSub = 
       double f3 = (p.nTag[1] + p.nUn[1]) > 0 ? (double)p.nTag[1] / (p.nTag[1] + p.nUn[1]) : 0, f20 = (p.nTag[2] + p.nUn[2]) > 0 ? (double)p.nTag[2] / (p.nTag[2] + p.nUn[2]) : 0;
       o << p.kind << '\t' << p.key << '\t' << Form("%.3f", d) << '\t' << p.runs.size() << '\t' << p.nTag[0] << '\t' << p.nUn[0] << '\t' << p.nTag[1] << '\t' << p.nUn[1] << '\t'
         << p.nTag[2] << '\t' << p.nUn[2] << '\t' << Form("%.4f", f3) << '\t' << Form("%.4f", f20) << '\t' << Form("%.1f", d > 0 ? p.nTag[1] / d : 0) << '\t' << Form("%.1f", d > 0 ? p.nUn[1] / d : 0) << '\n';
-      p.tag->SetDirectory(fo); p.un->SetDirectory(fo); p.tag->Write(); p.un->Write();
+      for (TH1D *h : {p.tag, p.un, p.tagL, p.unL}) { h->SetDirectory(fo); h->Write(); }
       if (p.kind == "all" || p.kind == "month")
          printf("[MUSP] %-5s %-8s : %.2f d  >3k tagged %lld / untagged %lld (%.1f %%)   >20k %lld / %lld (%.1f %%)\n", p.kind.c_str(), p.key.c_str(), d, p.nTag[1], p.nUn[1], 100 * f3, p.nTag[2], p.nUn[2], 100 * f20);
    }
