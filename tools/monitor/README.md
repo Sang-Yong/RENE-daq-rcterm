@@ -633,6 +633,7 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 57~58 | `57/58_bgspec_dt_<ch>.png` | prompt–delayed **Δt** (on · off · prompt < 3 MeV) 와 exp(−t/τ) + 평평 적합. 평평 × 창 = 우발 추정의 독립 대조, exp 적분 = 상관 쌍 수. **2-성분 적합**(34 µs Gd 포획 고정 + 긴 성분, 평평은 off-window 고정)의 N(34 µs) = IBD 다운 몫 |
 | 59 | `59_bg_vetoeff.png` | **VETO 태깅 효율** = 태그된 타겟 관통 뮤온(T_Muons, > 3000 / > 20000 NPE) / (태그된 + 안 된(T_Sat)). 문턱을 바꾸면 이 그림이 먼저 움직인다 (80 % 문턱 : 87 → 49 %) |
 | 60~61 | `60/61_signal_window_<ch>.png` | **원자로 참조 신호창 검수** (2026-09-15) : 배경 전부 뺀 prompt 스펙트럼(빨강) 위에 **원자로 IBD prompt 참조 모양**(Mueller 2011 flux × Vogel–Beacom σ, E_vis = E_ν − 0.78, σ_E = 0.12√E ; 파랑 = 창 안 후보 수로 규격화, 초록 점선 = 하루 1 IBD 기대) 과 창 `daily_prompt_lo/hi_mev`(회색). 범례에 창 안 on·우발·fast-n·Li/He·후보±오차·/day·템플릿 창 효율·기대치·비율. inset = 창 안 쌍의 Δt (평평 고정 + exp 34 µs 적합 → 상관 쌍 수) |
+| (별도) | `muspec/<dst>/muspec_*.png` | **타겟 뮤온 NPE 스펙트럼, veto 태그 유무별** (`muon-spec.sh --dst dst|dst_m2`, 2026-09-18) : 전체·월·주·런마다 태그/미태그/합 + 빈별 태그 비율, 기간 겹침, 태그 비율 추이. §11.205 |
 | 62~63 | `62/63_daily_rate_window_<ch>.png` | 창 안 후보 rate [/day] 날짜별 (배경 전부 뺀 뒤). 표의 `rate_win` |
 
 **추이 그림 공통** — 세로 점선 `THR <런>` 은 veto 문턱값이 바뀐 런(`psd/thr_by_run.tsv`, `tools/psd/thr-history.sh`). rate-trend 는 pair_summary(legacy)에 없는 (run,tag) 를
