@@ -33,10 +33,12 @@
 | **RENE-PRD-002** | Z4ZBZE6T | ST2000DM006-2DM164 | 7bb59870 | 2026-09-13 ~ 2026-09-13 | 7 | 6768 | 1865.6 | - |  |
 | **RENE-PRD-003** | Z4ZBZEBA | ST2000DM006-2DM164 | b5f58ed0 | 2026-09-15 ~ 2026-09-15 | 60 | 4215 | 1865.6 | - | auto-labeled 2026-09-16 16:17 from parts_index (prd) |
 | **RENE-PRD-004** | Z4ZBXG5Y | ST2000DM006-2DM164 |  |  ~ 2026-09-17 | 62 | 3765 | 1865.6 | - | reserved 2026-09-16 (bay 2, PRD session after RAW); auto-labeled 2026-09-16 16:17 from parts_index (prd) |
+| **RENE-PRD-005** | Z4ZBZE6C | ST2000DM006-2DM164 |  |  ~  |  |  |  | - | round 6 bay 2 (2026-09-17); auto-labeled 2026-09-17 20:43 from parts_index (prd) |
 | **RENE-RAW-001** | ZK206JXR | ST2000DM008-2FR102 | 6667eb2b | 2026-05-11 ~ 2026-05-11 | 1 | 5816 | 1711.8 | 2026-09-12 |  |
 | **RENE-RAW-002** | ZK2060HX | ST2000DM008-2FR102 | 26f4448e | 2026-08-28 ~ 2026-08-28 | 1 | 9087 | 1867.8 | 2026-09-13 |  |
 | **RENE-RAW-003** | Z4ZBXG5B | ST2000DM006-2DM164 | 97b26e2e | 2026-09-13 ~ 2026-09-13 | 7 | 7006 | 1865.7 | 2026-09-13 |  |
 | **RENE-RAW-004** | Z4ZBZE7F | ST2000DM006-2DM164 | 75b4fdcd | 2026-09-15 ~ 2026-09-15 | 48 | 3258 | 1865.6 | - | auto-labeled 2026-09-16 16:17 from parts_index (raw) |
 | **RENE-RAW-005** | Z4ZBZE3M | ST2000DM006-2DM164 | 2fb9a47f | 2026-09-16 ~ 2026-09-17 | 61 | 3217 | 1865.6 | - | auto-labeled 2026-09-16 16:17 from parts_index (raw) |
+| **RENE-RAW-006** | Z4ZBXG3F | ST2000DM006-2DM164 |  |  ~  |  |  |  | - | round 6 bay 1 (2026-09-17); auto-labeled 2026-09-17 20:43 from parts_index (raw) |
 
-생성 2026-09-17 13:37 · 하드 32
+생성 2026-09-17 20:43 · 하드 34
