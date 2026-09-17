@@ -2,6 +2,7 @@
 //
 //   root -l -b -q 'MuonSpec.C+("/scratch/RunSummary/", "dst", 4237, 4348)'
 //   → <outDir>/muspec/<dstSub>/  (기본 = 선형축, 5,000 NPE 아래 γ 는 위로 잘림 · 같은 이름 + _log = log-log 전체)  muspec_all_all.png · muspec_month_<YYYY-MM>.png · muspec_week_<YYYY-Www>.png · muspec_run_<NNNNNN>.png
+//                                 ★ muspec_cut_<kind>_<key>[_log].png · muspec_cut_overlay_{months,weeks}[_log].png : 한 캔버스에 veto 컷 전(전체) / 뒤(미태그) 스펙트럼
 //                                 muspec_overlay_months.png · muspec_overlay_weeks.png (태그 비율 곡선 겹침) · muspec_trend.png (주별 태그 비율 추이)
 //                                 muspec_summary.tsv · muspec.root
 //   입력 : DST (BuildMonitorDst.C). dst/ = 분석 코드의 패널 AND veto, dst_m2/ = 강한 veto (PMT 하나라도 or S_ADC > 50).
@@ -146,6 +147,47 @@ void DrawOverlay(const TString &dir, std::vector<const Per *> ps, const char *ki
    c->Print(dir + Form("muspec_overlay_%ss%s.png", kind, logMode ? "_log" : ""));
    delete c;
 }
+
+//  ---- 사용자가 보려는 그림 (2026-09-18 두 번째 지시) : 한 캔버스에 'veto 컷 전(태그 무관 전체)' 과 'veto 컷 뒤(태그 안 된 것만)' 스펙트럼을 같이.
+//       기간 하나(all/month/week/run)씩 : muspec_cut_<kind>_<key>[_log].png.  월·주 겹침 : muspec_cut_overlay_{months,weeks}[_log].png (실선 = 컷 전, 점선 = 컷 뒤, 색 = 기간)
+void DrawCut(const TString &dir, std::vector<const Per *> ps, const char *kind, const char *tagfile, const char *dstSub, bool logMode) {
+   if (ps.empty()) return;
+   std::sort(ps.begin(), ps.end(), [](const Per *a, const Per *b) { return a->key < b->key; });
+   const int cols[] = {kRed + 1, kBlue + 1, kGreen + 2, kMagenta + 1, kOrange + 7, kCyan + 2, kGray + 2, kViolet, kSpring - 6, kAzure + 7, kPink + 2, kTeal - 6};
+   TCanvas *c = new TCanvas(Form("c_cut_%s_%s_%d", kind, tagfile, (int)logMode), "", 1400, 850);
+   c->SetLeftMargin(0.08); c->SetRightMargin(0.03); c->SetBottomMargin(0.11); c->SetGridx(); c->SetGridy(); if (logMode) { c->SetLogx(); c->SetLogy(); }
+   const size_t n = ps.size();
+   const double lh = 0.042 * std::min<size_t>(n, 12) + 0.045;
+   TLegend *lg = logMode ? new TLegend(0.10, 0.12, 0.66, 0.12 + lh) : new TLegend(0.36, 0.89 - lh, 0.97, 0.89);
+   lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(n > 6 ? 0.020 : 0.024);
+   std::vector<TH1D *> hs; double ymax = 0;
+   for (size_t i = 0; i < n; ++i) {
+      const Per *p = ps[i]; double days = p->live / 86400.0; if (days <= 0) continue;
+      TH1D *all = (TH1D *)(logMode ? p->tag : p->tagL)->Clone(Form("cut_all_%s_%d", p->key.c_str(), (int)logMode)); all->Add(logMode ? p->un : p->unL); all->Scale(1.0 / days); all->SetDirectory(nullptr);
+      TH1D *cut = (TH1D *)(logMode ? p->un : p->unL)->Clone(Form("cut_un_%s_%d", p->key.c_str(), (int)logMode)); cut->Scale(1.0 / days); cut->SetDirectory(nullptr);
+      int col = n == 1 ? kBlack : cols[i % 12];
+      all->SetLineColor(col); all->SetLineWidth(2); all->SetLineStyle(1);
+      cut->SetLineColor(n == 1 ? kBlue + 1 : col); cut->SetLineWidth(2); cut->SetLineStyle(n == 1 ? 1 : 2);
+      if (n == 1) { cut->SetFillColorAlpha(kBlue + 1, 0.15); cut->SetFillStyle(1001); }
+      if (logMode) ymax = std::max(ymax, all->GetMaximum()); else for (int b = all->FindBin(5000); b <= all->GetNbinsX(); ++b) ymax = std::max(ymax, all->GetBinContent(b));
+      hs.push_back(all); hs.push_back(cut);
+      double s3 = (p->nTag[1] + p->nUn[1]) > 0 ? 100.0 * p->nUn[1] / (p->nTag[1] + p->nUn[1]) : 0, s20 = (p->nTag[2] + p->nUn[2]) > 0 ? 100.0 * p->nUn[2] / (p->nTag[2] + p->nUn[2]) : 0;
+      lg->AddEntry(all, Form("%s  no cut : >3k %.3g/d, >20k %.3g/d  (%.1f live d)", p->key.c_str(), (p->nTag[1] + p->nUn[1]) / days, (p->nTag[2] + p->nUn[2]) / days, days), "l");
+      lg->AddEntry(cut, Form("%s  after veto cut : >3k %.3g/d (%.0f %% left), >20k %.3g/d (%.0f %% left)", p->key.c_str(), p->nUn[1] / days, s3, p->nUn[2] / days, s20), n == 1 ? "f" : "l");
+   }
+   if (hs.empty()) { delete c; return; }
+   TH1D *fr = hs[0];
+   fr->SetTitle(Form("Target muon spectrum before / after the veto cut, per %s  [%s%s]%s;Target NPE (two-PMT sum, 1 #mus window);Events / day / bin", kind, dstSub,
+                     std::string(dstSub) == "dst" ? " = panel AND veto" : " = strong veto (any PMT or S_ADC>50)", logMode ? "" : "   (bins below 5000 NPE clipped)"));
+   fr->SetStats(0); fr->GetXaxis()->SetTitleSize(0.04); fr->GetYaxis()->SetTitleSize(0.04); fr->GetYaxis()->SetTitleOffset(1.0);
+   if (logMode) { fr->SetMaximum(ymax * 3); fr->SetMinimum(1.0); } else { fr->SetMaximum(ymax * 1.5 + 1); fr->SetMinimum(0); }
+   fr->Draw("HIST"); for (size_t k = 1; k < hs.size(); ++k) hs[k]->Draw("HIST SAME");
+   for (double x : {3000.0, 7265.0, 20000.0}) { TLine *l = new TLine(x, logMode ? 1.0 : 0, x, logMode ? ymax * 3 : ymax * 1.5 + 1); l->SetLineStyle(3); l->SetLineColor(kGray + 2); l->Draw(); }
+   lg->AddEntry((TObject *)nullptr, n == 1 ? "black = no veto cut, blue filled = left after the cut.  dotted lines : 3000 / 7265 (12 MeV) / 20000 NPE" : "solid = no veto cut, dashed = after the cut (same colour = same period).  dotted : 3k / 7265 / 20k NPE", "");
+   lg->Draw();
+   c->Print(dir + Form("muspec_cut_%s%s.png", tagfile, logMode ? "_log" : ""));
+   delete c;
+}
 }  // namespace
 
 void MuonSpec(const char *outDir = "/scratch/RunSummary/", const char *dstSub = "dst", int minRun = 4237, int maxRun = 4348) {
@@ -196,7 +238,11 @@ void MuonSpec(const char *outDir = "/scratch/RunSummary/", const char *dstSub = 
    //  ---- 그림 ----
    std::vector<const Per *> months, weeks, runs;
    for (auto &kv : per) { DrawOne(dir, kv.second, dstSub, false); DrawOne(dir, kv.second, dstSub, true); if (kv.second.kind == "month") months.push_back(&kv.second); else if (kv.second.kind == "week") weeks.push_back(&kv.second); else if (kv.second.kind == "run") runs.push_back(&kv.second); }
-   for (bool lg : {false, true}) { DrawOverlay(dir, months, "month", dstSub, lg); DrawOverlay(dir, weeks, "week", dstSub, lg); }
+   for (bool lg : {false, true}) {
+      DrawOverlay(dir, months, "month", dstSub, lg); DrawOverlay(dir, weeks, "week", dstSub, lg);
+      DrawCut(dir, months, "month", "overlay_months", dstSub, lg); DrawCut(dir, weeks, "week", "overlay_weeks", dstSub, lg);
+      for (auto &kv : per) DrawCut(dir, {&kv.second}, kv.second.kind.c_str(), Form("%s_%s", kv.second.kind.c_str(), kv.second.key.c_str()), dstSub, lg);
+   }
    //  주별 · 런별 태그 비율 추이
    {
       TrendSeries w3, w20, r3, r20;
