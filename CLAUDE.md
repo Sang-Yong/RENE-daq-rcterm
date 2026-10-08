@@ -893,6 +893,31 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.207 ★★ 문턱값을 run 4067 설정값의 80 % 로 — 새 설정 파일로 수집 재시작, run 4372 부터 (사용자 지시, 10-08 23:4x)
+
+사용자 : "지금 veto 문턱이 run 4067 기준 설정값보다 얼마나 낮은지, 그리고 현재의 2 배로 올리면 4067 과 차이가 얼마인지 확인하라" →
+"각 설정값의 80 % 로 설정해 수집을 다시 시작하자. 새 설정 파일은 기존 파일을 덮어쓰지 말고, 그 파일로 수집을 다시 시작하라."
+
+**대조 (PRD S_THR, `psd/thr_by_run.tsv`)** — 현재(4347~4371) = REF(4183~4221)×0.8. run 4067(2026-04-30) 은 같은 값들이 **다른 채널 순서**로
+있던 때라(2026-04-14 · 05-28 재배치, §11.197) 채널별 비율은 중앙값 0.80 이되 0.09~8 배로 흩어진다. 2 배로 올리면 중앙값 1.60. 사용자가 '4067 값의 80 %' 를 골랐다.
+
+**한 것**
+```
+설정   새 파일 /home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026_thr4067x80.config  (옛 파일은 그대로. 머리에 유래 주석, THR 옛 줄 2 개는 주석)
+       SADCT THR = 285 201 131 307 146 150 234 363 196 160 268 404 206 164 354 179 160 172 1594 826 702 100 1410 1570 954 990 686 236 478 982
+       config/rcterm.params 의 config= 가 새 파일을 가리킨다 (백업 rcterm.params.bak-20261008). dry-run 으로 INSERT·cp 대상이 새 파일임을 확인
+재시작 23:46:01 kill -TERM <rcsupervisor> → run 4371 정상 마감 (exit 0, phase=ended, DB etime 기록, 고아 0, 7809 비어 있음)
+       23:48:56 tmux daq:1.2 에서 같은 명령(rcsupervisor --params … -- --desc '<rundesc.txt 첫 줄>') → run 4372 Running
+확인   TCB_004372.log SADCT THR = 위 값 그대로 · DRAM 8/8 정렬 · LIBUSB 0 (TCB·FADC·SADC) · DB 4372 config = …_thr4067x80.config
+       계수율 4371 309.5 Hz → 4372 ~478 Hz (처음 40 s, FADC 477 · SADC 485). chainwatch 문턱(100 Hz 하한 · 20 k 경고) 안
+감시   /Data_ssd/LOG/veto-check-4372.sh (PRD 12 개 뒤 veto-history → veto-check-4372.log) · /Data_ssd/LOG/daqerr-watch-4372.sh (48 h, 로그 daqerr-watch-4372.log,
+       오류가 늘면 daqerr-004372-<시각>/ 에 증거 + 책임자 메일 런당 1 통)
+기록   /Data_ssd/LOG/threshold-changes.log (사본 docs/) 에 10-08 23:45 행. 시트 Description 접두어 '비토 문턱값 변경' 은 append_runs.py 가 PRD S_THR 로 자동.
+       docs/THRESHOLD-HISTORY.md 는 PRD 가 생긴 뒤 tools/psd/thr-history.sh 로 재생할 것
+```
+**★ 기억할 것** — 설정 파일은 이제 **두 개**다. 옛 `DataTaking_IBD_sykim_2026.config` 는 run 4371 까지의 기록이고 수집은 `_thr4067x80` 을 읽는다.
+문턱을 또 바꿀 때도 **새 파일을 만들고 rcterm.params 만 바꾼다** (사용자 지시 : 덮어쓰기 금지). daq-tmux.sh 는 rcterm.params 를 그대로 쓰므로 재부팅 복구에 손댈 것 없다.
+
 #### 11.206 ★ 외장하드 없이 버틸 수 있는 기간 (사용자 질문, 09-28) — 저장소 3 년, 경희대 2027-02 말
 
 외장하드 8 회차 : RAW-008 (Z4ZBZE5Q) 09-22 가득 · PRD 세션은 베이 2 미장착으로 실패(code=1). 이후 하드가 없어 하드 백업 정지 (서버에 미이관 런 1,509 개 47 T).
@@ -3858,6 +3883,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.207         ★★ 문턱값 = run 4067 설정값의 80 % (새 설정 파일 _thr4067x80, 옛 파일 보존), run 4372 부터 (10-08 23:48). 계수율 310 → ~480 Hz.
+                veto-check-4372 · daqerr-watch-4372 (48 h) 가 지켜본다. 문턱 변경은 늘 새 파일 + rcterm.params
 §11.206         ★ 하드 없이 버티는 기간 : 저장소 84 T = 3 년, 경희대 11 T = 2027-02 말 (74 G/일). 하드 8 회차 PRD 는 베이 2 미장착으로 미완
 §11.205         ★ 타겟 뮤온 NPE 스펙트럼 veto 태그 유무·기간별 (MuonSpec.C, muspec/). 패널 AND 태깅 59 %(>3k)/72 %(>20k), 강한 veto 84/94 %.
                 dst/4237 은 스키마 1 이라 재생성 중
