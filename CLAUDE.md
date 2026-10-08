@@ -893,6 +893,33 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.208 ★★ run 4372 가 다른 계정의 OOM 으로 중단 — 4373 은 DRAM 미정렬, usbreset 1 회로 run 4374 재개 (10-09 08:22 ~ 08:29)
+
+```
+08:21:41  run 4372 정상 (서브런 512, 480 Hz, DAQ 로그 USB 오류 0)
+08:22:01  rcterm 이 TCB 모니터 소켓을 잃음 (TCB 로그 host disconnected)        ← 시스템이 스왑 스래싱 중
+08:22:14  커널 OOM : ojk(uid 1004) 세션(session-8918, 9/16 부터 열린 Claude Code 원격 scope)의 grep 이 anon-rss 245 GB / 250 GB
+          → 'Out of memory: Killed process (grep)'. DAQ 프로세스는 안 죽었다
+08:22:23  rcterm exit 2 → 감시자 restart #1 : daq·tcb·merger pkill → run 4372 는 'aborted' (DB), 4373 부팅. restart 메일(both) 자동 발송
+08:23:17  run 4373 Running 477 Hz — ★ 그러나 TCB 로그 Fail to align DRAM 8/8 (pkill 로 죽인 뒤 보드 상태가 남음. §11.171 의 그 모양 — 계수는 나온다)
+08:25:04  감시자 kill -TERM → 4373 정상 마감(exit 0, 서브런 2). DB 를 onlbit=0 + runlog 로 표시 (물리 자료 아님, 시트 등재 제외)
+08:25:26  usbreset #1 → 확인 런(--no-db 999999, 3 분) : DRAM 8/8 정렬(delay 5 4 4 4 3 3 3 3) · LIBUSB 0 · 475 Hz  — 한 번으로 풀렸다 (전원 재투입 뒤와 달리)
+08:29:02  감시자 재기동 → run 4374 Running · DRAM 8/8 · LIBUSB 0 · ~480 Hz · THR 4067×0.8 그대로
+```
+**뒷정리** — `badrun.sh --scan --run 4372 --quarantine --update-list` : 서브런 00513 (FADC 5.1 MB · SADC 0.87 MB, ROOT 로 안 열림) → `badrun/` (목록 627 런).
+Merged 는 postrun 이 00512 까지 이미 만들어 두었고(잘린 SADC 의 앞부분은 읽힌다, §11.136) `runcheck.sh --run 4372 --fix` 로 PRD 00512 복구 → **FADC 513 = PRD 513 완결**, 자동 이동 대상.
+veto-check : 4372 는 서브런 10·100 으로 다시 재어 4371 비교표 갱신(아래), 서브런 600 감시는 `veto-check-4374-s600.sh` 로 옮겼다. daqerr-watch-4372 는 heartbeat 의 런을 따라가므로 4374 도 본다 (4373 의 DRAM 8 건을 잡아 책임자 메일 1 통 + `daqerr-004373-*/`).
+메일 : 원인·조치·남은 것을 전문가 목록 + 책임자에게 (08:3x, `--to both`).
+
+**★ 교훈** — ① **이 PC 는 공용이다.** 다른 계정 프로세스 하나가 메모리를 다 쓰면 수집이 선다. DAQ 쪽에서 막을 방법이 없다 — cgroup 상한이나 분석 작업 분리는 책임자 몫.
+sklee 의 ./sshd · ./rcu-sched (§11.194, 9/10 부터 11 코어, load 32) 도 그대로다. ② **감시자의 pkill 복구 뒤에는 TCB 로그의 `is aligned` 8 줄을 세어야 한다** — restart 가 성공한 것처럼 보여도
+DRAM 이 안 맞은 채 24 h 가 돈다. 세션 모니터가 'USB/DRAM 오류 8 건' 으로 잡아 준 덕에 2 분 만에 알았다. 감시자 자체에 'Fail to align' 검사를 넣는 것이 백로그.
+③ rcterm 은 소켓을 잃으면 곧바로 exit 2 다 — 스래싱 40 초를 못 버틴다. 모니터 소켓 재연결(§6 백로그)이 있었으면 4372 는 살았다.
+
+**4371 대 4372 패널 비교 (veto-history, 각 서브런 10·100, % × 합계 = Hz)** — 4372 합계 482 Hz 중 늘어난 170 Hz 는 패널 2 (+134) · 8 (+49) 가 대부분
+(문턱이 196/268→146/150, 307/150→160/172 로 내려가 문턱 바로 위 잡음), 패널 4·6 은 한쪽 1,400 이상→160 대로 내려와 처음 AND 가 걸림(12.5 · 19.9 Hz, 뮤온율의 10 배),
+패널 9·11 은 160~360→1,400~1,600 으로 올라가 0 (4371 에선 0.4 · 2.1 Hz 로 뮤온율 수준). 패널 0·1 은 절반 이하, 12~14 는 같은 문턱이라 그대로. 표 전체는 `/Data_ssd/LOG/veto-check-4372-s100.log` 뒤 python 출력과 세션 기록.
+
 #### 11.207 ★★ 문턱값을 run 4067 설정값의 80 % 로 — 새 설정 파일로 수집 재시작, run 4372 부터 (사용자 지시, 10-08 23:4x)
 
 사용자 : "지금 veto 문턱이 run 4067 기준 설정값보다 얼마나 낮은지, 그리고 현재의 2 배로 올리면 4067 과 차이가 얼마인지 확인하라" →
@@ -3883,6 +3910,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.208         ★★ 10-09 08:22 run 4372 중단 = 다른 계정(ojk) grep 의 OOM (245 GB). 감시자 pkill 뒤 4373 은 DRAM 미정렬(onlbit=0) → usbreset 1 회 →
+                run 4374 재개 (DRAM 8/8, 480 Hz). 4372 꼬리 00513 격리 · PRD 복구 완결. ★ 공용 PC 메모리는 책임자 판단
 §11.207         ★★ 문턱값 = run 4067 설정값의 80 % (새 설정 파일 _thr4067x80, 옛 파일 보존), run 4372 부터 (10-08 23:48). 계수율 310 → ~480 Hz.
                 veto-check-4372 · daqerr-watch-4372 (48 h) 가 지켜본다. 문턱 변경은 늘 새 파일 + rcterm.params
 §11.206         ★ 하드 없이 버티는 기간 : 저장소 84 T = 3 년, 경희대 11 T = 2027-02 말 (74 G/일). 하드 8 회차 PRD 는 베이 2 미장착으로 미완
