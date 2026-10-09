@@ -893,6 +893,30 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.209 ★★★ [보안] sklee 계정의 ./sshd · ./rcu-sched 는 모네로 채굴기(XMRig) — 9/10 프랑스 IP 접속 직후부터 11 코어 점유 (사용자 질문, 10-09 17:4x)
+
+사용자 : "sklee 와 ojk 세션의 grep 이 뭘 돌리던 건지, 아직 도는지, 파일이 생기는 위치를 확인하라." **전부 읽기 전용** (남의 /proc 안쪽은 권한이 없어 명령줄·status·세계 읽기 파일만).
+
+**sklee — 채굴기다 (§11.194 의 의심이 확정).**
+```
+pid 227242 ./sshd · 227835 ./rcu-sched   09-10 20:15 시작 · 각 535 % CPU · 18 스레드 · 2.1 GB · ppid 1 · 아직 돈다
+실체      /dev/shm/.ICE-unix/rcu-sched (9.4 MB ELF stripped, md5 738339bd…) — 문자열에 XMRig 설정 : "algo": "rx/0", pool-{de,fr,hk,nyc}.supportxmr.com:3333/443/80, cryptonight
+연결      141.94.96.71:3333 (OVH, 프랑스) 2 개  ← 채굴 풀 포트
+지속화    /dev/shm/sshd (1.4 KB bash) : 2 분마다 rcu-sched 가 없으면 /dev/shm/.ICE-unix 또는 /tmp/.ICE-Unix 에서 재기동.
+          sklee crontab 이 매일 00:00 에 이것을 띄운다 (root CROND 자식 sh -c /dev/shm/sshd 가 09-12 · 09-13 · 09-28 · 10-03 … 날마다 남아 있음)
+침입      09-10 20:12~20:15 sklee 가 151.241.154.243(파리, AS399486) 에서 ssh 3 분 접속 → 직후 두 프로세스. 그 뒤 sklee 로그인 없음 → 계정 유출 의심
+영향      load 26~32 (12 코어 중 11), 메모리 4.3 GB. 수집은 돌지만 배치가 2 배 느리다. 오늘 OOM 과는 별개
+```
+증거 사본 `/Data_ssd/LOG/security-20261009/` (watchdog 스크립트 · 바이너리 · 문자열 · ps · ss · dmesg). **책임자에게 긴급 메일(권고 : kill → crontab 제거 → 파일 삭제 → 계정 잠금·키 점검 → secure 로그 · 방화벽). 다른 계정이라 세션은 손대지 않았다.**
+
+**ojk — OOM 을 낸 grep 은 ojk 의 Claude Code 원격 세션이 돌린 것이고 이미 죽었다.**
+```
+명령      grep -v "^Info\|Processing\|^$" <scratchpad>/psd/align.log | head -30   (PSDAlign.C 가 끝나길 기다리던 bash 래퍼 709714 · 723699 의 일부)
+          = /home/ojk/analysis3 의 PSD 정렬 매크로 로그를 훑던 것. 245 GB 가 된 이유는 로그가 개행 없는 거대한 한 줄(ROOT 진행 표시 \r)이었을 가능성 — 스크래치(700)는 못 읽어 확인 못 함
+지금      grep 1719105 는 OOM 뒤 reaped. PSDAlign.C · find / -maxdepth 4 도 끝났다. 남은 것은 sleep 루프 bash 래퍼 넷(무해)과 ccd-cli 세션 5 개(ojk RSS 합 1.3 GB), refpair 파이프라인 대기 루프
+파일 위치 /home/ojk/analysis3 (results/*.pdf, 10-09 17:11) · /home/ojk/analysis3_refpair/SampleFiles/Step3 · /scratch/junkyo (2.2 T, SampleFiles 10-09 01:41). /scratch/RunSummary 에는 ojk 파일 없음
+```
+
 #### 11.208 ★★ run 4372 가 다른 계정의 OOM 으로 중단 — 4373 은 DRAM 미정렬, usbreset 1 회로 run 4374 재개 (10-09 08:22 ~ 08:29)
 
 ```
@@ -3910,6 +3934,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.209         ★★★ [보안] sklee 의 ./sshd · ./rcu-sched = XMRig 모네로 채굴기 (/dev/shm/.ICE-unix, supportxmr 풀, 141.94.96.71:3333, crontab 00:00 재기동,
+                9/10 파리 IP 접속 직후). 증거 /Data_ssd/LOG/security-20261009/, 책임자 긴급 메일. ojk 의 OOM grep 은 Claude 세션의 로그 훑기, 이미 죽음
 §11.208         ★★ 10-09 08:22 run 4372 중단 = 다른 계정(ojk) grep 의 OOM (245 GB). 감시자 pkill 뒤 4373 은 DRAM 미정렬(onlbit=0) → usbreset 1 회 →
                 run 4374 재개 (DRAM 8/8, 480 Hz). 4372 꼬리 00513 격리 · PRD 복구 완결. ★ 공용 PC 메모리는 책임자 판단
 §11.207         ★★ 문턱값 = run 4067 설정값의 80 % (새 설정 파일 _thr4067x80, 옛 파일 보존), run 4372 부터 (10-08 23:48). 계수율 310 → ~480 Hz.
