@@ -908,7 +908,17 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 **밟은 것** — ① `printf "$body"` 가 본문의 `%` 를 서식으로 읽어 "300% 이상" 에서 깨졌다 → `printf '%b'`. ② `ss -tnH state established` 는 **state 필터를 주면 State 열이 빠져 4 열**(`0 0 local peer`)이다 — 픽스처를 5 열로 썼다가 C 가 안 잡혔다. 실물 출력을 복사해 픽스처를 만들 것(§11.177 의 교훈 그대로).
 지금 `minerwatch.sh --status` 는 A(./sshd ./rcu-sched) · B(두 파일) · C(141.94.96.71 · .195 :3333) 를 잡는다. 첫 cron 이 같은 사건으로 또 메일을 내지 않게 상태 파일에 현재 서명을 심어 두었다 (6 h 뒤에도 남아 있으면 다시 알린다).
 
-**사용자가 할 것 (이 순서로, 모두 root)**
+**✅ 결과 (사용자가 root 로 실행, 18:17~18:20)** — frontend 를 wheel 에 넣었지만 이 세션의 셸은 그 전에 떠서 sudo 가 안 됐고(`sg wheel` 은 분류기가 막음), 사용자가 직접 돌렸다.
+```
+cleanup --ojk   sklee 프로세스 96 → 0 (채굴기 2 + 날마다 쌓인 sh -c /dev/shm/sshd) · crontab 제거 (@reboot/@daily/@monthly /dev/shm/sshd, 사본) · 채굴 파일 삭제 · passwd -l sklee · 키 보관
+                ojk 프로세스 전부 종료 → 18:17:27 ojk 가 재접속, Claude 원격 서버 6 개만 (무해). 3333 연결 0
+secure 로그     sklee 비밀번호 로그인이 09-10 파리 IP 말고도 09-23 · 10-04 두 번 더 (다른 해외 IP) — ★ 비밀번호 유출 확정. 잠금이 맞다
+harden 1 2 3 6  /dev/shm noexec (fstab+remount 확인) · cron.deny sklee · firewalld OUTPUT 3333/3334/4444/5555/7777/14444/45700 + 141.94.96.0/24 REJECT (success) ·
+                user-1004/1005/1006.slice MemoryMax=120G MemoryHigh=100G (daemon-reload). ④ sshd 키 전용 · ⑤ fail2ban 은 아직 (fail2ban inactive)
+결과            load 32 → 1.4 · minerwatch 18:20 '징후 해소' · DAQ run 4374 그대로 477 Hz (서브런 602)
+```
+**남은 것** — ④ `harden-root.sh --apply 4` 는 ojk·cheong 이 키로 접속하는지 확인한 뒤(비밀번호만 쓰면 잠긴다). ⑤ `--apply 5` 는 망이 되는 때. sklee 본인 확인 뒤 비밀번호 교체·`passwd -u`. 대화에 올린 root 비밀번호 교체.
+**사용자가 한 것 (이 순서로, 모두 root)**
 ```
 sudo bash /Data_ssd/LOG/security-20261009/cleanup-root.sh --dry-run     # 대상 확인
 sudo bash /Data_ssd/LOG/security-20261009/cleanup-root.sh               # (ojk 까지 세우려면 --ojk)
