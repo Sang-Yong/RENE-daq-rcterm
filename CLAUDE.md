@@ -772,6 +772,19 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   쓰기 도중 죽은 런에서는 거의 언제나 **마지막 SADC 가 안 닫힌 것**이고, 그때는
   부분 Merged 가 정상 ROOT 파일로 남아 있으므로 **PRD 는 살릴 수 있다** (§11.64).
 
+## 하네스: RENE DAQ 운용 (Harness v2, 2026-10-10)
+
+**목표:** 수집·후처리·백업·모니터링·코드 변경·기록을 전문 에이전트에 나눠 맡기되, 사고의 대부분이 "절차를 빠뜨림" 에서 났으므로 절차를 스킬에 박고 읽기 전용 검증자를 붙인다.
+
+**호출 조건:** DAQ 운용 요청(상태 점검 · 사건 대응 · 문턱값 변경 · 모니터링 분석 · 외장하드 백업 · 저장소 코드 변경 · 기록과 메일)을 받으면 `rene-daq-orchestrator` 스킬을 사용한다. 단순 질문에는 직접 답해도 된다. 에이전트 정의는 `.claude/agents/`, 스킬은 `.claude/skills/`, 중간 산출물은 `/Data_ssd/LOG/harness/`.
+
+**하드웨어 권한:** 문서화된 복구 절차(감시자 TERM · killdaq · usbreset · 확인 런 · 재기동)는 자동, 전원 재투입 · HV · 설정 변경 · 다른 계정 · root 는 사용자 확인 (2026-10-10 사용자 결정).
+
+**변경 이력:**
+| 날짜 | 변경 내용 | 대상 | 사유 |
+| --- | --- | --- | --- |
+| 2026-10-10 | Harness v2 로 처음 구성 — 에이전트 8 · 스킬 6 신규(+기존 2 연결) · 오케스트레이터 | 전체 | - |
+
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
 대상 시트 — **RENE Offline Data GoodRuns**, 탭 `gid=0`
@@ -892,6 +905,14 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.211 ★ 하네스 v2 구성 — 에이전트 8 · 스킬 6 + 오케스트레이터 (사용자 지시 '하네스 구성해줘', 10-10)
+
+`harness` 플러그인(revfactory/harness 2.1.0)의 절차로 만들었다. 범위는 사용자 선택(전체 7 역할), 하드웨어 권한은 "문서화된 복구 절차는 자동, 그 외 확인".
+에이전트(`.claude/agents/`) : daq-status-inspector(sonnet, 읽기 전용) · daq-incident-responder(opus) · threshold-change-operator(opus) · monitor-analyst(opus) · backup-operator(sonnet) ·
+code-engineer(opus) · code-reviewer(opus, 읽기 전용) · ops-scribe(sonnet). 스킬(`.claude/skills/`) : daq-status-check(+scripts/status.sh) · daq-incident-playbook · veto-threshold-change ·
+run-summary-analysis · rene-code-change · ops-record-and-notify · **rene-daq-orchestrator**(혼합 : 서브에이전트 위임 + 코드는 생성·검증 쌍, Workflow 는 안 쓴다). 기존 스킬 둘은 그대로 연결.
+스킬 본문은 §11 의 사건 기록에서 뽑은 분기표·금지 목록·정상 범위다 — 새 규칙을 만든 것이 아니라 흩어진 규칙을 한 자리에 모았다. 호출 조건·이력은 위 '## 하네스' 절, 회고·개선은 `harness:evolve`.
 
 #### 11.210 ★★ [보안] 채굴기 제거·재발 방지 — root 스크립트 둘(사용자 실행) + frontend 감시 cron (사용자 지시, 10-09 18:1x)
 
@@ -3968,6 +3989,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.211         ★ 하네스 v2 : 에이전트 8 · 스킬 6 + rene-daq-orchestrator (.claude/agents · .claude/skills). DAQ 운용 요청은 오케스트레이터로
 §11.210         ★★ 채굴기 제거·재발 방지 : root 스크립트 cleanup-root.sh / harden-root.sh (/Data_ssd/LOG/security-20261009, 사용자가 sudo 로 실행) +
                 scripts/minerwatch.sh cron */10 (위장 프로세스·/dev/shm 실행 파일·풀 포트 연결 → 책임자 메일). frontend 는 root 가 없다
 §11.209         ★★★ [보안] sklee 의 ./sshd · ./rcu-sched = XMRig 모네로 채굴기 (/dev/shm/.ICE-unix, supportxmr 풀, 141.94.96.71:3333, crontab 00:00 재기동,
