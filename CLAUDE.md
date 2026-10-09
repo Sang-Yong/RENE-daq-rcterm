@@ -893,6 +893,30 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.210 ★★ [보안] 채굴기 제거·재발 방지 — root 스크립트 둘(사용자 실행) + frontend 감시 cron (사용자 지시, 10-09 18:1x)
+
+사용자 : "sklee 와 ojk 프로세스 모두 죽이고 관련 파일을 다 지우고, 로그에 기록하고, 다시는 이런 문제가 없도록 보안을 강화하라."
+**frontend 에는 root 가 없다** (`sudo -n` 은 암호 요구, /dev/shm 은 sticky 라 남의 파일을 못 지운다). 그래서 root 몫은 스크립트로 만들어 사용자가 한 줄로 돌리고, 감시는 내 권한으로 cron 에 넣었다.
+
+| 무엇 | 어디 | 하는 일 |
+|---|---|---|
+| 사건 기록 | `/Data_ssd/LOG/security-20261009/incident.log` | 09-10 접속 → 채굴기 기동 → crontab → 10-09 확정까지 시간순 (append-only) |
+| **`cleanup-root.sh`** | 같은 폴더 (`sudo bash … [--dry-run] [--ojk]`) | sklee 의 /dev/shm·/tmp 실행 프로세스 kill -9 → sklee 전 프로세스 종료 → crontab 보관 후 제거 → `/dev/shm/.ICE-unix` `/dev/shm/sshd` `/tmp/.ICE-Unix` 삭제 → 09-10 이후 sklee 파일 목록 → `passwd -l sklee` + authorized_keys 보관 후 비움 → last/secure 발췌 → 3333 연결 재확인. `--ojk` 를 주면 ojk 계정 프로세스도 전부 종료 (★ 동료의 분석·Claude 세션이 끊기므로 따로 뺐다 — OOM 을 낸 grep 은 이미 죽었고 남은 것은 대기 루프뿐이라 기본에는 안 넣었다). 전부 `cleanup.log` 에 |
+| **`harden-root.sh`** | 같은 폴더 (`sudo bash … [--apply] [1-6]`) | ① /dev/shm·/tmp noexec (fstab + remount) ② cron.deny sklee ③ firewalld 아웃바운드 3333/3334/4444/5555/7777/14444/45700 + 141.94.96.71 REJECT ④ sshd 키 전용·root 금지·MaxAuthTries 3 (★ 비밀번호만 쓰는 사용자가 있으면 먼저 키부터) ⑤ fail2ban ⑥ 분석 계정(1004·1005·1006) user slice MemoryMax 120 G (10-09 OOM 재발 방지, frontend 는 제외). 기본은 미리보기 |
+| **`scripts/minerwatch.sh`** | 저장소 (cron `*/10`) | 읽기 전용 징후 : A 상대 경로로 뜬 ./sshd ./rcu-sched 류 · B /dev/shm·/tmp/.* 의 실행 파일 · C 채굴 풀 포트 연결 · D (참고) 다른 계정 300 % 이상 10 분. 징후가 있으면 책임자 메일(같은 징후 6 h 에 한 번), 해소되면 로그. `--status` `--dry-run` `--install-cron`. 시험 `tests/minerwatch.test.sh` 22 |
+
+**밟은 것** — ① `printf "$body"` 가 본문의 `%` 를 서식으로 읽어 "300% 이상" 에서 깨졌다 → `printf '%b'`. ② `ss -tnH state established` 는 **state 필터를 주면 State 열이 빠져 4 열**(`0 0 local peer`)이다 — 픽스처를 5 열로 썼다가 C 가 안 잡혔다. 실물 출력을 복사해 픽스처를 만들 것(§11.177 의 교훈 그대로).
+지금 `minerwatch.sh --status` 는 A(./sshd ./rcu-sched) · B(두 파일) · C(141.94.96.71 · .195 :3333) 를 잡는다. 첫 cron 이 같은 사건으로 또 메일을 내지 않게 상태 파일에 현재 서명을 심어 두었다 (6 h 뒤에도 남아 있으면 다시 알린다).
+
+**사용자가 할 것 (이 순서로, 모두 root)**
+```
+sudo bash /Data_ssd/LOG/security-20261009/cleanup-root.sh --dry-run     # 대상 확인
+sudo bash /Data_ssd/LOG/security-20261009/cleanup-root.sh               # (ojk 까지 세우려면 --ojk)
+sudo bash /Data_ssd/LOG/security-20261009/harden-root.sh                # 미리보기
+sudo bash /Data_ssd/LOG/security-20261009/harden-root.sh --apply 1 2 3 6   # ④⑤ 는 키 확인·망 확인 뒤
+scripts/minerwatch.sh --status                                          # '징후 없음' 이어야 한다
+```
+
 #### 11.209 ★★★ [보안] sklee 계정의 ./sshd · ./rcu-sched 는 모네로 채굴기(XMRig) — 9/10 프랑스 IP 접속 직후부터 11 코어 점유 (사용자 질문, 10-09 17:4x)
 
 사용자 : "sklee 와 ojk 세션의 grep 이 뭘 돌리던 건지, 아직 도는지, 파일이 생기는 위치를 확인하라." **전부 읽기 전용** (남의 /proc 안쪽은 권한이 없어 명령줄·status·세계 읽기 파일만).
@@ -3934,6 +3958,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.210         ★★ 채굴기 제거·재발 방지 : root 스크립트 cleanup-root.sh / harden-root.sh (/Data_ssd/LOG/security-20261009, 사용자가 sudo 로 실행) +
+                scripts/minerwatch.sh cron */10 (위장 프로세스·/dev/shm 실행 파일·풀 포트 연결 → 책임자 메일). frontend 는 root 가 없다
 §11.209         ★★★ [보안] sklee 의 ./sshd · ./rcu-sched = XMRig 모네로 채굴기 (/dev/shm/.ICE-unix, supportxmr 풀, 141.94.96.71:3333, crontab 00:00 재기동,
                 9/10 파리 IP 접속 직후). 증거 /Data_ssd/LOG/security-20261009/, 책임자 긴급 메일. ojk 의 OOM grep 은 Claude 세션의 로그 훑기, 이미 죽음
 §11.208         ★★ 10-09 08:22 run 4372 중단 = 다른 계정(ojk) grep 의 OOM (245 GB). 감시자 pkill 뒤 4373 은 DRAM 미정렬(onlbit=0) → usbreset 1 회 →
