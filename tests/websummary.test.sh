@@ -63,6 +63,8 @@ EOF
 #                        가짜 자신이 목격하게 하는 것 -- 시각차보다
 #                        확실한 인과 증거다)
 #    WS_TEST_PUBLISH_RC publish_google.py 가짜의 종료코드 (기본 0)
+#    WS_TEST_PUBLISH_OUT publish_google.py 가짜가 stdout 에 낼 한 줄
+#                        (드라이브 경고 '[WARN] drive N/M 교체 실패 ...' 재현용)
 mk_fake_mon() {
    local mon=$1 s
    mkdir -p "$mon"
@@ -122,6 +124,7 @@ if [ -n "${WS_TEST_WEBROOT:-}" ] && [ -r "$WS_TEST_WEBROOT/summary.html" ]; then
 else
    echo "webroot-NOT-ready" >> "${WS_TEST_CALLS:-/dev/null}"
 fi
+[ -n "${WS_TEST_PUBLISH_OUT:-}" ] && printf '%s\n' "$WS_TEST_PUBLISH_OUT"
 exit "${WS_TEST_PUBLISH_RC:-0}"
 FAKE
    chmod +x "$mon/publish_google.py"
@@ -538,11 +541,49 @@ if [ "$RC15b" -ne 0 ] && [ -z "$SLR15b" ] && [ "$MB15b" -eq 0 ] && [ "${N15b:-0}
 CHK metrics_dst_m2_build_fail_blocks=1"; else R="$R
 CHK metrics_dst_m2_build_fail_blocks=0"; echo "[15b] 진단 : rc=$RC15b last_run=[$SLR15b] metrics=$MB15b notify=$N15b"; cat "$T/15/log"; cat "$T/15/notify" 2>/dev/null; fi
 
+# ==== [16] 드라이브 그림 교체 실패는 발행을 막지 않는다 (2026-10-10, §11.211) ====
+#     publish_google.py 가 rc=0 + '[WARN] drive N/M 교체 실패' 를 내는 상황.
+#     보는 것 : exit 0 · last_run 전진 · 로그에 WARN 한 줄 · 책임자 알림은
+#     두 회차에 걸쳐 딱 한 번. metrics_source=dst 로 두고 metrics --verify(전체)가
+#     통과하게 해서 그 갈래가 매 회차 $FAILSTATE.warn 을 지우는데도 드라이브
+#     경고가 다시 울리지 않는지(상태 파일이 따로인지) 함께 본다 -- 같은 파일을
+#     썼으면 매시 메일이 다시 나갔을 것이다. 끝으로 경고가 사라진 회차에서
+#     $FAILSTATE.drive 가 치워져 다음 재발 때 다시 알릴 수 있는지도 본다.
+mkdir -p "$T/16/tsv" "$T/16/mon"; mk_fake_mon "$T/16/mon"; seed_pngs "$T/16/tsv"
+mkrun "$T/16/RAW" 004346 3 3
+mkparams "$T/16/params" "$T/16/tsv" 4346 1; sed -i 's/metrics_source = legacy/metrics_source = dst/' "$T/16/params"
+#  운영 로그(2026-10-10 01:35) 의 문구를 그대로 쓴다 -- 개수와 이름이 실제 그 회차의 것이다
+DW16='[WARN] drive 20/20 교체 실패 (로컬 png 없음 20 : bg_trend_accidental.png, bg_trend_fastn.png, bg_trend_lihe.png …)'
+run16() { WEBSUMMARY_ROOTS="$T/16/RAW" WEBSUMMARY_LOCK="$T/16/.lock" WEBSUMMARY_STATE="$T/16/state" WEBSUMMARY_LOG="$T/16/log" \
+   WEBSUMMARY_MON_DIR="$T/16/mon" WEBSUMMARY_NOTIFY="$T/16/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/16/failstate" \
+   WS_TEST_CALLS="$T/16/calls" WS_TEST_NOTIFY="$T/16/notify" WS_TEST_PUBLISH_OUT="$1" \
+   "$SUT" --params "$T/16/params" >/dev/null 2>&1; }
+run16 "$DW16"; RC16=$?; rm -f "$T/16/state"; run16 "$DW16"; RC16b=$?
+SLR16=$(awk -F= '$1=="last_run"{print $2}' "$T/16/state" 2>/dev/null)
+W16=$(grep -c 'WARN\] publish : \[WARN\] drive 20/20' "$T/16/log")
+N16=$(grep -c '드라이브 그림 교체' "$T/16/notify" 2>/dev/null || echo 0)
+DF16=$([ -e "$T/16/failstate.drive" ] && echo yes || echo no)
+#  세 번째 회차 -- 이번엔 경고가 없다. [OK ] publish 로 끝나고 상태 파일이 치워져야 한다
+rm -f "$T/16/state"; run16 ""; RC16c=$?
+OK16=$(grep -c 'OK  \] publish' "$T/16/log"); DF16c=$([ -e "$T/16/failstate.drive" ] && echo yes || echo no)
+if [ "$RC16" -eq 0 ] && [ "$RC16b" -eq 0 ] && [ "$RC16c" -eq 0 ] && [ "$SLR16" = "4346" ] \
+   && [ "$W16" -eq 2 ] && [ "${N16:-0}" -eq 1 ] && [ "$DF16" = yes ] \
+   && [ "$OK16" -eq 1 ] && [ "$DF16c" = no ]; then
+   R="$R
+CHK drive_warn_no_block_notify_once=1"
+else
+   R="$R
+CHK drive_warn_no_block_notify_once=0"
+   echo "[16] 진단 : rc=$RC16/$RC16b/$RC16c last_run=[$SLR16] warn=$W16 notify=$N16 drivestate=$DF16/$DF16c ok=$OK16"
+   cat "$T/16/log"; cat "$T/16/notify" 2>/dev/null
+fi
+
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
          publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny \
          gate_new_runs_notify_once gate_after_ibd old_run_selfheal_no_block old_run_warn_notify_once \
-         metrics_dst_m2_skips_verify metrics_dst_m2_build_fail_blocks; do
+         metrics_dst_m2_skips_verify metrics_dst_m2_build_fail_blocks \
+         drive_warn_no_block_notify_once; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -551,4 +592,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (18/18)"
+echo "PASS websummary (19/19)"

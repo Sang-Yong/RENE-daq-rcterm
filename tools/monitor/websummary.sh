@@ -34,7 +34,8 @@
 #      PRD 0 이라 영영 '미완결' 이고 그 뒤 런을 전부 막았다(§11.179). 단 **heartbeat 가 가리키는
 #      수집 중인 런은 제외** -- 막 시작한 런도 FADC 가 1개라서다. 그 런은 언제나 게이트를 막는다.
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
-#      -> publish_google.py (publish=1 일 때만)
+#      -> publish_google.py (publish=1 일 때만). 시트 쓰기 실패는 발행을 막고,
+#         드라이브 그림 교체 실패는 WARN + 책임자 경고 한 번뿐이다 (2026-10-10, §11.211)
 #
 #  상태 : <WEBSUMMARY_STATE> 에 'last_run=N' 한 줄. 모든 단계(발행 포함)가
 #      성공한 뒤에만 전진한다. publish=0 이면 로컬 생성까지만 마치고
@@ -445,7 +446,31 @@ else
    log "[OK  ] webroot 복사 (${#pngs[@]}개 png + summary.html)"
 
    if [ "$PUBLISH" = 1 ]; then
-      run_stage "publish" "$MON/publish_google.py" --params "$PARAMS" || exit 1
+      #  ★ 2026-10-10 : run_stage 를 쓰지 않는다 -- 종료코드 하나로는 '시트가 막혔다' 와
+      #  '그림만 못 바꿨다' 를 가를 수 없다. 시트 쓰기 실패(종료코드≠0)는 그대로 막고,
+      #  드라이브 교체 실패는 publish_google.py 가 종료코드 0 + '[WARN] drive N/M 교체
+      #  실패' 한 줄로 알려 오므로 여기서 경고로만 처리한다. 그림 이름이 NN_*.png 로
+      #  바뀐 뒤 map_file 의 옛 이름이 전부 '로컬 png 없음' 이 되어 매시 발행 전체가
+      #  막혔고 last_run 이 4345 에 묶였다 (§11.211. 그 내내 시트는 정상이었다).
+      #  metrics-verify 와 같은 관용구 : 출력을 받아 로그에 흘리고 그 안을 본다.
+      log "[RUN ] publish"
+      POUT=$(nice -n 15 ionice -c2 -n7 "$MON/publish_google.py" --params "$PARAMS" 2>&1); prc=$?
+      printf '%s\n' "$POUT" >>"$LOG"
+      if [ $prc -ne 0 ]; then
+         log "[FAIL] publish (exit=$prc). 로그 : $LOG"
+         notify_fail "stage:publish" "런 서머리 발행이 막혔다 : 단계 publish 실패 (exit=$prc), run $NEWLIST. 시트 쓰기가 실패한 것이다. 로그 $LOG"
+         exit 1
+      fi
+      #  경고 상태는 $FAILSTATE.warn 과 따로 둔다 -- 그 파일은 metrics-verify(전체)가
+      #  맞을 때마다 지워 버리므로, 같이 쓰면 매시 경고 메일이 다시 나간다.
+      DWARN=$(printf '%s\n' "$POUT" | grep -m1 '^\[WARN\] drive ')
+      if [ -n "$DWARN" ]; then
+         log "[WARN] publish : $DWARN -- 시트 발행은 성공했다. 발행을 막지 않는다"
+         notify_fail "drive:$DWARN" "런 서머리 : 드라이브 그림 교체가 실패했다 ($DWARN). 시트 발행은 성공했고 다음 회차도 계속 발행한다. config/websummary.map 의 이름이 지금 그림 이름(NN_*.png)과 맞는지 볼 것 -- 새 그림을 드라이브 폴더에 올린 뒤 publish_google.py --params $PARAMS --init 으로 map 을 다시 만든다. 로그 $LOG" "$FAILSTATE.drive"
+      else
+         log "[OK  ] publish"
+         rm -f "$FAILSTATE.drive" 2>/dev/null
+      fi
    else
       log "[SKIP] publish=0 -- 로컬 생성까지만"
    fi

@@ -228,7 +228,8 @@ def main():
     ws = gspread.authorize(cr).open_by_key(p["sheet_id"]) \
                .get_worksheet_by_id(int(p.get("sheet_gid", "0")))
     grid = ws.get_all_values()
-    bdir = "/Data_ssd/LOG/websummary"; os.makedirs(bdir, exist_ok=True)
+    #  시험이 실 /Data_ssd 를 건드리지 않게 params 로 갈아끼울 수 있다. 기본값은 그대로다.
+    bdir = p.get("sheet_backup_dir", "/Data_ssd/LOG/websummary"); os.makedirs(bdir, exist_ok=True)
     bak = os.path.join(bdir, time.strftime("sheet-backup-%Y%m%d%H%M%S.tsv"))
     with open(bak, "w", encoding="utf-8") as fh:
         for r in grid: fh.write("\t".join(r) + "\n")
@@ -284,9 +285,26 @@ def main():
             failed.append((n, f"{type(e).__name__}: {e}"))
     print(f"[DRIVE] {nup}/{len(fmap)} 개 교체")
     if failed:
+        #  ★ 2026-10-10 : 드라이브 교체 실패로 종료코드 1 을 내던 것을 그만둔다.
+        #  시트가 정본이고 드라이브는 사람이 올려 둔 파일의 '내용 교체' 일 뿐이다
+        #  (drive_find 의 주석 -- 서비스 계정은 파일을 만들 수 없다). 그림 이름이
+        #  NN_*.png 로 바뀐 2026-09-13 뒤로 map_file 의 옛 20 줄이 전부 '로컬 png
+        #  없음' 이 되어 매시 exit 1 이 났고, websummary.sh 가 그것을 막는 실패로
+        #  보아 last_run 이 4345 에 묶였다 -- 런 28 개가 한 달 가까이 발행 대기였고
+        #  그 내내 시트는 정상으로 쓰이고 있었다. 다시 시도는 다음 회차가 어차피
+        #  한다(map 은 그대로 남는다). 시트 쓰기 실패는 그대로 치명적이다 --
+        #  그쪽은 위에서 sys.exit 하거나 예외가 그대로 전파된다.
+        groups = {}
         for n, reason in failed:
-            print(f"[WARN] drive update 실패 : {n}.png -- {reason}")
-        sys.exit(1)   # 오케스트레이터(Task 9)가 다음 주기에 다시 시도하도록
+            groups.setdefault(reason, []).append(n + ".png")
+        parts = []
+        for reason in sorted(groups):
+            names = sorted(groups[reason])
+            shown = ", ".join(names[:3]) + (" …" if len(names) > 3 else "")
+            parts.append(f"{reason} {len(names)} : {shown}")
+        #  한 줄 요약이다 -- 20 줄을 쏟아내면 로그에서 진짜 실패가 묻힌다.
+        #  websummary.sh 가 이 줄을 찾아 책임자에게 한 번만 경고를 보낸다.
+        print(f"[WARN] drive {len(failed)}/{len(fmap)} 교체 실패 ({' / '.join(parts)})")
 
 def read_map(path):
     m = {}

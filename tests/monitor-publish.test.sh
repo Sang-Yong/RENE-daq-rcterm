@@ -26,6 +26,13 @@
 #      (컨트롤러 판정 R9 -- 소비 쪽만 본다. 분류 규칙 자체는
 #      tests/monitor-runclass.test.sh 의 몫이다)
 #   ⑨ HEADER 상수에 "Type" 이 인덱스 1(Run 다음)에 있고 전체 20열인가
+#   ⑪ 드라이브 교체가 일부/전부 실패해도 rc=0 이고, 실패 20줄이 아니라
+#      '[WARN] drive N/M 교체 실패 (사유)' 한 줄로 사유별로 모여 나오는가
+#      (2026-10-10 -- 그림 이름이 NN_*.png 로 바뀐 뒤 map_file 의 옛 20줄이
+#      전부 '로컬 png 없음' 이 되어 매시 exit 1 이 났고, websummary.sh 가
+#      그것을 막는 실패로 보아 last_run 이 4345 에 묶여 런 28 개가 발행
+#      대기였다. 시트는 그 내내 정상으로 쓰이고 있었다)
+#   ⑫ 시트 쓰기 실패(되대조 불일치)는 그대로 치명적이다 -- rc≠0, 드라이브로 안 간다
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -346,9 +353,141 @@ if [ "$RES" = "$T/repo/config/websummary.map" ]; then R="$R
 CHK map_relative=1"; else R="$R
 CHK map_relative=0"; echo "[10] 진단 : map_file=$RES"; fi
 
+# ⑪⑫ 드라이브 교체 실패는 경고(rc=0 + 한 줄 요약), 시트 쓰기 실패는 치명적 ----
+#    main() 의 드라이브 루프와 종료코드 판정을 *실제 코드로* 돌린다. 거기까지
+#    들어가려면 자격증명·gspread·네트워크가 필요하므로 그 셋을 sys.modules 에
+#    가짜로 꽂고 drive_update 만 갈아끼운다. 구글·네트워크·/Data_ssd 무접촉
+#    (sheet_backup_dir 로 백업 자리를 샌드박스로 돌린다).
+cat > "$T/drive_harness.py" <<'PYEOF'
+import sys, os, types, importlib.util
+SUT, PARAMS, MODE = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def _mod(name):
+    m = types.ModuleType(name); m.__path__ = []; sys.modules[name] = m; return m
+
+class _Creds:
+    token = "FAKE_TOKEN"
+    @staticmethod
+    def from_service_account_file(path, scopes=None): return _Creds()
+    def refresh(self, req): pass
+
+g       = _mod("google")
+oauth2  = _mod("google.oauth2")
+sa      = _mod("google.oauth2.service_account"); sa.Credentials = _Creds
+gauth   = _mod("google.auth")
+gtrans  = _mod("google.auth.transport")
+greq    = _mod("google.auth.transport.requests")
+class _Req:
+    def __init__(self, *a, **k): pass
+greq.Request = _Req
+g.oauth2, oauth2.service_account = oauth2, sa
+g.auth, gauth.transport, gtrans.requests = gauth, gtrans, greq
+
+#  시트에는 헤더 + run 4280 이 이미 있다 -> 새 행은 4281,4282 둘
+GRID = [["Run"] + ["x"] * 19, ["4280"] + ["x"] * 19]
+class _WS:
+    def __init__(self): self.grid = [r[:] for r in GRID]
+    def get_all_values(self): return [r[:] for r in self.grid]
+    def append_row(self, row, value_input_option=None):
+        self.grid.append([str(c) for c in row])
+    def append_rows(self, rows, value_input_option=None):
+        for r in rows:
+            r = [str(c) for c in r]
+            if MODE == "sheetbad":      # 되대조가 어긋나게 한 칸을 일부러 바꿔 쓴다
+                r = r[:1] + ["TAMPERED"] + r[2:]
+            self.grid.append(r)
+class _SH:
+    def __init__(self): self.ws = _WS()
+    def get_worksheet_by_id(self, gid): return self.ws
+gs = _mod("gspread"); gs.authorize = lambda cr: type("C", (), {"open_by_key": lambda s, k: _SH()})()
+
+spec = importlib.util.spec_from_file_location("pg", SUT)
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.find_creds = lambda: PARAMS        # 있기만 하면 된다 -- 가짜 Credentials 는 읽지 않는다
+
+def fake_drive_update(token, fid, path, dry):
+    n = os.path.basename(path)
+    if n.startswith("02_"): return False                  # 드라이브가 200 이 아닌 응답
+    if n.startswith("03_"): raise RuntimeError("boom")     # 개별 파일 예외
+    return True
+m.drive_update = fake_drive_update
+
+sys.argv = [SUT, "--params", PARAMS]
+try:
+    m.main()
+except SystemExit as e:
+    code = e.code
+    if code is None: sys.exit(0)
+    if isinstance(code, int): sys.exit(code)
+    print(code, file=sys.stderr); sys.exit(1)
+PYEOF
+
+mkdir -p "$T/web2" "$T/bak"
+for n in 01_rate_candidates_nGd 02_rate_candidates_nH 03_rate_raw_nGd; do : > "$T/web2/$n.png"; done
+#  map 넷 중 셋만 로컬에 있다. rate_trend_rll 은 '로컬 png 없음' 갈래다
+printf '%s\n' \
+   '01_rate_candidates_nGd	FAKE_1' \
+   '02_rate_candidates_nH	FAKE_2' \
+   '03_rate_raw_nGd	FAKE_3' \
+   'rate_trend_rll	FAKE_4' > "$T/drive.map"
+sed -e "s|^map_file.*|map_file = $T/drive.map|" -e "s|^webroot.*|webroot = $T/web2|" \
+    "$T/websummary.params" > "$T/drive.params"
+printf 'sheet_backup_dir = %s\n' "$T/bak" >> "$T/drive.params"
+
+run_harness() {   # $1=params $2=mode
+   env -i PATH="$PATH" HOME="$T/fake-home" TZ=Asia/Seoul \
+      python3 "$T/drive_harness.py" "$SUT" "$1" "$2"
+}
+
+OUT11=$(run_harness "$T/drive.params" drive 2>"$T/err11.txt"); RC11=$?
+NW11=$(printf '%s\n' "$OUT11" | grep -c '^\[WARN\] drive ')
+#  ⑪b 실제로 막혀 있던 그 상황 : map 은 옛 이름 20 줄, webroot 에는 하나도 없다
+#  (config/websummary.map 의 실제 이름을 그대로 복사했다 -- gitignore 대상이라
+#   저장소에는 없고, 2026-10-10 운영 파일에서 가져왔다)
+: > "$T/empty.map"
+for n in bg_trend_accidental bg_trend_fastn bg_trend_lihe bg_trend_multrej bg_trend_psd \
+         bg_trend_psd_nlike rate_trend_accidental rate_trend_candidates rate_trend_cumulative \
+         rate_trend_efficiency rate_trend_evt_coinc rate_trend_evt_target rate_trend_evt_total \
+         rate_trend_evt_veto rate_trend_rate_corrected rate_trend_rate_raw rate_trend_rll \
+         veto_panel1_pmts veto_panel_trend veto_rate_trend; do
+   printf '%s\tFAKE_ID\n' "$n" >> "$T/empty.map"
+done
+sed "s|^map_file.*|map_file = $T/empty.map|" "$T/drive.params" > "$T/live.params"
+OUT11b=$(run_harness "$T/live.params" drive 2>"$T/err11b.txt"); RC11b=$?
+NW11b=$(printf '%s\n' "$OUT11b" | grep -c '^\[WARN\] drive ')
+if [ "$RC11" -eq 0 ] && [ "$NW11" -eq 1 ] && \
+   printf '%s\n' "$OUT11" | grep -qxF '[DRIVE] 1/4 개 교체' && \
+   printf '%s\n' "$OUT11" | grep -q '^\[WARN\] drive 3/4 교체 실패 (' && \
+   printf '%s\n' "$OUT11" | grep -qF '로컬 png 없음 1 : rate_trend_rll.png' && \
+   printf '%s\n' "$OUT11" | grep -qF '02_rate_candidates_nH.png' && \
+   printf '%s\n' "$OUT11" | grep -qF '03_rate_raw_nGd.png' && \
+   [ "$RC11b" -eq 0 ] && [ "$NW11b" -eq 1 ] && \
+   printf '%s\n' "$OUT11b" | grep -qF '[WARN] drive 20/20 교체 실패 (로컬 png 없음 20 : bg_trend_accidental.png, bg_trend_fastn.png, bg_trend_lihe.png …)'; then
+   R="$R
+CHK drive_fail_is_warning=1"
+else
+   R="$R
+CHK drive_fail_is_warning=0"
+   echo "진단(⑪) : rc=$RC11 warnlines=$NW11 / rc_live=$RC11b warnlines_live=$NW11b"
+   printf '%s\n' "$OUT11"; cat "$T/err11.txt"; printf '%s\n' "$OUT11b"; cat "$T/err11b.txt"
+fi
+
+# ⑫ 시트 되대조 불일치는 그대로 치명적이다 -- rc≠0 이고 드라이브 루프에 가지도 않는다
+OUT12=$(run_harness "$T/drive.params" sheetbad 2>"$T/err12.txt"); RC12=$?
+if [ "$RC12" -ne 0 ] && grep -qF '[FATAL] 되대조 실패' "$T/err12.txt" && \
+   ! printf '%s\n' "$OUT12" | grep -q '^\[DRIVE\]'; then
+   R="$R
+CHK sheet_mismatch_fatal=1"
+else
+   R="$R
+CHK sheet_mismatch_fatal=0"
+   echo "진단(⑫) : rc=$RC12"; printf '%s\n' "$OUT12"; cat "$T/err12.txt"
+fi
+
 FAILED=0
 for k in map_relative offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
-         local_time_start independent_gates type_position header_has_type; do
+         local_time_start independent_gates type_position header_has_type \
+         drive_fail_is_warning sheet_mismatch_fatal; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -369,4 +508,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run7 stderr --"; cat "$T/err7.txt"
    exit 1
 fi
-echo "PASS monitor-publish (10/10)"
+echo "PASS monitor-publish (12/12)"
