@@ -912,7 +912,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ```
 cleanup --ojk   sklee 프로세스 96 → 0 (채굴기 2 + 날마다 쌓인 sh -c /dev/shm/sshd) · crontab 제거 (@reboot/@daily/@monthly /dev/shm/sshd, 사본) · 채굴 파일 삭제 · passwd -l sklee · 키 보관
                 ojk 프로세스 전부 종료 → 18:17:27 ojk 가 재접속, Claude 원격 서버 6 개만 (무해). 3333 연결 0
-secure 로그     sklee 비밀번호 로그인이 09-10 파리 IP 말고도 09-23 · 10-04 두 번 더 (다른 해외 IP) — ★ 비밀번호 유출 확정. 잠금이 맞다
+secure 로그     sklee 비밀번호 로그인 4 회, 전부 해외 VPS : 09-10 11:47 206.189.3.86 (DigitalOcean NL) · 09-10 20:12 151.241.154.243 (FR) · 09-23 172.239.6.132 (Akamai FR) · 10-04 94.154.43.21 (NL) — ★ 비밀번호 유출 확정. 잠금이 맞다
 harden 1 2 3 6  /dev/shm noexec (fstab+remount 확인) · cron.deny sklee · firewalld OUTPUT 3333/3334/4444/5555/7777/14444/45700 + 141.94.96.0/24 REJECT (success) ·
                 user-1004/1005/1006.slice MemoryMax=120G MemoryHigh=100G (daemon-reload). ④ sshd 키 전용 · ⑤ fail2ban 은 아직 (fail2ban inactive)
 결과            load 32 → 1.4 · minerwatch 18:20 '징후 해소' · DAQ run 4374 그대로 477 Hz (서브런 602)
