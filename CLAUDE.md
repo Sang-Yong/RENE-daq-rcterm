@@ -784,6 +784,10 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 날짜 | 변경 내용 | 대상 | 사유 |
 | --- | --- | --- | --- |
 | 2026-10-10 | Harness v2 로 처음 구성 — 에이전트 8 · 스킬 6 신규(+기존 2 연결) · 오케스트레이터 | 전체 | - |
+| 2026-10-10 | 로그 꼬리는 과거 기록 · 침묵형 cron 로그는 --status 로 · 단일 값으로 인과 단정 금지 | skills/daq-status-check | 모의 실행 대역이 짚은 모호점 3 |
+| 2026-10-10 | '보안' 갈래 추가 (status-inspector → code-engineer → ops-scribe, root 는 사용자) + description 트리거 | skills/rene-daq-orchestrator | 채굴기·OOM 사건이 분류표에 자리가 없어 오케스트레이터 밖에서 처리됨 |
+| 2026-10-10 | 금지 11 : 바깥에 영향 주는 규칙(방화벽·cron·kill·마운트)은 우리 의존 포트 목록과 대조 | skills/rene-code-change | 채굴 풀 포트 목록에 7777(store ssh)을 넣어 ssh 가 끊긴 사고의 일반화 |
+| 2026-10-10 | 새 에이전트 정의는 몇 분 뒤 같은 세션에서 보인다 — 그 사이 general-purpose 대역 | CLAUDE.md §11.211 · 메모리 | 첫 호출 'not found' |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
