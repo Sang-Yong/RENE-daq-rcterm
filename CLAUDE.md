@@ -788,6 +788,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-10 | '보안' 갈래 추가 (status-inspector → code-engineer → ops-scribe, root 는 사용자) + description 트리거 | skills/rene-daq-orchestrator | 채굴기·OOM 사건이 분류표에 자리가 없어 오케스트레이터 밖에서 처리됨 |
 | 2026-10-10 | 금지 11 : 바깥에 영향 주는 규칙(방화벽·cron·kill·마운트)은 우리 의존 포트 목록과 대조 | skills/rene-code-change | 채굴 풀 포트 목록에 7777(store ssh)을 넣어 ssh 가 끊긴 사고의 일반화 |
 | 2026-10-10 | 새 에이전트 정의는 몇 분 뒤 같은 세션에서 보인다 — 그 사이 general-purpose 대역 | CLAUDE.md §11.211 · 메모리 | 첫 호출 'not found' |
+| 2026-10-10 | 첫 실전 코드 갈래(구현→검토 2 라운드→배포) | skills/rene-daq-orchestrator (절차 변경 없음) | websummary 드라이브 실패 비치명화 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -909,6 +910,60 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.212 ★★ 웹 서머리 발행이 27일 묶여 있었다 — 드라이브 실패를 치명적으로 읽던 버그와, 알림이 애초에 못 나가던 결함 (사용자 지시 "웹 서머리 드라이브 실패 치명적이지 않게 하네스로 고쳐줘", 10-10)
+
+**하네스 첫 실전 코드 갈래** — code-engineer(구현, 2 라운드) → code-reviewer(검토, 2 라운드, 승인) → ops-scribe(이 절). 산출물
+`/Data_ssd/LOG/harness/20261010_code-engineer_websummary-drive.md` · `20261010_code-reviewer_websummary-drive.md`.
+증상을 처음 잡은 것은 §11.211 의 모의 실행 보고 `20261010_daq-status-inspector_smoke.md` 다.
+
+**원인 (실측)** — `tools/monitor/publish_google.py` 가 드라이브 PNG 교체를 하나라도 실패하면 `sys.exit(1)` 을
+냈고, `websummary.sh` 는 `run_stage` 관용구로 그 1 을 '단계 실패' 로 읽어 발행 전체를 막았다. 2026-09-14 부터
+`[FAIL] publish` **585 회**, `last_run` 이 **4345 에 고정**, 완결 런 **28 개(4346~4373)가 대기**. **시트 쓰기
+자체는 매시 정상이었다** — 01:35 회차 로그가 `[SHEET] 새 행 없음`(성공) 과 `[DRIVE] 0/20 개 교체` +
+`[WARN] drive update 실패 … 로컬 png 없음` × 20 줄을 같이 찍고 `[FAIL] publish (exit=1)` 로 끝난다.
+§11.191 에서 그림 파일 이름을 `NN_*.png` 번호순(지금 63 장)으로 바꾼 뒤 `config/websummary.map` 은 옛 이름
+20 개(`bg_trend_*`·`rate_trend_*`·`veto_*`) 그대로였고, 지금 그림 63 장과 겹치는 이름이 0 개다.
+
+**★ 알림이 한 번도 안 나간 이유** — `websummary.sh` 의 `NOTIFY` 기본값이 `$DIR/scripts/daq-notify.sh` 인데
+`$DIR` 이 저장소 루트가 아니라 **`tools/monitor`** 였다. `tools/monitor/scripts/daq-notify.sh` 는 존재하지
+않아 `[ -x ]` 가 거짓이 되고 알림이 조용히 빠졌다. `/Data/LOG/daq-notify.log` 에서 `event=websummary` 성공
+기록이 **0 건**(실측, 같은 로그의 sheetlog 153·rotate 33·restart 30 과 대조) — 585 번 막히는 동안 아무도
+몰랐던 이유다.
+
+**고친 것 (커밋 `35d246f` 1 라운드 → 리뷰 반영 `9711963` 2 라운드, 승인)**
+```
+드라이브 교체 실패   WARN 요약 한 줄(사유별로 모음, 이름은 3개까지) + rc=0 로.  시트 쓰기 실패만 치명적(rc≠0, 그대로 유지)
+알림 경로            NOTIFY/NOTIFY_PARAMS 기본값을 $DIR(tools/monitor) → $REPO(저장소 루트) 로. --status 에 notify 줄,
+                    실행 불가면 ★ 표시 — 585 회 동안 이것이 보였으면 바로 잡혔을 결함이다
+알림 중복 방지       드라이브 경고는 $FAILSTATE.drive 로 한 번만. 서명은 N/M·파일명을 뺀 "사유만" — 안 그러면
+                    사람이 그림을 몇 장씩 올리는 동안 개수가 바뀔 때마다 다시 메일이 간다
+출력 보존            $( ) 로 받지 않고 >>$LOG 로 흘리고 LOGPOS(단계 전 바이트 수)로 그 회차분만 WARN 을 찾는다
+                    — 안 그러면 publish 도중 죽을 때 [SHEET] 감사 줄이 로그에서 통째로 사라진다
+sheet_backup_dir     map_file 과 같은 규칙(저장소 루트 기준)으로 상대 경로를 푼다. config/websummary.params.example 에 문서화
+```
+
+**확인한 것 (실측)**
+| 스위트 | 전 | 후 |
+|---|---|---|
+| tests/monitor-publish.test.sh | 10/10 | **13/13** |
+| tests/websummary.test.sh | 18/18 | **23/23** |
+
+리뷰 1 라운드가 지적 5 건(알림 경로 · §11.211 번호 충돌 · README 거짓 문장 · `sheet_backup_dir` 상대경로 ·
+publish 도중 죽으면 SHEET 줄 소실)을 들어 "고치면 승인" 으로 반려했고, 2 라운드 재검토에서 다섯 건 전부를
+재현으로 닫혔음을 확인하고 **승인**했다. 운영 디렉터리는 02:45 에 `9711963` 로 fast-forward, `--status` 가
+notify 경로를 저장소 루트의 `scripts/daq-notify.sh` 로 보인다.
+
+**남은 것**
+- 리뷰 2 라운드가 남긴 후속 둘(발행을 막지 않음, 이 파일을 다음에 만질 때) : `sheet_backup_dir` 를 빈 값으로
+  두면 `os.makedirs('')` 로 죽어 '시트 실패' 로 잘못 보고될 수 있다 → `p.get(...) or 기본값` 으로. `LOGPOS`
+  가 0 으로 떨어지면(wc -c 실패) 이번 회차가 아니라 지난 회차의 WARN 을 다시 집을 수 있다 → 실패 시 WARN
+  탐색을 건너뛰도록.
+- **첫 회차는 28 런(4346~4373)을 한 번에 돈다** — 게이트에 회차 상한이 없고 legacy `ibd-summary` 가
+  2 런에 1h35m(§11.190)이라 반나절~하루 flock 을 쥘 수 있다(예상, 실측 아님). 다음 cron 회차는 03:27.
+- **그림 63 장을 드라이브에 올리고 `--init` 으로 map 을 다시 만드는 것은 여전히 사용자 몫** (§11.176·§11.191
+  — 서비스 계정은 드라이브에 파일을 만들 수 없다). 그때까지는 매시 경고 한 줄만 로그에 남고 메일은
+  사유가 바뀔 때만 다시 간다.
 
 #### 11.211 ★ 하네스 v2 구성 — 에이전트 8 · 스킬 6 + 오케스트레이터 (사용자 지시 '하네스 구성해줘', 10-10)
 
@@ -3997,6 +4052,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.212         ★★ 웹 서머리 발행 27일 정체 — 드라이브 실패를 치명으로 읽던 버그(publish_google.py exit=1) + 알림 경로 결함(NOTIFY 가 tools/monitor 기준이라
+                585 회 무음) 수정. 하네스 첫 실전 코드 갈래(code-engineer 2라운드 → code-reviewer 2라운드 승인). 9711963 배포, 첫 회차 03:27 (28 런)
 §11.211         ★ 하네스 v2 : 에이전트 8 · 스킬 6 + rene-daq-orchestrator (.claude/agents · .claude/skills). DAQ 운용 요청은 오케스트레이터로
 §11.210         ★★ 채굴기 제거·재발 방지 : root 스크립트 cleanup-root.sh / harden-root.sh (/Data_ssd/LOG/security-20261009, 사용자가 sudo 로 실행) +
                 scripts/minerwatch.sh cron */10 (위장 프로세스·/dev/shm 실행 파일·풀 포트 연결 → 책임자 메일). frontend 는 root 가 없다
