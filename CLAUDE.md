@@ -913,7 +913,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 code-engineer(opus) · code-reviewer(opus, 읽기 전용) · ops-scribe(sonnet). 스킬(`.claude/skills/`) : daq-status-check(+scripts/status.sh) · daq-incident-playbook · veto-threshold-change ·
 run-summary-analysis · rene-code-change · ops-record-and-notify · **rene-daq-orchestrator**(혼합 : 서브에이전트 위임 + 코드는 생성·검증 쌍, Workflow 는 안 쓴다). 기존 스킬 둘은 그대로 연결.
 스킬 본문은 §11 의 사건 기록에서 뽑은 분기표·금지 목록·정상 범위다 — 새 규칙을 만든 것이 아니라 흩어진 규칙을 한 자리에 모았다. 호출 조건·이력은 위 '## 하네스' 절, 회고·개선은 `harness:evolve`.
-**모의 실행 (01:52)** — `.claude/agents/` 는 세션 시작 때만 읽히므로 같은 세션에서는 `subagent_type` 이 'not found' 다 → general-purpose 에 정의·스킬 경로를 읽혀 대역.
+**모의 실행 (01:52)** — `.claude/agents/` 의 새 정의는 만든 직후 몇 분은 `subagent_type` 이 'not found' 라 general-purpose 에 정의·스킬 경로를 읽혀 대역했다(약 10 분 뒤 같은 세션에서 8 개가 올라왔다).
 보고서 `/Data_ssd/LOG/harness/20261010_daq-status-inspector_smoke.md` 가 템플릿대로 나왔고 ⚠️ 둘을 잡았다 : ① **websummary 가 09-13(last_run 4345) 이후 매시 publish 단계에서 exit 1** —
 드라이브 map 의 옛 그림 20 장이 로컬에 없다(§11.191 의 이름 변경, 사용자가 새 그림을 올리고 `--init` 하는 일이 밀려 있음). 발행 대기 28 런. ② 외장하드 백업 정지(하드 없음, §11.206).
 대역이 짚은 스킬의 모호점 셋(로그 꼬리는 과거 · 침묵형 cron 로그 · 단일 값으로 인과 단정 금지)을 `daq-status-check` 에 원칙으로 넣었다.
