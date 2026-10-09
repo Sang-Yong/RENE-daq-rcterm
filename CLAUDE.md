@@ -790,6 +790,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-10 | 새 에이전트 정의는 몇 분 뒤 같은 세션에서 보인다 — 그 사이 general-purpose 대역 | CLAUDE.md §11.211 · 메모리 | 첫 호출 'not found' |
 | 2026-10-10 | 첫 실전 코드 갈래(구현→검토 2 라운드→배포) | skills/rene-daq-orchestrator (절차 변경 없음) | websummary 드라이브 실패 비치명화 |
 | 2026-10-10 | 코드 갈래 중 오케스트레이터는 work-web 에 미커밋 변경을 두지 않는다 | skills/rene-daq-orchestrator | 구현자가 남의 미커밋 변경을 보고 멈춤(첫 실전) |
+| 2026-10-10 | 금지 3 확장: probe·시험도 알림 경로를 가짜로 갈아끼운 뒤에만 | skills/rene-code-change | 검토자 probe 가 운영 daq-notify.log 에 가짜 사건을 남김(메일은 안 나감) |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 

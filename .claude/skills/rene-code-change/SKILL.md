@@ -38,7 +38,7 @@ cd /home/frontend/DAQ/RENE-daq-rcterm && git pull -q --ff-only /home/frontend/DA
 
 1. 운영 디렉터리에서 소스 편집.
 2. `pgrep -f` / `pkill -f`. 저장소 경로의 `rcterm`, `$( )` 서브셸, 조상 argv, 감시 명령줄의 대상 이름까지 다섯 가지로 오탐한다. `pgrep -x`, PID, 잠금 보유자(`fuser`)로.
-3. `--dry-run` 이 메일·시트·하드·하드웨어에 닿는 것. 미리보기는 바깥에 흔적을 남기지 않는다.
+3. `--dry-run` 이 메일·시트·하드·하드웨어에 닿는 것. 미리보기는 바깥에 흔적을 남기지 않는다. **시험과 probe 도 같다** — 알림 경로(`WEBSUMMARY_NOTIFY`·`NOTIFY_LOG` 류)를 가짜로 갈아끼우지 않은 probe 가 운영 `daq-notify.sh` 를 불러 `/Data/LOG/daq-notify.log` 에 `run 4300` 가짜 사건을 남겼다(10-10 02:40, 메일은 params 가 없어 rc=2 로 안 나간 것뿐). 실제 알림 스크립트는 환경변수로 갈아끼운 뒤에만 돌린다.
 4. 알림·감시 스크립트가 실패로 종료코드≠0 을 내는 것. 감시가 스스로 넘어지면 없느니만 못하다.
 5. `mv` 로 파일시스템을 넘는 이동. rsync → `rsync -c -n -i` 대조 → 삭제. 같은 파일시스템의 `mv -T` 만 예외.
 6. awk 프로그램 안 주석의 따옴표(한글 주석도 코드다). `local a=$1 b="${a}"` (b 가 빈다). `NR==FNR` 에 빈 첫 파일. `printf "$var"` (`%` 가 서식이 된다 → `printf '%s'`/`'%b'`).
