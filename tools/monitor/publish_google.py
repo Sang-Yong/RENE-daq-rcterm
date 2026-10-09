@@ -24,13 +24,16 @@ def read_params(path):
         ln = ln.split("#", 1)[0].strip()
         if "=" in ln:
             k, v = ln.split("=", 1); p[k.strip()] = v.strip()
-    #  ★ map_file 이 상대 경로면 저장소 루트(params 파일이 있는 config/ 의 부모) 기준으로 푼다.
+    #  ★ 경로 키가 상대 경로면 저장소 루트(params 파일이 있는 config/ 의 부모) 기준으로 푼다.
     #    cron 은 홈에서 부르므로 'config/websummary.map' 을 못 찾아 그림을 0/0 으로 교체했다
     #    (2026-09-10 17:07 첫 자동 회차에서 실측). 손으로 돌릴 때는 저장소 안이라 드러나지 않았다.
-    mf = p.get("map_file", "")
-    if mf and not os.path.isabs(mf):
-        root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
-        p["map_file"] = os.path.join(root, mf)
+    #    sheet_backup_dir 도 같은 규칙이다 -- 안 그러면 cwd 기준으로 풀려 시트 백업이
+    #    cron 의 작업 디렉터리에 쌓인다 (2026-10-10 리뷰 지적 4).
+    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    for k in ("map_file", "sheet_backup_dir"):
+        v = p.get(k, "")
+        if v and not os.path.isabs(v):
+            p[k] = os.path.join(root, v)
     return p
 
 def read_tsv(path):
@@ -228,7 +231,8 @@ def main():
     ws = gspread.authorize(cr).open_by_key(p["sheet_id"]) \
                .get_worksheet_by_id(int(p.get("sheet_gid", "0")))
     grid = ws.get_all_values()
-    #  시험이 실 /Data_ssd 를 건드리지 않게 params 로 갈아끼울 수 있다. 기본값은 그대로다.
+    #  시험이 실 /Data_ssd 를 건드리지 않게 params 로 갈아끼울 수 있다. 기본값은 그대로이고,
+    #  상대 경로는 read_params 가 저장소 루트 기준으로 풀어 둔다(map_file 과 같은 규칙).
     bdir = p.get("sheet_backup_dir", "/Data_ssd/LOG/websummary"); os.makedirs(bdir, exist_ok=True)
     bak = os.path.join(bdir, time.strftime("sheet-backup-%Y%m%d%H%M%S.tsv"))
     with open(bak, "w", encoding="utf-8") as fh:

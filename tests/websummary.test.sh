@@ -65,6 +65,8 @@ EOF
 #    WS_TEST_PUBLISH_RC publish_google.py 가짜의 종료코드 (기본 0)
 #    WS_TEST_PUBLISH_OUT publish_google.py 가짜가 stdout 에 낼 한 줄
 #                        (드라이브 경고 '[WARN] drive N/M 교체 실패 ...' 재현용)
+#    WS_TEST_PUBLISH_PIDFILE  가짜가 자기 pid 를 적을 파일 ([18] 이 치우는 데 쓴다)
+#    WS_TEST_PUBLISH_HANG     가짜가 출력 뒤 잠들 초 ([18] 이 그 사이 SIGTERM 을 보낸다)
 mk_fake_mon() {
    local mon=$1 s
    mkdir -p "$mon"
@@ -125,6 +127,8 @@ else
    echo "webroot-NOT-ready" >> "${WS_TEST_CALLS:-/dev/null}"
 fi
 [ -n "${WS_TEST_PUBLISH_OUT:-}" ] && printf '%s\n' "$WS_TEST_PUBLISH_OUT"
+[ -n "${WS_TEST_PUBLISH_PIDFILE:-}" ] && printf '%s\n' "$$" > "$WS_TEST_PUBLISH_PIDFILE"
+[ -n "${WS_TEST_PUBLISH_HANG:-}" ] && sleep "$WS_TEST_PUBLISH_HANG"
 exit "${WS_TEST_PUBLISH_RC:-0}"
 FAKE
    chmod +x "$mon/publish_google.py"
@@ -541,7 +545,7 @@ if [ "$RC15b" -ne 0 ] && [ -z "$SLR15b" ] && [ "$MB15b" -eq 0 ] && [ "${N15b:-0}
 CHK metrics_dst_m2_build_fail_blocks=1"; else R="$R
 CHK metrics_dst_m2_build_fail_blocks=0"; echo "[15b] 진단 : rc=$RC15b last_run=[$SLR15b] metrics=$MB15b notify=$N15b"; cat "$T/15/log"; cat "$T/15/notify" 2>/dev/null; fi
 
-# ==== [16] 드라이브 그림 교체 실패는 발행을 막지 않는다 (2026-10-10, §11.211) ====
+# ==== [16] 드라이브 그림 교체 실패는 발행을 막지 않는다 (2026-10-10, §11.212) ====
 #     publish_google.py 가 rc=0 + '[WARN] drive N/M 교체 실패' 를 내는 상황.
 #     보는 것 : exit 0 · last_run 전진 · 로그에 WARN 한 줄 · 책임자 알림은
 #     두 회차에 걸쳐 딱 한 번. metrics_source=dst 로 두고 metrics --verify(전체)가
@@ -578,12 +582,119 @@ CHK drive_warn_no_block_notify_once=0"
    cat "$T/16/log"; cat "$T/16/notify" 2>/dev/null
 fi
 
+# ==== [17] 환경변수를 안 주면 $NOTIFY 가 실제 실행 파일을 가리킨다 (2026-10-10) ====
+#     ★ 다른 모든 검사는 WEBSUMMARY_NOTIFY 를 가짜로 갈아끼운다 -- 그래서 기본값이
+#     시험 뒤에 숨어 있었다. 기본값이 $DIR(= tools/monitor) 기준이라
+#     tools/monitor/scripts/daq-notify.sh 를 가리켰고, 그런 파일이 없어 [ -x ] 가
+#     거짓이 되어 알림이 조용히 지나갔다 : websummary.log 의 '[FAIL] publish' 585 회
+#     (2026-09-14 19:09 ~ 10-10 01:35) 동안 /Data/LOG/daq-notify.log 의
+#     event=websummary 는 0 건이었다(같은 로그에 sheetlog 153 · rotate 33 · restart 30).
+#     --status 가 그 경로를 찍으므로 거기서 본다(읽기 전용, 잠금을 잡지 않는다).
+S17=$(WEBSUMMARY_STATE="$T/17/state" WEBSUMMARY_LOG="$T/17/log" WEBSUMMARY_ROOTS="$T/17/RAW" \
+      "$SUT" --params "$T/nonexistent.params" --status 2>&1)
+NP17=$(printf '%s\n' "$S17" | sed -n 's/^  notify    : \([^ ]*\).*/\1/p')
+if [ "$NP17" = "$DIR/scripts/daq-notify.sh" ] && [ -x "$NP17" ] && \
+   ! printf '%s\n' "$S17" | grep -qF '실행할 수 없다'; then
+   R="$R
+CHK notify_default_executable=1"
+else
+   R="$R
+CHK notify_default_executable=0"
+   echo "[17] 진단 : notify=[$NP17] (기대 $DIR/scripts/daq-notify.sh, -x 여야 한다)"; printf '%s\n' "$S17"
+fi
+
+# ==== [18] publish 도중에 죽어도 [SHEET] 감사 줄은 로그에 남는다 (2026-10-10) ====
+#     출력을 $( ) 로 받으면 단계가 끝나야 로그에 붓는다 -- 그 사이 websummary.sh 가
+#     SIGTERM 을 받으면 '[SHEET] N 행 추가 + 되대조 통과' 가 사라진다. 이 스크립트의
+#     되돌릴 수 없는 유일한 부작용의 감사 흔적이라 그것만은 잃으면 안 된다.
+mkdir -p "$T/18/tsv" "$T/18/mon"; mk_fake_mon "$T/18/mon"; seed_pngs "$T/18/tsv"
+mkrun "$T/18/RAW" 004346 3 3
+mkparams "$T/18/params" "$T/18/tsv" 4346 1
+WEBSUMMARY_ROOTS="$T/18/RAW" WEBSUMMARY_LOCK="$T/18/.lock" WEBSUMMARY_STATE="$T/18/state" \
+WEBSUMMARY_LOG="$T/18/log" WEBSUMMARY_MON_DIR="$T/18/mon" WEBSUMMARY_NOTIFY="$T/18/mon/notify.sh" \
+WEBSUMMARY_FAILSTATE="$T/18/failstate" WS_TEST_CALLS="$T/18/calls" \
+WS_TEST_PUBLISH_OUT='[SHEET] 2 행 추가 + 되대조 통과 (백업 /Data_ssd/LOG/websummary/sheet-backup-x.tsv)' \
+WS_TEST_PUBLISH_PIDFILE="$T/18/pubpid" WS_TEST_PUBLISH_HANG=20 \
+   "$SUT" --params "$T/18/params" >/dev/null 2>&1 &
+WS18=$!
+I=0; while [ $I -lt 200 ]; do grep -q 'RUN \] publish' "$T/18/log" 2>/dev/null && break; I=$((I+1)); sleep 0.1; done
+#  가짜가 SHEET 줄을 찍고 자리를 잡을 틈
+I=0; while [ $I -lt 100 ]; do [ -s "$T/18/pubpid" ] && break; I=$((I+1)); sleep 0.1; done
+kill -TERM "$WS18" 2>/dev/null; wait "$WS18" 2>/dev/null; RC18=$?
+[ -s "$T/18/pubpid" ] && kill -TERM "$(cat "$T/18/pubpid")" 2>/dev/null
+SH18=$(grep -c 'SHEET\] 2 행 추가' "$T/18/log" 2>/dev/null || echo 0)
+ST18=$([ -e "$T/18/state" ] && echo yes || echo no)
+if [ "$SH18" -ge 1 ] && [ "$ST18" = no ]; then
+   R="$R
+CHK sheet_audit_line_survives_kill=1"
+else
+   R="$R
+CHK sheet_audit_line_survives_kill=0"
+   echo "[18] 진단 : sheet줄=$SH18 state=$ST18 rc=$RC18"; cat "$T/18/log"
+fi
+
+# ==== [19] 종료코드≠0 과 드라이브 WARN 이 동시에 나면 치명적 쪽이 이긴다 ====
+#     시트가 막혔으면 그림이 몇 장 갔는지는 중요하지 않다 -- 막고, $FAILSTATE 로
+#     알리고, 상태를 전진시키지 않는다. .drive 경고 파일은 만들지 않는다.
+mkdir -p "$T/19/tsv" "$T/19/mon"; mk_fake_mon "$T/19/mon"; seed_pngs "$T/19/tsv"
+mkrun "$T/19/RAW" 004346 3 3
+mkparams "$T/19/params" "$T/19/tsv" 4346 1
+WEBSUMMARY_ROOTS="$T/19/RAW" WEBSUMMARY_LOCK="$T/19/.lock" WEBSUMMARY_STATE="$T/19/state" \
+WEBSUMMARY_LOG="$T/19/log" WEBSUMMARY_MON_DIR="$T/19/mon" WEBSUMMARY_NOTIFY="$T/19/mon/notify.sh" \
+WEBSUMMARY_FAILSTATE="$T/19/failstate" WS_TEST_CALLS="$T/19/calls" WS_TEST_NOTIFY="$T/19/notify" \
+WS_TEST_PUBLISH_RC=1 \
+WS_TEST_PUBLISH_OUT='[WARN] drive 20/20 교체 실패 (로컬 png 없음 20 : bg_trend_accidental.png, bg_trend_fastn.png, bg_trend_lihe.png …)' \
+   "$SUT" --params "$T/19/params" >/dev/null 2>&1; RC19=$?
+FS19=$(cat "$T/19/failstate" 2>/dev/null); DR19=$([ -e "$T/19/failstate.drive" ] && echo yes || echo no)
+N19=$(grep -c '시트 쓰기가 실패한 것이다' "$T/19/notify" 2>/dev/null || echo 0)
+if [ "$RC19" -ne 0 ] && [ ! -e "$T/19/state" ] && [ "$FS19" = "stage:publish" ] \
+   && [ "$DR19" = no ] && [ "${N19:-0}" -eq 1 ]; then
+   R="$R
+CHK sheet_fail_beats_drive_warn=1"
+else
+   R="$R
+CHK sheet_fail_beats_drive_warn=0"
+   echo "[19] 진단 : rc=$RC19 failstate=[$FS19] drive=$DR19 notify=$N19"; cat "$T/19/log"
+fi
+
+# ==== [20] 이행기에 개수가 바뀌어도 메일은 한 통 (서명은 사유만, 2026-10-10) ====
+#     사람이 그림을 몇 장씩 드라이브에 올리는 동안 '20/20 -> 9/20 -> 7/20' 로 개수가
+#     줄어든다. 서명이 WARN 줄 전체였으면 회차마다 다른 서명이 되어 매시 메일이
+#     나갔다(리뷰 probe P6 : 세 회차에 2 통). 사유가 같으면 한 통이어야 한다.
+mkdir -p "$T/20/tsv" "$T/20/mon"; mk_fake_mon "$T/20/mon"; seed_pngs "$T/20/tsv"
+mkrun "$T/20/RAW" 004346 3 3
+mkparams "$T/20/params" "$T/20/tsv" 4346 1
+run20() { rm -f "$T/20/state"; WEBSUMMARY_ROOTS="$T/20/RAW" WEBSUMMARY_LOCK="$T/20/.lock" \
+   WEBSUMMARY_STATE="$T/20/state" WEBSUMMARY_LOG="$T/20/log" WEBSUMMARY_MON_DIR="$T/20/mon" \
+   WEBSUMMARY_NOTIFY="$T/20/mon/notify.sh" WEBSUMMARY_FAILSTATE="$T/20/failstate" \
+   WS_TEST_CALLS="$T/20/calls" WS_TEST_NOTIFY="$T/20/notify" WS_TEST_PUBLISH_OUT="$1" \
+   "$SUT" --params "$T/20/params" >/dev/null 2>&1; }
+run20 '[WARN] drive 20/20 교체 실패 (로컬 png 없음 20 : bg_trend_accidental.png, bg_trend_fastn.png, bg_trend_lihe.png …)'
+run20 '[WARN] drive 9/20 교체 실패 (로컬 png 없음 9 : bg_trend_fastn.png, bg_trend_lihe.png, bg_trend_psd.png …)'
+run20 '[WARN] drive 7/20 교체 실패 (로컬 png 없음 7 : bg_trend_lihe.png, bg_trend_psd.png, rate_trend_rll.png …)'
+N20=$(grep -c '드라이브 그림 교체' "$T/20/notify" 2>/dev/null || echo 0)
+#  사유가 달라지면(새 문제) 다시 알린다 -- 그것까지 확인한다
+run20 '[WARN] drive 2/20 교체 실패 (드라이브가 200 이 아닌 응답을 줬다 2 : bg_trend_psd.png, rate_trend_rll.png)'
+N20b=$(grep -c '드라이브 그림 교체' "$T/20/notify" 2>/dev/null || echo 0)
+SLR20=$(awk -F= '$1=="last_run"{print $2}' "$T/20/state" 2>/dev/null)
+if [ "${N20:-0}" -eq 1 ] && [ "${N20b:-0}" -eq 2 ] && [ "$SLR20" = "4346" ]; then
+   R="$R
+CHK drive_warn_signature_is_reason_only=1"
+else
+   R="$R
+CHK drive_warn_signature_is_reason_only=0"
+   echo "[20] 진단 : 세 회차 notify=$N20 (기대 1), 사유 바뀐 뒤=$N20b (기대 2), last_run=[$SLR20]"
+   cat "$T/20/notify" 2>/dev/null
+fi
+
 FAILED=0
 for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_contend cron_env \
          publish_fail publish_order runclass_before_html skip_bootfail skip_incomplete_tiny \
          gate_new_runs_notify_once gate_after_ibd old_run_selfheal_no_block old_run_warn_notify_once \
          metrics_dst_m2_skips_verify metrics_dst_m2_build_fail_blocks \
-         drive_warn_no_block_notify_once; do
+         drive_warn_no_block_notify_once notify_default_executable \
+         sheet_audit_line_survives_kill sheet_fail_beats_drive_warn \
+         drive_warn_signature_is_reason_only; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -592,4 +703,4 @@ for k in gate gate_quarantined no_new_quiet dry_run_noop mount_missing lock_cont
    fi
 done
 [ "$FAILED" -ne 0 ] && exit 1
-echo "PASS websummary (19/19)"
+echo "PASS websummary (23/23)"

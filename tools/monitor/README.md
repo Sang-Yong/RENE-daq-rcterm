@@ -741,7 +741,8 @@ CLAUDE.md §11.142 참조) — `monitor-all.sh` 는 legacy 3단계(1·과도기�
   -> gen-runclass.sh (type 열 분류, 컨트롤러 판정 R9 — 실패해도 WARN 뿐,
      type='-' 로 계속) -> gen-summary-html.sh
   -> NN_*.png 31개 + summary.html 을 webroot 로 rsync 복사
-  -> publish_google.py (publish=1 일 때만)
+  -> publish_google.py (publish=1 일 때만. 시트 쓰기 실패는 발행을 막고,
+     드라이브 그림 교체 실패는 WARN + 책임자 알림 한 번뿐이다 — §11.212)
 ```
 
 ## 완결 게이트
@@ -869,8 +870,17 @@ sheet-backup-<시각>.tsv` 로 백업하고, 쓴 뒤 다시 읽어 **되대조**
 기록자 보장은 `websummary.sh` 의 `flock` 몫이지 이 스크립트가 아니다).
 
 **드라이브** — `map_file`(이름→fileId)에 있는 PNG 를 같은 파일 ID 에
-**내용만** 교체(PATCH). 개별 실패는 나머지 계속 진행 후 모아서 exit 1 —
-오케스트레이터가 다음 주기에 다시 시도한다.
+**내용만** 교체(PATCH). 개별 실패는 나머지를 계속 진행한 뒤 **사유별로 모아
+한 줄**로 낸다 — `[WARN] drive N/M 교체 실패 (로컬 png 없음 20 : …)` — 그리고
+**종료코드는 0 이다**(2026-10-10, §11.212). 그림은 사람이 올려 둔 드라이브
+파일의 내용 교체일 뿐이라 시트 발행을 막을 값어치가 없다. 실제로
+`map_file` 이 그림 이름이 바뀌기 전(`rate_trend_*`)을 가리키는 동안 매시
+`exit 1` 이 나 `websummary.sh` 의 `last_run` 이 4345 에 묶이고 런 28 개가
+한 달 가까이 발행 대기였다 — 그 내내 시트는 정상으로 쓰이고 있었다.
+`websummary.sh` 가 그 WARN 줄을 보고 책임자에게 **한 번만** 알린다
+(상태 `websummary.failstate.drive`, 사유가 같으면 조용하다).
+**시트 쓰기 실패만 치명적이다** — 되대조 불일치의 `[FATAL]` 과 루프 밖
+예외는 그대로 종료코드≠0 이고 발행을 막는다.
 
 **`--init`** — `webroot` 의 PNG 를 각각 새 드라이브 파일로 올리고
 `map_file`(이름`\t`fileId)을 쓴다. 퍼가기(임베드) URL 을

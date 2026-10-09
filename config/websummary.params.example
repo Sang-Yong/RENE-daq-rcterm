@@ -10,3 +10,5 @@ tsv_dir       = /scratch/RunSummary
 publish       = 1          # 0 이면 로컬 생성까지만
 start_run     = 4280       # 이 번호부터 싣는다
 min_subruns   = 2          # FADC 파일이 이보다 적은 완결 런(부팅 실패 잔재)은 표에 싣지 않는다
+sheet_backup_dir = /Data_ssd/LOG/websummary   # 시트를 쓰기 전 백업할 곳. 생략하면 이 값이 기본.
+                                              # 상대 경로는 map_file 과 같이 저장소 루트 기준이다

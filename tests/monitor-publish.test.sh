@@ -33,6 +33,7 @@
 #      그것을 막는 실패로 보아 last_run 이 4345 에 묶여 런 28 개가 발행
 #      대기였다. 시트는 그 내내 정상으로 쓰이고 있었다)
 #   ⑫ 시트 쓰기 실패(되대조 불일치)는 그대로 치명적이다 -- rc≠0, 드라이브로 안 간다
+#   ⑬ sheet_backup_dir 도 map_file 과 같이 상대 경로면 저장소 루트 기준으로 풀린다
 # 실데이터·실API·실디스크(/scratch, /Data_ssd)는 전혀 건드리지 않는다.
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -484,10 +485,42 @@ CHK sheet_mismatch_fatal=0"
    echo "진단(⑫) : rc=$RC12"; printf '%s\n' "$OUT12"; cat "$T/err12.txt"
 fi
 
+# ⑬ sheet_backup_dir 도 상대 경로면 저장소 루트 기준으로 풀린다 (리뷰 지적 4) --
+#    cwd 기준으로 풀리면 cron(홈 또는 /) 에서 돌 때 시트 백업이 엉뚱한 자리에
+#    쌓인다. map_file 이 바로 그 함정을 한 번 겪었다(§11.176). 절대 경로는
+#    그대로 두는 것과, 같은 리팩터로 map_file 이 깨지지 않은 것도 함께 본다.
+mkdir -p "$T/repo2/config" "$T/cwdA"
+printf 'map_file = config/websummary.map\nsheet_backup_dir = relbak\ntsv_dir = x\nwebroot = y\n' \
+   > "$T/repo2/config/rel.params"
+printf 'sheet_backup_dir = /Data_ssd/LOG/websummary\ntsv_dir = x\nwebroot = y\n' \
+   > "$T/repo2/config/abs.params"
+getkey() {   # getkey <params> <키>  -- cwd 를 저장소 밖으로 옮겨 놓고 읽는다
+   (cd "$T/cwdA" && env -i PATH="$PATH" HOME="$T/fake-home" python3 -c "
+import sys, importlib.util
+spec = importlib.util.spec_from_file_location('pg', sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.read_params(sys.argv[2]).get(sys.argv[3], '<없음>'))
+" "$SUT" "$1" "$2")
+}
+B13=$(getkey "$T/repo2/config/rel.params" sheet_backup_dir)
+M13=$(getkey "$T/repo2/config/rel.params" map_file)
+A13=$(getkey "$T/repo2/config/abs.params" sheet_backup_dir)
+if [ "$B13" = "$T/repo2/relbak" ] && [ "$M13" = "$T/repo2/config/websummary.map" ] \
+   && [ "$A13" = "/Data_ssd/LOG/websummary" ]; then
+   R="$R
+CHK backup_dir_relative=1"
+else
+   R="$R
+CHK backup_dir_relative=0"
+   echo "진단(⑬) : sheet_backup_dir=[$B13] (기대 $T/repo2/relbak)"
+   echo "           map_file=[$M13] (기대 $T/repo2/config/websummary.map)"
+   echo "           절대경로=[$A13] (기대 /Data_ssd/LOG/websummary)"
+fi
+
 FAILED=0
 for k in map_relative offline_dry_run row_listing drive_update_count missing_sheet_id_fatal dry_run_init \
          local_time_start independent_gates type_position header_has_type \
-         drive_fail_is_warning sheet_mismatch_fatal; do
+         drive_fail_is_warning sheet_mismatch_fatal backup_dir_relative; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -508,4 +541,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- run7 stderr --"; cat "$T/err7.txt"
    exit 1
 fi
-echo "PASS monitor-publish (12/12)"
+echo "PASS monitor-publish (13/13)"

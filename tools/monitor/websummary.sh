@@ -35,7 +35,7 @@
 #      수집 중인 런은 제외** -- 막 시작한 런도 FADC 가 1개라서다. 그 런은 언제나 게이트를 막는다.
 #         (publish_google.py 는 webroot 만 읽는다 -- 컨트롤러 판정 R2)
 #      -> publish_google.py (publish=1 일 때만). 시트 쓰기 실패는 발행을 막고,
-#         드라이브 그림 교체 실패는 WARN + 책임자 경고 한 번뿐이다 (2026-10-10, §11.211)
+#         드라이브 그림 교체 실패는 WARN + 책임자 경고 한 번뿐이다 (2026-10-10, §11.212)
 #
 #  상태 : <WEBSUMMARY_STATE> 에 'last_run=N' 한 줄. 모든 단계(발행 포함)가
 #      성공한 뒤에만 전진한다. publish=0 이면 로컬 생성까지만 마치고
@@ -103,8 +103,14 @@ done
 LOG=${WEBSUMMARY_LOG:-/Data_ssd/LOG/websummary.log}
 STATE=${WEBSUMMARY_STATE:-/Data_ssd/LOG/websummary.state}
 LOCK=${WEBSUMMARY_LOCK:-/tmp/websummary.lock}
-NOTIFY=${WEBSUMMARY_NOTIFY:-$DIR/scripts/daq-notify.sh}          # 막혔을 때 책임자에게. 시험은 가짜로 갈아끼운다
-NOTIFY_PARAMS=${WEBSUMMARY_NOTIFY_PARAMS:-$DIR/config/notify.params}
+#  ★ 2026-10-10 : 이 두 기본값이 $DIR(= tools/monitor) 기준이라 tools/monitor/scripts/daq-notify.sh
+#  를 가리켰다 -- 그런 파일이 없어 [ -x ] 가 거짓이 되고 알림이 조용히 지나갔다. 실측 : websummary.log
+#  의 '[FAIL] publish' 585 회(2026-09-14 19:09 ~ 10-10 01:35) 동안 /Data/LOG/daq-notify.log 의
+#  event=websummary 는 0 건이다(같은 로그에 sheetlog 153 · rotate 33 · restart 30 은 있다).
+#  형제 스크립트의 관용구대로 $REPO 다. 시험은 늘 WEBSUMMARY_NOTIFY 를 가짜로 갈아끼우므로
+#  기본값이 그 뒤에 숨는다 -- tests/websummary.test.sh 의 [17] 이 기본값 자체를 못 박는다.
+NOTIFY=${WEBSUMMARY_NOTIFY:-$REPO/scripts/daq-notify.sh}          # 막혔을 때 책임자에게. 시험은 가짜로 갈아끼운다
+NOTIFY_PARAMS=${WEBSUMMARY_NOTIFY_PARAMS:-$REPO/config/notify.params}
 FAILSTATE=${WEBSUMMARY_FAILSTATE:-/Data_ssd/LOG/websummary.failstate}   # 마지막 실패 사유. 같은 사유로는 한 번만 알린다
 #  ★ 2026-09-13 : 9-11 18:27 부터 이틀 동안 매시 회차가 옛 런(4341)의 대조 불일치에서 멈췄는데 아무도 몰랐다.
 #    막히면 알리고(같은 사유 한 번), 옛 런의 불일치는 발행을 막지 않으며(새 런만 게이트), DST 가 낡은 것이면 스스로 다시 만든다.
@@ -246,6 +252,9 @@ if [ "$STATUS" -eq 1 ]; then
    echo "  webroot   : $WEBROOT"
    echo "  publish   : $PUBLISH   metrics_source : $METRICS_SOURCE   refresh_s : ${REFRESH_S}s"
    echo "  start_run : $START_RUN"
+   #  ★ 알림 경로를 보여준다 -- 기본값이 $DIR 기준이던 탓에 585 회 막히는 동안 메일이 0 통이었고,
+   #  그 사실이 어디에도 안 보였다(2026-10-10). 감시자 기동 로그의 'notify=' 줄과 같은 취지다.
+   echo "  notify    : $NOTIFY$( [ -x "$NOTIFY" ] || echo '  ★ 실행할 수 없다 -- 알림이 조용히 빠진다' )"
    mountpoint -q /scratch 2>/dev/null && echo "  /scratch  : 마운트됨" || echo "  /scratch  : ★ 마운트 안 됨"
    SLR=$(state_last_run 2>/dev/null); case "$SLR" in ''|*[!0-9]*) SLR=0 ;; esac
    echo "  last_run  : $( [ "$SLR" -gt 0 ] && echo "$SLR" || echo '없음(0)' )  ($STATE)"
@@ -451,11 +460,14 @@ else
       #  드라이브 교체 실패는 publish_google.py 가 종료코드 0 + '[WARN] drive N/M 교체
       #  실패' 한 줄로 알려 오므로 여기서 경고로만 처리한다. 그림 이름이 NN_*.png 로
       #  바뀐 뒤 map_file 의 옛 이름이 전부 '로컬 png 없음' 이 되어 매시 발행 전체가
-      #  막혔고 last_run 이 4345 에 묶였다 (§11.211. 그 내내 시트는 정상이었다).
-      #  metrics-verify 와 같은 관용구 : 출력을 받아 로그에 흘리고 그 안을 본다.
+      #  막혔고 last_run 이 4345 에 묶였다 (§11.212. 그 내내 시트는 정상이었다).
+      #  ★ 출력은 예전처럼 >>"$LOG" 로 흘린다 -- $( ) 로 받으면 publish 가 도중에 죽을 때
+      #  그 단계 출력이 로그에 한 줄도 안 남고, 하필 잃는 줄이 '[SHEET] N 행 추가 + 되대조
+      #  통과' 다. 이 스크립트의 되돌릴 수 없는 유일한 부작용의 감사 흔적이다. 그래서 단계
+      #  전에 로그 크기를 재 두고 그 지점부터만 WARN 줄을 찾는다.
       log "[RUN ] publish"
-      POUT=$(nice -n 15 ionice -c2 -n7 "$MON/publish_google.py" --params "$PARAMS" 2>&1); prc=$?
-      printf '%s\n' "$POUT" >>"$LOG"
+      LOGPOS=$(wc -c < "$LOG" 2>/dev/null || echo 0)
+      nice -n 15 ionice -c2 -n7 "$MON/publish_google.py" --params "$PARAMS" >>"$LOG" 2>&1; prc=$?
       if [ $prc -ne 0 ]; then
          log "[FAIL] publish (exit=$prc). 로그 : $LOG"
          notify_fail "stage:publish" "런 서머리 발행이 막혔다 : 단계 publish 실패 (exit=$prc), run $NEWLIST. 시트 쓰기가 실패한 것이다. 로그 $LOG"
@@ -463,10 +475,13 @@ else
       fi
       #  경고 상태는 $FAILSTATE.warn 과 따로 둔다 -- 그 파일은 metrics-verify(전체)가
       #  맞을 때마다 지워 버리므로, 같이 쓰면 매시 경고 메일이 다시 나간다.
-      DWARN=$(printf '%s\n' "$POUT" | grep -m1 '^\[WARN\] drive ')
+      DWARN=$(tail -c "+$((LOGPOS + 1))" "$LOG" 2>/dev/null | grep -m1 '^\[WARN\] drive ')
       if [ -n "$DWARN" ]; then
          log "[WARN] publish : $DWARN -- 시트 발행은 성공했다. 발행을 막지 않는다"
-         notify_fail "drive:$DWARN" "런 서머리 : 드라이브 그림 교체가 실패했다 ($DWARN). 시트 발행은 성공했고 다음 회차도 계속 발행한다. config/websummary.map 의 이름이 지금 그림 이름(NN_*.png)과 맞는지 볼 것 -- 새 그림을 드라이브 폴더에 올린 뒤 publish_google.py --params $PARAMS --init 으로 map 을 다시 만든다. 로그 $LOG" "$FAILSTATE.drive"
+         #  서명에서 개수·파일명을 뺀다 -- 사람이 그림을 몇 장씩 올리는 이행기에는
+         #  '7/20 -> 9/20' 처럼 회차마다 숫자가 바뀌어 메일이 되풀이된다. 사유만 쓴다.
+         DSIG=$(printf '%s\n' "$DWARN" | sed -e 's/^\[WARN\] drive [0-9]*\/[0-9]* 교체 실패 (//' -e 's/)$//' -e 's/[0-9]* : [^/]*//g')
+         notify_fail "drive:$DSIG" "런 서머리 : 드라이브 그림 교체가 실패했다 ($DWARN). 시트 발행은 성공했고 다음 회차도 계속 발행한다. config/websummary.map 의 이름이 지금 그림 이름(NN_*.png)과 맞는지 볼 것 -- 새 그림을 드라이브 폴더에 올린 뒤 publish_google.py --params $PARAMS --init 으로 map 을 다시 만든다. 로그 $LOG" "$FAILSTATE.drive"
       else
          log "[OK  ] publish"
          rm -f "$FAILSTATE.drive" 2>/dev/null
