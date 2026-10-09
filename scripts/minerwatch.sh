@@ -8,7 +8,7 @@
 #   징후 (2026-09-10 의 실물에서 뽑았다, §11.209) :
 #     A  명령줄이 ./sshd ./rcu-sched ./kworker ./kthreadd 처럼 상대 경로로 뜬 시스템 이름 (진짜는 /usr/sbin/sshd, 커널 스레드는 [rcu_sched])
 #     B  /dev/shm · /tmp/.* · /var/tmp/.* 안의 실행 파일
-#     C  채굴 풀 포트(3333 3334 4444 5555 7777 14444 45700)로 맺힌 TCP 연결
+#     C  채굴 풀 포트(3333 3334 4444 5555 14444 45700. 7777 은 store ssh 라 제외)로 맺힌 TCP 연결
 #     D  frontend·root 가 아닌 계정의 프로세스가 300 % CPU 넘게 10 분 이상 (분석 작업일 수 있어 '참고' 로만 싣는다)
 #   시험 : MINERWATCH_PS · MINERWATCH_SS · MINERWATCH_FIND 로 ps/ss/find 출력을 갈아끼운다. MINERWATCH_MAIL 로 가짜 send_mail.
 set -u
@@ -16,7 +16,7 @@ DIR=$(cd "$(dirname "$0")/.." && pwd)
 LOGDIR=${MINERWATCH_LOGDIR:-/Data_ssd/LOG}; LOG=$LOGDIR/minerwatch.log; STATE=$LOGDIR/minerwatch.state
 MAIL=${MINERWATCH_MAIL:-$DIR/tools/notify/send_mail.py}; PARAMS=$DIR/config/notify.params
 EVERY=${MINERWATCH_MAIL_EVERY:-21600}; CPU_HI=${MINERWATCH_CPU_HI:-300}
-PORTS='3333|3334|4444|5555|7777|14444|45700'
+PORTS='3333|3334|4444|5555|14444|45700'   # 7777 은 저장소 서버 ssh 포트라 뺀다
 MODE=run
 case "${1:-}" in --status) MODE=status;; --dry-run) MODE=dry;; "") ;;
    --install-cron)
