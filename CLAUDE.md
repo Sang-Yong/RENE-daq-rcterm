@@ -974,6 +974,10 @@ notify 경로를 저장소 루트의 `scripts/daq-notify.sh` 로 보인다.
 이어서 publish 한 번으로 서비스 계정이 내용을 교체했다 : `[DRIVE] 63/63 개 교체`, rc=0. 옛 map 은 `websummary.map.bak-20261010`. 새 파일 id 로 만든 사이트 퍼가기 블록 v5 :
 `/Data_ssd/LOG/rene-runsummary-sites-embed-v5.html` (시트 iframe + 7 절 63 장) — 사이트의 삽입 상자를 이것으로 갈아 끼우는 것만 사용자 몫. 옛 20 장은 폴더에 그대로(지워도 map 과 무관).
 ★ 다음에 그림 이름이 또 바뀌면 같은 방법 : 자리표시 → --init → publish.
+**v6 블록 (05:xx)** — 사용자 : "화면이 다 보이지 않고 보기가 안 좋다 → 니가 직접 갈아 끼우고 깔끔하게". 63 장을 한 줄로 늘어놓은 v5 가 삽입 상자 높이에 잘렸다. v6 = 탭 8 개(런 표 + 그림 7 묶음) · 카드 격자 · 한글 캡션 ·
+클릭 시 원본 · lazy 로딩. `/Data_ssd/LOG/rene-runsummary-sites-embed-v6.html` (드라이브 폴더 RENE_DAQ 에도 사본). ★ 첫 판은 map 의 fileId 뒤 줄바꿈과 시트 URL 의 `&amp;amp;` 이중 이스케이프로 링크가 깨져 있었다 —
+삽입 블록을 만들면 **시트·썸네일 URL 을 익명 curl 로 200 확인**할 것(§11.176 의 사고와 같은 종류). **크롬 확장은 이 서버 세션에 안 붙는다** — Claude in Chrome 은 확장이 설치된 그 PC 에서 도는 Claude Code 와만 연결되므로, 사이트 편집은
+사용자 PC 의 Claude Code 세션에서 `/chrome` 을 켜고 해야 한다(그 세션은 이 저장소를 clone 하거나 드라이브의 v6 사본을 읽으면 된다).
 
 #### 11.211 ★ 하네스 v2 구성 — 에이전트 8 · 스킬 6 + 오케스트레이터 (사용자 지시 '하네스 구성해줘', 10-10)
 
