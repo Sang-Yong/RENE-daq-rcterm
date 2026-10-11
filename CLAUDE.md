@@ -926,6 +926,11 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 ch2·4·5·21 은 2.5~2.7 배 **올렸다**(패널 1·2 의 잡음 몫). 사용자가 '시험 설정' 으로 준 값이라 근거는 묻지 않고 적용했다. 계수율이 100 Hz 하한 위라 chainwatch 알림은 없다.
 감시 : `veto-check-4377.sh` (PRD 12 개 뒤 패널 Hz → 4376 과 비교표는 서브런 100 뒤) · `daqerr-watch-4377.sh` (48 h). 옛 4372/4374 감시는 종료. 기록 : threshold-changes.log(사본 docs) · 설정 파일 주석 · THRESHOLD-HISTORY.md 는 PRD 뒤 재생. 시트 접두어 자동. 메일은 정상 교체 → 책임자(ops 규칙).
 
+**예약 종료 (사용자 지시 10-11 19:2x "내일 10:15 에 이번 run 종료")** — 감시자 로테이션이 10-12 10:12:41 에 먼저 와 4377 을 닫고 4378 을 띄우므로, 그 11 초 전 **10:12:30** 에 감시자 TERM 을 걸어
+run 4377 자체가 끝나게 했다 (10:15 정각이면 2 분짜리 4378 을 닫는 모양이 된다 — 사용자가 10:15 를 고집하면 바꿀 것). systemd 사용자 타이머 `rene-stop-run-4377.timer` → `/Data_ssd/LOG/stop-run-4377.sh`
+(TERM → 마감 확인 → DB 행 → 책임자 메일, 로그 `stop-run-4377.log`). **그 뒤 수집은 멎어 있다** — 다시 받으려면 감시자 재기동. 상태 : `systemctl --user list-timers`, 취소 : `systemctl --user stop rene-stop-run-4377.timer`.
+사용자 systemd 는 Linger 가 켜져 있어 세션이 없어도 돈다(재부팅은 예외 — 재부팅하면 타이머가 사라진다).
+
 #### 11.212 ★★ 웹 서머리 발행이 27일 묶여 있었다 — 드라이브 실패를 치명적으로 읽던 버그와, 알림이 애초에 못 나가던 결함 (사용자 지시 "웹 서머리 드라이브 실패 치명적이지 않게 하네스로 고쳐줘", 10-10)
 
 **하네스 첫 실전 코드 갈래** — code-engineer(구현, 2 라운드) → code-reviewer(검토, 2 라운드, 승인) → ops-scribe(이 절). 산출물
