@@ -913,6 +913,19 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.213 ★★ 문턱값을 사용자 지정 30 값으로 — 새 파일 DataTaking_test_2026.config, run 4377 부터 (사용자 지시, 10-11 10:0x)
+
+사용자 : "현재 run 중단. 복사해 둔 `/home/frontend/ConfigFiles/DataTaking_test_2026.config` 의 THR 을 `274 288 355 306 361 400 315 296 125 216 303 220 281 323 303 316 243 299 136 171 180 266 139 342 558 363 114 126 129 105` 로 바꾸고 새 run 시작."
+사용자가 복사해 둔 파일은 지금 설정(`_thr4067x80`)과 주석 외 차이 0 이었다. SADC THR 활성 줄만 교체(옛 줄은 주석 + 적용 런 구간), `rcterm.params` 전환(백업 `.bak-20261011`, 파일 백업 `.bak-202610111010`), dry-run 으로 INSERT·cp 대상 확인.
+```
+10:11:17  감시자 TERM → run 4376 정상 마감 (exit 0, 1 h 42 m, 484.6 Hz, onlbit=1, 고아 0, 포트 0)
+10:11:41  재기동 → run 4377 Running.  TCB SADCT THR 30 값 = 새 값 글자 단위 일치 · DRAM 8/8 · LIBUSB 0 · DB config = DataTaking_test_2026.config · notify 켜짐
+계수율    4376 485 Hz → 4377 ~237 Hz (첫 40 s, FADC 238 · SADC 237).  FADC 는 그대로이므로 veto 트리거가 ~290 → ~50 Hz 로 줄어든 것 (추정, veto-check 가 확정)
+```
+**값의 성격 (직전 4067×0.8 대비)** : 중앙값 0.91 이지만 채널마다 0.09~2.7 배. 문턱이 1,400~1,600 이던 ch18·22·23·29 와 700~1,000 이던 ch19·20·25·26 을 100~360 으로 **크게 내렸고**(패널 9·10·11·12·13·14 가 처음으로 MIP 아래 문턱을 받는다),
+ch2·4·5·21 은 2.5~2.7 배 **올렸다**(패널 1·2 의 잡음 몫). 사용자가 '시험 설정' 으로 준 값이라 근거는 묻지 않고 적용했다. 계수율이 100 Hz 하한 위라 chainwatch 알림은 없다.
+감시 : `veto-check-4377.sh` (PRD 12 개 뒤 패널 Hz → 4376 과 비교표는 서브런 100 뒤) · `daqerr-watch-4377.sh` (48 h). 옛 4372/4374 감시는 종료. 기록 : threshold-changes.log(사본 docs) · 설정 파일 주석 · THRESHOLD-HISTORY.md 는 PRD 뒤 재생. 시트 접두어 자동. 메일은 정상 교체 → 책임자(ops 규칙).
+
 #### 11.212 ★★ 웹 서머리 발행이 27일 묶여 있었다 — 드라이브 실패를 치명적으로 읽던 버그와, 알림이 애초에 못 나가던 결함 (사용자 지시 "웹 서머리 드라이브 실패 치명적이지 않게 하네스로 고쳐줘", 10-10)
 
 **하네스 첫 실전 코드 갈래** — code-engineer(구현, 2 라운드) → code-reviewer(검토, 2 라운드, 승인) → ops-scribe(이 절). 산출물
@@ -4066,6 +4079,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.213         ★★ 문턱값 = 사용자 지정 30 값 (DataTaking_test_2026.config, 새 파일), run 4377 부터 (10-11 10:11). 계수율 485 → ~237 Hz. veto-check-4377 · daqerr-watch-4377
 §11.212         ★★ 웹 서머리 발행 27일 정체 — 드라이브 실패를 치명으로 읽던 버그(publish_google.py exit=1) + 알림 경로 결함(NOTIFY 가 tools/monitor 기준이라
                 585 회 무음) 수정. 하네스 첫 실전 코드 갈래(code-engineer 2라운드 → code-reviewer 2라운드 승인). 9711963 배포, 첫 회차 03:27 (28 런)
 §11.211         ★ 하네스 v2 : 에이전트 8 · 스킬 6 + rene-daq-orchestrator (.claude/agents · .claude/skills). DAQ 운용 요청은 오케스트레이터로
