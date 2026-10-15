@@ -972,6 +972,31 @@ usbreset · NOTICE_CODE_RUN 은 필요 없었다. 18:19~18:24 의 a~e(허브 밑
 따라오는 것 : chainwatch `rate_low` 문턱 100 Hz(`chain_min_rate`, 연속 2 회)라 약 10 분 안에 전문가 목록 + 책임자에게 자동 메일 가능 — → **23:2x 사용자 지시로 `chain_min_rate` 를 1 로 내렸다** (`config/notify.params`, 백업 `.bak-20261015-minrate`; rate_low 카운터 1 에서 잡아 전문가 메일은 안 나갔다. ★ 시험이 끝나면 100 으로 되돌릴 것). 이력상 저계수율에서 USB 오류가 났으므로(§11.197) `daqerr-watch-4380.sh`(heartbeat 를 따라 4381 기록) 가 48 h 본다. 감시 `veto-check-4381.sh`(PRD 는 /scratch 가 붙어야 생김). chain_down 메일은 23:15 에 이미 나갔다(/scratch 미마운트 · postrun 없음).
 **남은 것.** ① ~~`chain_min_rate` 결정~~ (1 로 내림, 시험 뒤 100 복귀) ② 저장소 서버 복구 뒤 `sudo mount /scratch` + postrun pane 재기동 ③ `config/rundesc.txt` 가 지하 시절 문구 그대로 ④ `docs/THRESHOLD-HISTORY.md` 재생·veto 비교는 PRD 가 생긴 뒤.
 
+**이어서 (23:3x ~ 23:57) — 설정 파일을 VETO_test_9layers_v2 와 똑같이, run 4382.** 사용자 : "설정 파일을 그냥 VETO_test_9layers_v2.config 의 설정파일과 똑같이 해서 다시 돌려줘". 상세 같은 보고서 끝 '이어서 (23:3x~)' 절.
+- 쓴 파일 `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3.config` (18:08 사본). 원본 그대로는 FADCT 1 인데 지금 FADC 보드는 mid=3 이라 'enabled but not linked' 로 부팅 실패(§11.214) → 사본. 주석 뺀 diff 는 19 행 `FADCT 1 4 4 → 3 4 4` 한 줄뿐. 새 파일은 만들지 않았다. `config/rcterm.params` 백업 `.bak-20261015d`.
+- run 4381 마감 : 23:52:42 감시자 TERM → 23:53:04 exit 0 phase=ended, daq·tcb 23:53:19 스스로 닫힘, 고아 0, 포트 비어 있음. DB 23:19:03~23:52:42 onlbit=1, nfadc 23,620 / 2018 s (11.7 Hz), nsadc 23,232.
+
+| run 4382 (23:53:26, tmux %2) 검증 | 결과 |
+|---|---|
+| SADCT THR 30 값 | 100 ×18 + 500000 ×12, 사본과 글자 단위 일치 |
+| FADC THR / FADC TLT / SADC TLT | 100 100 100 100 / EEEE (1+2) / config F888 (1x2+3x4), register 0 은 원래 그렇다(§11.130) |
+| TCB (config·register 둘 다) | CW 400 · MTHRF 4 · MTHRSM 18 · TSWF 0 1 0 0 · TSWSM 0 1 0 0 |
+| FADCT mid / DRAM | 3 (found @ 3) / is aligned 8 · Fail 0 |
+| LIBUSB·TIMEOUT·OVERFLOW (첫 3 분) | TCB 0 · FADCDAQ 0 · SADCDAQ 0 |
+| CONFIG/004382.config · DB config | 사본과 동일 · …/VETO_test_9layers_v2_mid3.config |
+| 계수율 (daqtime 183 s) | FADC 56.9 Hz · SADC 56.9 Hz (10,428 / 10,432 사건) |
+
+★ 18:19~18:24 의 확인 런 a~e(같은 설정, 허브 밑)는 STARTRUN 뒤 수 초 만에 USB TIMEOUT 으로 죽었는데 직결 뒤 이번엔 3 분 오류 0 — 허브가 원인이었다는 추정을 보강한다(1 회 관측 더, 단정 아님, 48 h 감시 중).
+감시 : `veto-check-4381.sh` 종료 → `/Data_ssd/LOG/veto-check-4382.sh` (pid 248665, 출력 psd-check4382). `daqerr-watch-4380.sh` (pid 143345) 는 heartbeat 를 따라 4382 를 rate 56.3 으로 기록 중. threshold-changes.log 23:53 행(문턱 변경 명시).
+
+| 오늘 런 | 시각 | 설정 | 계수율 |
+|---|---|---|---|
+| 4380 | 23:07~23:18 | _thr4067 (4067 ×1.0, 물리 런 파일) | ~941 Hz |
+| 4381 | 23:19~23:52 | _thr4067_trg9L (+ TCB 트리거 네 값) | 11.7 Hz |
+| 4382 | 23:53~ | VETO_test_9layers_v2_mid3 (통째) | 56.9 Hz |
+
+**남은 것.** ① 시험이 끝나면 `chain_min_rate` 를 100 으로(백업 `config/notify.params.bak-20261015-minrate`) 되돌리고 물리 설정 `_thr4067x80` 으로 복귀 ② 저장소 서버 복구 뒤 `sudo mount /scratch` + postrun pane 재기동 ③ `config/rundesc.txt` 가 지하 시절 문구 그대로 ④ THRESHOLD-HISTORY 재생·veto 비교는 PRD 가 생긴 뒤.
+
 #### 11.214 ★★ VETO_test_9layers_v2 설정으로 run 준비 — 보드가 USB 에 없어 확인 런 전에 멈춤 (사용자 지시, 10-15 18:0x)
 
 사용자 : "VETO_test_9layers_v2.config 를 config 파일로 적용해서 run 돌려줄래?" + "run 현황 볼 수 있게 controller 창 띄워줄 수 있어?" 상세 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_veto9layers.md`.
@@ -994,7 +1019,7 @@ PC          10-15 15:29 재부팅 (15:24 · 15:27 에도 기록). tmux daq · po
 **controller 창.** `scripts/daq-tmux.sh`(--start 없이)로 tmux `daq` 세션을 세웠다 — rcmon · postrun(--follow, pid 108867) · dataflow(--follow, pid 108866)는 살아 있다.
 감시자 pane 의 미리 타이핑된 명령은 사고 방지로 지웠다(C-u). DISPLAY=:1 의 gnome-terminal 에 `tmux attach -t daq` 창을 띄웠다. postrun 은 4379 가 완결이라 할 일 없고, dataflow M 단계가 /scratch 의 옛 런 Merged 를 훑는 중.
 
-**→ 이 계획은 쓰지 않고 §11.215(개활지 우주선 시험, 4067 100 %)로 대체됐다.** (아래는 당시 계획)
+**→ 이 계획은 당시에는 §11.215 로 대체됐으나, 4380·4381 을 거쳐 결국 run 4382 부터 이 사본(VETO_test_9layers_v2_mid3)으로 수집하게 됐다 (§11.215 세 번째 "이어서").** (아래는 당시 계획)
 **다음.** 사용자가 보드를 USB 에 되살리면(전원 재투입이면 `NOTICE_CODE_RUN.sh` → `usbreset` ×2, §11.119 · §11.171) 확인 런(--no-db 999999, TCB 로그 `is aligned` 8 줄) →
 합격 시 감시자를 tmux daq:1.2 에서 시험용 desc 로 기동 → 새 런 TCB 로그의 THR · FADCT mid 검증 → daqerr-watch · veto-check → 기록.
 되돌리려면 `cp -p config/rcterm.params.bak-20261015 config/rcterm.params`. 메일은 보내지 않았다(책임자가 세션에 있음).
@@ -4141,7 +4166,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       run 4381 (10-15 23:18 부터, 개활지 우주선 시험, 문턱 run 4067 100 % + TCB 트리거 조건 MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0 = DataTaking_IBD_sykim_2026_thr4067_trg9L.config, ~11 Hz 가 정상, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
+수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
 수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
            ★ 로테이션 직후 FADC USB 오류가 두 번째(09-09 · 09-11) — 4342·4343 실패, usbreset ×2 로 복구.
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
@@ -4182,7 +4207,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
-§11.215         ★★ 개활지 우주선 시험 : 문턱값 run 4067 원래 값(100 %), 파일 _thr4067.config, run 4380 (10-15 23:07, ~955 Hz) → 23:18 run 4381 부터 TCB 트리거 네 값을 9layers 값으로(_thr4067_trg9L.config, ~11 Hz). 허브 없이 직결 뒤 USB 오류 0. /scratch 미마운트로 postrun 정지
+§11.215         ★★ 개활지 우주선 시험 : 문턱 run 4067 원래 값(100 %) run 4380 (23:07, ~955 Hz) → 23:19 run 4381 TCB 트리거 네 값 9layers (~11 Hz) → 23:53 run 4382 부터 설정 통째로 VETO_test_9layers_v2_mid3.config (~57 Hz). 허브 없이 직결 뒤 USB 오류 0. /scratch 미마운트로 postrun 정지
 §11.214         ★★ VETO_test_9layers_v2 설정(FADCT 3 사본) 으로 run 준비, 10-15. 재부팅 뒤 보드 3 종이 USB 에 안 보여 확인 런 전에 멈춤(현장 확인). tmux daq controller 창 띄움
 §11.213         ★★ 문턱값 = 사용자 지정 30 값 (DataTaking_test_2026.config, 새 파일), run 4377 부터 (10-11 10:11). 계수율 485 → ~237 Hz. veto-check-4377 · daqerr-watch-4377
 §11.212         ★★ 웹 서머리 발행 27일 정체 — 드라이브 실패를 치명으로 읽던 버그(publish_google.py exit=1) + 알림 경로 결함(NOTIFY 가 tools/monitor 기준이라
