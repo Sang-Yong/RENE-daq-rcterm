@@ -970,6 +970,12 @@ n=14·15 감소(253 → 53)는 원인 미상 (꺼진 채널이 주로 끝 두 �
 **chain_down 메일 12 h 휴지 (사용자 지시 01:4x).** /scratch 미마운트로 chainwatch chain_down 이 1 h 마다 나가므로 `config/notify.params` 에 `chain_realert_min = 720` (백업 `config/notify.params.bak-20261016-realert`; chain_down 마지막 발송 01:15 → 다음은 13:15 이후).
 1 회성 crontab `50 13 16 10 * /Data_ssd/LOG/restore-realert-20261016.sh` 가 13:50 에 60 으로 되돌리고 자기 줄을 지운다 (로그 `/Data_ssd/LOG/restore-realert-20261016.log`). 사용자는 10-16 낮에 현장에서 /scratch 를 마운트할 예정.
 
+**예약 (사용자 지시 02:17 "5시간뒤에 ch8 문턱 80으로 고정해서 다시 돌려줘", 02:2x).** 새 파일 `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3_ch8thr80.config` (= `_mid3` 에서 THR 의 9 번째 값 CID 9/PMT 18 만 100→80, MTHRSM 18 그대로, diff 한 줄).
+예약 스크립트 `/Data_ssd/LOG/switch-ch8thr80-20261016.sh` (로그 `.log`) 를 crontab `17 7 16 10 *` 에 걸었다 (백업 `~/crontab.bak-20261016021859`, 13:50 restore-realert 줄은 유지). 순서 : tmux daq pane %2 확인 → rcterm.params 백업 `.bak-20261016e` + 전환 + dry-run 검증 →
+감시자 TERM (최대 5 분 대기, 강제 종료 없음) → DB 에서 4386 etime 확인 → send-keys 로 평소 감시자 재기동 → 새 런 (≥ 4387) 검증 : THR 9 번째 = 80 · MTHRSM 18 · `is aligned` 8 · USB 오류 0 · CONFIG 사본 · 계수율 → veto-check 교체 → threshold-changes.log → 책임자 메일 (검증이 실패해도 보냄) → crontab 자기 줄 삭제.
+dry-run 02:18:45 통과 (감시자 pid 496489, pane %2, 파서가 TCB_004385 THR9=80/MTHRSM 16 · TCB_004386 THR9=100/MTHRSM 18 로 맞게 읽음). 로테이션 10-17 01:53 과는 겹치지 않는다. 결과 메일·로그는 07:2x 에 확인 (아직 실행 전이라 결과는 없다).
+rundesc 는 사용자가 10-15 23:54 에 `Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP` 로 바꿔 두었다 (run 4383 부터 적용).
+
 #### 11.217 ★★ MTHRSM 16 10 분 런(4383)으로 N−1 채널 효율 — ∏ε 0.975, 끝 패널 손실은 기하, 패널 4 정렬 의심 (오케스트레이터 지시, 10-16 00:4x ~ 01:3x)
 
 정본 보고서 : 수집 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_thr4067-cosmic.md` 끝 "이어서 (00:4x~)" · 분석 `/Data_ssd/LOG/harness/20261016_monitor-analyst_n-1-efficiency-4383.md`.
@@ -4307,7 +4313,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★ run 4386 (10-16 01:53 부터, 24 h 로테이션, 설정 = _mid3 (ch8 THR 100, MTHRSM 18), ~57.8 Hz). 4385 는 ch8 THR 80 10 분 런 (§11.218), 4384 는 01:42 마감. 이하 4384 줄은 직전 기록
+수집       ★ 07:17 예약 전환 (switch-ch8thr80, run 4386 → 4387 예정, `_mid3_ch8thr80`). run 4386 (10-16 01:53 부터, 24 h 로테이션, 설정 = _mid3 (ch8 THR 100, MTHRSM 18), ~57.8 Hz). 4385 는 ch8 THR 80 10 분 런 (§11.218), 4384 는 01:42 마감. 이하 4384 줄은 직전 기록
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
 수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
@@ -4350,7 +4356,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
-§11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. chain_down 메일 12 h 휴지(13:50 자동 복귀)
+§11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. 07:17 에 80 고정 전환 예약(02:2x). chain_down 메일 12 h 휴지(13:50 자동 복귀)
 §11.217         ★★ MTHRSM 16 10 분 런(run 4383, 76.1 Hz)으로 N−1 채널 효율 : ∏ε 0.9746 ± 0.0009, 최저 ch16 0.9926 · ch8 0.9938, 끝 패널 0.86 은 기하, 패널 4 정렬 의심. 4384 로 MTHRSM 18 원복
 §11.216         ★★ 개활지 9 층 스택 계수율 58 Hz 는 기대 51~100 Hz 안 (기하 수용이 주원인). TCB MTHRSM N = 문턱 넘은 SADC 채널 수 ≥ N 을 데이터로 확정. 분석만, 수집 무접촉
 §11.215         ★★ 개활지 우주선 시험 : 문턱 run 4067 원래 값(100 %) run 4380 (23:07, ~955 Hz) → 23:19 run 4381 TCB 트리거 네 값 9layers (~11 Hz) → 23:53 run 4382 부터 설정 통째로 VETO_test_9layers_v2_mid3.config (~57 Hz). 허브 없이 직결 뒤 USB 오류 0. /scratch 미마운트로 postrun 정지
@@ -4470,10 +4476,10 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **ch8 문턱 80 고정 여부 결정** | 분석자 권고는 유지(§11.218). 고정하려면 설정 파일 변경 + 감시자 재시작이 필요 (지금 4386 은 100) | §11.218 |
+| **07:17 ch8 THR 80 자동 전환 예약됨 — 07:2x 메일·로그 확인** | `switch-ch8thr80-20261016.sh` (crontab 17 7 16 10). 결과는 `/Data_ssd/LOG/switch-ch8thr80-20261016.log` 와 책임자 메일. 실패하면 4386(THR 100)이 계속 돌거나 감시자 재기동을 사람이 | §11.218 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
 | **/scratch 마운트 + postrun pane 재기동** | 저장소 서버 10.0.0.10 무응답으로 10-15 부터 /scratch 없음, 후처리 정지 (root, 서버 복구 뒤) | §11.215 |
-| `config/rundesc.txt` 갱신 | run 4380 은 개활지 우주선 시험인데 desc 가 지하 시절 문구 | §11.215 |
+| ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
