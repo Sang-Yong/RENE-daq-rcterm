@@ -913,6 +913,44 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.215 ★★ 개활지 우주선 시험 — 문턱값을 run 4067 원래 값(100 %)으로, run 4380 (사용자 지시, 10-15 22:57 ~ 23:10)
+
+사용자 : "검출기에서 동굴밖 개활지에서 우주선을 측정해보기 위해 VETO Type A, B1, B2 로 나눠서 샌드위치처럼 쌓아서 데이터를 받으려고 해. 일단 VETO 검출기의 threshold 값을 원래 설정값(런 4067 기준)으로 되돌려서 데이터를 받아줘."
+기본 설정 파일은 사용자가 **DataTaking_IBD 계열(물리 런 파일, FADC+SADC 트리거)** 로 골랐다. **§11.214 의 VETO_test_9layers_v2 계획은 쓰지 않는다 (이 지시로 대체).** 상세 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_thr4067-cosmic.md`.
+
+```
+새 파일   /home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026_thr4067.config  (= _thr4067x80 사본, SADCT THR 한 줄만 100 % 값. 옛 파일 무수정)
+THR       356 251 164 384 182 187 293 454 245 200 335 505 257 205 443 224 200 215 1992 1032 877 125 1762 1963 1192 1237 857 295 597 1228
+          직전 _thr4067x80 줄의 ÷0.8 과 30/30 일치(비율 0.797~0.802), PRD S_THR(THRESHOLD-HISTORY run 3909~4169)과 글자 단위 일치. FADC THR(80 80 5000000 5000000)·TCB 조건 그대로
+전환      config/rcterm.params config= 새 파일 (백업 config/rcterm.params.bak-20261015b = VETO_test_9layers_v2_mid3 을 가리키던 것). dry-run 에서 INSERT·cp 대상이 새 파일임 확인
+```
+사전 : PC 20:13 재부팅, 보드 3 종이 **허브 없이 PC 직결**(Bus 002 Port 4/5/6). 고아 0, 포트 7809/7814/7815 비어 있음.
+
+| 확인 런 f (--no-db 999999) | 값 |
+|---|---|
+| 시각 | 23:03:44 ~ 23:06:44 (3 분) |
+| exit / is aligned / Fail to align | 0 / 8 / 0 |
+| LIBUSB (TCB·FADC·SADC) | 0 |
+| 계수율 | FADC 1134.1 Hz · SADC 1133.7 Hz |
+| FADC pedestal | 3917 3939 3934 3909 |
+
+usbreset · NOTICE_CODE_RUN 은 필요 없었다. 18:19~18:24 의 a~e(허브 밑)는 전부 USB TIMEOUT 이었는데 직결에서는 3 분 오류 0 — 허브 제거가 처방이었던 것으로 보인다(추정, 1 회 관측).
+
+| run 4380 (감시자 23:07:06, `scripts/daq-tmux.sh --start`, pid 140205) | 결과 |
+|---|---|
+| TCB SADCT THR 30 값 | 새 파일과 글자 단위 일치 |
+| FADCT mid / DRAM | 3 (found @ 3) / is aligned 8 · Fail 0 |
+| LIBUSB·TIMEOUT | 0 |
+| CONFIG/004380.config · DB config | 새 파일과 동일 · …_thr4067.config |
+| 계수율 첫 50 s | FADC 955.7 Hz · SADC 954.4 Hz (첫 12 s 1037/1051) |
+| notify | 켜짐 |
+
+4376(지하, 80 %) 485 Hz 와는 장소가 달라 직접 비교 불가 — 값만 기록. 4067 시절과 지금은 채널→PMT 배치가 다를 수 있다(§11.207 과 같은 방식으로 채널 k 값을 채널 k 에). ch18·19·22·23·24·25·29 는 1,000 이상 — 지하 기준으로는 MIP 위였다(§11.195). 개활지 샌드위치 해석은 데이터로.
+감시 : `/Data_ssd/LOG/daqerr-watch-4380.sh` (pid 143345, 48 h) · `/Data_ssd/LOG/veto-check-4380.sh` (pid 143344, 출력 /Data_ssd/LOG/psd-check4380).
+
+**★ /scratch 미마운트.** 저장소 서버 10.0.0.10 ping 실패 (enp3s0f1 carrier=1, 10.0.0.11/24 UP — §11.133 과 같은 모양). postrun pane 은 "LOG 디렉터리 없음" 으로 즉시 종료, dataflow 는 3단계 가드(§11.135)로 건너뛰며 돈다. 수집은 /Data_ssd 라 무관. chainwatch 가 chain_down(전문가+책임자)·resumed 를 자동으로 낼 것 — 실제 상황이라 맞는 알림.
+**남은 것.** ① 서버가 살아난 뒤 `sudo mount /scratch` + postrun pane 재기동 (root, 사용자) ② rundesc 는 지하 시절 문구 그대로 — 개활지 시험임을 남기려면 `config/rundesc.txt` 수정(다음 런부터) ③ `docs/THRESHOLD-HISTORY.md` 재생과 veto-check 비교표(4376·4377·4379 대비, 배치가 달라 참고용)는 PRD 가 생긴 뒤 ④ threshold-changes.log 의 이 행 시각은 23:10:00 으로 적혔으나 실제 적용은 23:03 경(append-only 라 그대로).
+
 #### 11.214 ★★ VETO_test_9layers_v2 설정으로 run 준비 — 보드가 USB 에 없어 확인 런 전에 멈춤 (사용자 지시, 10-15 18:0x)
 
 사용자 : "VETO_test_9layers_v2.config 를 config 파일로 적용해서 run 돌려줄래?" + "run 현황 볼 수 있게 controller 창 띄워줄 수 있어?" 상세 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_veto9layers.md`.
@@ -935,6 +973,7 @@ PC          10-15 15:29 재부팅 (15:24 · 15:27 에도 기록). tmux daq · po
 **controller 창.** `scripts/daq-tmux.sh`(--start 없이)로 tmux `daq` 세션을 세웠다 — rcmon · postrun(--follow, pid 108867) · dataflow(--follow, pid 108866)는 살아 있다.
 감시자 pane 의 미리 타이핑된 명령은 사고 방지로 지웠다(C-u). DISPLAY=:1 의 gnome-terminal 에 `tmux attach -t daq` 창을 띄웠다. postrun 은 4379 가 완결이라 할 일 없고, dataflow M 단계가 /scratch 의 옛 런 Merged 를 훑는 중.
 
+**→ 이 계획은 쓰지 않고 §11.215(개활지 우주선 시험, 4067 100 %)로 대체됐다.** (아래는 당시 계획)
 **다음.** 사용자가 보드를 USB 에 되살리면(전원 재투입이면 `NOTICE_CODE_RUN.sh` → `usbreset` ×2, §11.119 · §11.171) 확인 런(--no-db 999999, TCB 로그 `is aligned` 8 줄) →
 합격 시 감시자를 tmux daq:1.2 에서 시험용 desc 로 기동 → 새 런 TCB 로그의 THR · FADCT mid 검증 → daqerr-watch · veto-check → 기록.
 되돌리려면 `cp -p config/rcterm.params.bak-20261015 config/rcterm.params`. 메일은 보내지 않았다(책임자가 세션에 있음).
@@ -4081,7 +4120,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★ 10-15 현재 대기 상태 (재부팅 15:29, 보드 USB 미검출 — §11.214). rcterm.params 는 VETO_test_9layers_v2_mid3 을 가리킴. 아래 4344 줄은 옛 기록
+수집       run 4380 (10-15 23:07 부터, 개활지 우주선 시험, 문턱 run 4067 100 % = DataTaking_IBD_sykim_2026_thr4067.config, ~955 Hz, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
 수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
            ★ 로테이션 직후 FADC USB 오류가 두 번째(09-09 · 09-11) — 4342·4343 실패, usbreset ×2 로 복구.
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
@@ -4122,6 +4161,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.215         ★★ 개활지 우주선 시험 : 문턱값 run 4067 원래 값(100 %), 파일 _thr4067.config, run 4380 부터 (10-15 23:07, ~955 Hz). 허브 없이 직결 뒤 USB 오류 0. /scratch 미마운트로 postrun 정지
 §11.214         ★★ VETO_test_9layers_v2 설정(FADCT 3 사본) 으로 run 준비, 10-15. 재부팅 뒤 보드 3 종이 USB 에 안 보여 확인 런 전에 멈춤(현장 확인). tmux daq controller 창 띄움
 §11.213         ★★ 문턱값 = 사용자 지정 30 값 (DataTaking_test_2026.config, 새 파일), run 4377 부터 (10-11 10:11). 계수율 485 → ~237 Hz. veto-check-4377 · daqerr-watch-4377
 §11.212         ★★ 웹 서머리 발행 27일 정체 — 드라이브 실패를 치명으로 읽던 버그(publish_google.py exit=1) + 알림 경로 결함(NOTIFY 가 tools/monitor 기준이라
@@ -4238,6 +4278,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| **/scratch 마운트 + postrun pane 재기동** | 저장소 서버 10.0.0.10 무응답으로 10-15 부터 /scratch 없음, 후처리 정지 (root, 서버 복구 뒤) | §11.215 |
+| `config/rundesc.txt` 갱신 | run 4380 은 개활지 우주선 시험인데 desc 가 지하 시절 문구 | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
