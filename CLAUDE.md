@@ -969,8 +969,8 @@ usbreset · NOTICE_CODE_RUN 은 필요 없었다. 18:19~18:24 의 a~e(허브 밑
 | 4381 | 23:18:52 시작 (tmux daq:1.2). TCB 네 값 위 표대로 · SADCT THR 30 값 4067 그대로 · DRAM is aligned 8 / 실패 0 · LIBUSB·TIMEOUT·OVERFLOW 첫 3 분 TCB 0 · FADC 0 · SADC 0 · CONFIG/004381.config 와 DB config 가 새 파일 |
 
 ★ **계수율이 ~940 Hz → FADC 11.22 Hz · SADC 11.21 Hz** (daqtime 180 s, 사건 2,028 / 1,920). FADC 자체 트리거(SWF)가 빠지고 SADC 조건(MTHRSM 18)만 남은 결과로 보이나 이상 여부는 단정하지 않는다(추정 — 샌드위치 관통 우주선만 남긴 조건이면 그럴 수 있다).
-따라오는 것 : chainwatch `rate_low` 문턱 100 Hz(`chain_min_rate`, 연속 2 회)라 약 10 분 안에 전문가 목록 + 책임자에게 자동 메일 가능 — 낮출지는 사용자 판단 대기. 이력상 저계수율에서 USB 오류가 났으므로(§11.197) `daqerr-watch-4380.sh`(heartbeat 를 따라 4381 기록) 가 48 h 본다. 감시 `veto-check-4381.sh`(PRD 는 /scratch 가 붙어야 생김). chain_down 메일은 23:15 에 이미 나갔다(/scratch 미마운트 · postrun 없음).
-**남은 것.** ① `chain_min_rate` 결정 ② 저장소 서버 복구 뒤 `sudo mount /scratch` + postrun pane 재기동 ③ `config/rundesc.txt` 가 지하 시절 문구 그대로 ④ `docs/THRESHOLD-HISTORY.md` 재생·veto 비교는 PRD 가 생긴 뒤.
+따라오는 것 : chainwatch `rate_low` 문턱 100 Hz(`chain_min_rate`, 연속 2 회)라 약 10 분 안에 전문가 목록 + 책임자에게 자동 메일 가능 — → **23:2x 사용자 지시로 `chain_min_rate` 를 1 로 내렸다** (`config/notify.params`, 백업 `.bak-20261015-minrate`; rate_low 카운터 1 에서 잡아 전문가 메일은 안 나갔다. ★ 시험이 끝나면 100 으로 되돌릴 것). 이력상 저계수율에서 USB 오류가 났으므로(§11.197) `daqerr-watch-4380.sh`(heartbeat 를 따라 4381 기록) 가 48 h 본다. 감시 `veto-check-4381.sh`(PRD 는 /scratch 가 붙어야 생김). chain_down 메일은 23:15 에 이미 나갔다(/scratch 미마운트 · postrun 없음).
+**남은 것.** ① ~~`chain_min_rate` 결정~~ (1 로 내림, 시험 뒤 100 복귀) ② 저장소 서버 복구 뒤 `sudo mount /scratch` + postrun pane 재기동 ③ `config/rundesc.txt` 가 지하 시절 문구 그대로 ④ `docs/THRESHOLD-HISTORY.md` 재생·veto 비교는 PRD 가 생긴 뒤.
 
 #### 11.214 ★★ VETO_test_9layers_v2 설정으로 run 준비 — 보드가 USB 에 없어 확인 런 전에 멈춤 (사용자 지시, 10-15 18:0x)
 
