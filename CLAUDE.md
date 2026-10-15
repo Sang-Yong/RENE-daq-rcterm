@@ -913,6 +913,32 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.214 ★★ VETO_test_9layers_v2 설정으로 run 준비 — 보드가 USB 에 없어 확인 런 전에 멈춤 (사용자 지시, 10-15 18:0x)
+
+사용자 : "VETO_test_9layers_v2.config 를 config 파일로 적용해서 run 돌려줄래?" + "run 현황 볼 수 있게 controller 창 띄워줄 수 있어?" 상세 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_veto9layers.md`.
+
+```
+PC          10-15 15:29 재부팅 (15:24 · 15:27 에도 기록). tmux daq · postrun · dataflow 가 죽어 있었다. 수집은 10-13 09:44 부터 대기 그대로 (§11.213)
+요청 파일    /home/frontend/ConfigFiles/VETO_test_9layers_v2.config (mtime 2026-03-03) : FADCT 1 4 4.  지금 FADC 보드 MID 는 3 (TCB_004379.log FADCT[mid= 3] found @ 3)
+            같은 FADCT 1 이 2026-04-14 run 3895 에서 'ConfigFADC: FADCT[mid= 1] is enabled but not linked' 로 실패 (/scratch/DAQ_LOG/RAW_log.old001/TCB_003895.log).
+            2026-03-03 의 run 3566~3571 때는 하드웨어도 mid=1 이었고, 2025-07 의 run 2170·2171(같은 파일 이름, 13~16 h 완주)은 설정 사본이 FADCT 3
+사본        /home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3.config = 원본에서 FADCT 3 한 줄만 고침 (머리 유래 주석 9 줄). 사용자 원본은 손대지 않음.
+            그 외 값은 원본 그대로 : TCB CW 400 · MTHRF 4 · MTHRSM 18 · SWF/SWSM 0 1 0 0 · FADC THR 100×4 TLT 1+2 · SADC THR 100×18 + 500000×12 ("A type only" 9 층) ·
+            TLT1~8 1x2+3x4 · PID 순서 38 27 24 9 15 30 4 5 18 2 1 3 22 12 10 7 8 19 28 29 26 11 23 25 20 6 16 17 21 13
+전환        config/rcterm.params 백업 .bak-20261015, config= 를 사본으로. dry-run 으로 INSERT·cp 대상이 사본임을 확인. threshold-changes.log 에 '준비만, 미적용' 한 행
+```
+
+**★★ 확인 런 전에 멈췄다.** `lsusb` 에 TCB · NKFADC500 · M64ADC 가 하나도 없다 (Realtek 허브 2 · 키보드 · 마우스 · Realtek RTL8153 USB LAN 어댑터뿐).
+이번 부팅 dmesg 에 보드가 잡힌 기록이 없다. 15:30:50 에 RTL8153 이 usb 2-1.4(예전 FADC 자리)에 붙었고 인터페이스 enp0s20f0u1u4 가 UP.
+원인은 추정(크레이트 전원 · USB 케이블 · 허브 포트) — **현장 확인 필요.** 확인 런 · 감시자 기동 · 감시 스크립트는 하지 않았다. 지금 수집은 대기 상태이고 rcterm.params 만 사본을 가리킨다.
+
+**controller 창.** `scripts/daq-tmux.sh`(--start 없이)로 tmux `daq` 세션을 세웠다 — rcmon · postrun(--follow, pid 108867) · dataflow(--follow, pid 108866)는 살아 있다.
+감시자 pane 의 미리 타이핑된 명령은 사고 방지로 지웠다(C-u). DISPLAY=:1 의 gnome-terminal 에 `tmux attach -t daq` 창을 띄웠다. postrun 은 4379 가 완결이라 할 일 없고, dataflow M 단계가 /scratch 의 옛 런 Merged 를 훑는 중.
+
+**다음.** 사용자가 보드를 USB 에 되살리면(전원 재투입이면 `NOTICE_CODE_RUN.sh` → `usbreset` ×2, §11.119 · §11.171) 확인 런(--no-db 999999, TCB 로그 `is aligned` 8 줄) →
+합격 시 감시자를 tmux daq:1.2 에서 시험용 desc 로 기동 → 새 런 TCB 로그의 THR · FADCT mid 검증 → daqerr-watch · veto-check → 기록.
+되돌리려면 `cp -p config/rcterm.params.bak-20261015 config/rcterm.params`. 메일은 보내지 않았다(책임자가 세션에 있음).
+
 #### 11.213 ★★ 문턱값을 사용자 지정 30 값으로 — 새 파일 DataTaking_test_2026.config, run 4377 부터 (사용자 지시, 10-11 10:0x)
 
 사용자 : "현재 run 중단. 복사해 둔 `/home/frontend/ConfigFiles/DataTaking_test_2026.config` 의 THR 을 `274 288 355 306 361 400 315 296 125 216 303 220 281 323 303 316 243 299 136 171 180 266 139 342 558 363 114 126 129 105` 로 바꾸고 새 run 시작."
@@ -4055,6 +4081,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
+수집       ★ 10-15 현재 대기 상태 (재부팅 15:29, 보드 USB 미검출 — §11.214). rcterm.params 는 VETO_test_9layers_v2_mid3 을 가리킴. 아래 4344 줄은 옛 기록
 수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
            ★ 로테이션 직후 FADC USB 오류가 두 번째(09-09 · 09-11) — 4342·4343 실패, usbreset ×2 로 복구.
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
@@ -4095,6 +4122,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.214         ★★ VETO_test_9layers_v2 설정(FADCT 3 사본) 으로 run 준비, 10-15. 재부팅 뒤 보드 3 종이 USB 에 안 보여 확인 런 전에 멈춤(현장 확인). tmux daq controller 창 띄움
 §11.213         ★★ 문턱값 = 사용자 지정 30 값 (DataTaking_test_2026.config, 새 파일), run 4377 부터 (10-11 10:11). 계수율 485 → ~237 Hz. veto-check-4377 · daqerr-watch-4377
 §11.212         ★★ 웹 서머리 발행 27일 정체 — 드라이브 실패를 치명으로 읽던 버그(publish_google.py exit=1) + 알림 경로 결함(NOTIFY 가 tools/monitor 기준이라
                 585 회 무음) 수정. 하네스 첫 실전 코드 갈래(code-engineer 2라운드 → code-reviewer 2라운드 승인). 9711963 배포, 첫 회차 03:27 (28 런)
