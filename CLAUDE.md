@@ -737,6 +737,8 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   정상의 20배가 넘는다(실측 23,527 Hz). 전체 절차는 §11.119.
   **★ 전원 재투입 뒤 `usbreset` 은 두 번** — 첫 번째 뒤에는 FADC DRAM 이 8/8 정렬 실패한 채
   계수만 나온다. 확인 런의 TCB 로그에서 `is aligned` 8줄을 셀 것 (§11.130 · §11.171, 두 번 재현).
+- **★ HV 크레이트(SY4527, 192.168.0.39)는 USB 랜 어댑터 `enp0s20f0u1u4` 의 DHCP 프로파일 "프로파일 1" 로 붙는다.** interface-name 이 없으면 NM 이 다른 포트(특히 저장소 10G enp3s0f1)에 올려 GECO 가 접속을 못 한다 (§11.220). `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`.
+- **★ 설정 파일을 복사해 고칠 때 원본의 THR 줄이 주석으로 바뀌지 않았는지 run 사본(`/Data_ssd/CONFIG/<런>.config`)과 diff 할 것.** SADCT THR 줄이 없으면 CUPDAQ 가 전 채널 50 을 기본값으로 쓴다 (§11.220).
 - **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
   포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
   치울 것 — **인자 없이 부르면 `bin directory not found` 로 실패한다** (§11.119).
@@ -914,6 +916,40 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.220 ★★ GECO(HV 제어) 접속 불가 점검 · typeB 설정 점검 · run 4388 = `_mid3_pidfix_typeB` 24 h 로테이션 (10-16 15:0x ~ 15:3x)
+
+정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md`.
+
+**GECO 접속 불가 (읽기 전용 점검, 오케스트레이터).** 원인은 GECO 가 아니라 HV 크레이트(SY4527, 192.168.0.39)로 가는 USB 랜 어댑터 `enp0s20f0u1u4` 의 NetworkManager 프로파일 "프로파일 1"(DHCP, 192.168.0.4 받던 것)이 떨어진 것.
+```
+NM 로그  11:00:59 root nmtui 가 내림 -> 11:23:34 GUI 로 복귀 -> 11:24:12·11:24:22 frontend 의 nmcli 가 다시 활성화
+         프로파일에 interface-name 이 없어 NM 이 저장소 10G 포트 enp3s0f1 에 올리며 USB 어댑터에서 떨어짐
+         -> 11:24:24 storage10g 가 되찾음, 이후 프로파일은 어디에도 안 붙음
+GECO     15:05:59·15:06:29 두 번 실행 모두 로그인 창 뒤 12~15 s 만에 종료 (연결 실패 추정)
+         실행 스크립트 /usr/local/bin/CAENGECO2020 = `xhost +; sudo snap run caengeco2020` (비밀번호는 sudo 의 것)
+처방     (사용자, root) nmcli connection up "프로파일 1" ifname enp0s20f0u1u4
+재발 방지 nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4
+```
+★ 사용자가 두 줄을 실행했는지는 아직 확인 못 함. 곁들여 enp3s0f1 가 14:26~14:56 에 "carrier: link connected" 를 30 회쯤 반복했고 10.0.0.10 은 여전히 ping 불가.
+
+**설정 파일 점검.** 사용자가 만든 `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3_pidfix_typeB.config` = pidfix 에서 MTHRSM 18→6, SADCT THR 500000×18 + 100×6 (CID 19~24 = ch18~23, PMT 29 28 11 26 23 25) + 500000×6.
+첫 점검에서 **원본 pidfix 의 활성 THR 줄이 15:24 편집 때 주석 처리돼** run 4387 사본과 `#` 한 글자가 달랐다 — 그대로 띄우면 CUPDAQ `SADCTConf` 기본값(fTHR 50 ×30)으로 돌 뻔했다. 사용자가 15:3x 에 주석을 풀었고(이후 004387.config 과 동일 확인), typeB 주석 초안 줄의 `50000` 오타도 고쳤다. rcterm dry-run 통과.
+
+**run 4388 (15:32:48, threshold-change-operator).** rcterm.params 백업 `.bak-20261016g`(= pidfix), 감시자는 평소 명령(24 h 로테이션). 검증(실측):
+| 항목 | 결과 |
+|---|---|
+| TCB SADC THR 30 값 | 500000×18 + 100×6 (ch18~23) + 500000×6, _typeB 와 글자 단위 일치 |
+| SADC PID 30 값 | pidfix 와 일치. 100 인 채널 = PMT 29 28 11 26 23 25 |
+| TCB config / register | CW 400 · MTHRF 4 · MTHRSM 6 / 6 · TSWF 0 1 0 0 · TSWSM 0 1 0 0 |
+| FADC / DRAM | FADCT[mid=3] found @ 3, THR 100×4 / is aligned 8, Fail to align 0 |
+| LIBUSB·TIMEOUT·OVERFLOW (첫 3 분) | TCB 0 · FADCDAQ 0 · SADCDAQ 0 |
+| CONFIG/004388.config · DB config | _typeB 와 diff 없음 · …_pidfix_typeB.config |
+| 계수율 (daqtime 184 s, 사건 14,972) | FADC 42.7 Hz · SADC 42.6 Hz |
+42.7 Hz 는 Type B 3 장 6 채널 AND 라 4387(Type A, 46.9 Hz)과 비교 대상이 아니다 — 이상으로 판정하지 않음.
+감시: `veto-check-4388.sh`(pid 2187629, ★ /scratch 미마운트라 PRD 가 안 생겨 마운트 + postrun 재기동 뒤에야 돈다) · `daqerr-watch-4380.sh` 가 4388 을 따라간다 · 옛 `veto-check-4387.sh`(pid 1352413)는 PRD 를 기다리며 남아 있다(해롭지 않음) · threshold-changes.log 15:33:45 행.
+다음 로테이션 10-17 15:32:48. 되돌리려면 `cp -p config/rcterm.params.bak-20261016g config/rcterm.params` 뒤 감시자 TERM·재기동.
+**남은 것.** ① 사용자의 HV 망 프로파일 복구 확인 ② /scratch 마운트 + postrun 재기동 ③ chain_min_rate 100 복귀 · 물리 설정 복귀는 시험 뒤 사용자 결정 ④ THRESHOLD-HISTORY.md 는 PRD 뒤 재생.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4338,6 +4374,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
+수집       ★★ run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4381,6 +4418,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h
 §11.219         ★★ 10-16 07:17 ch8 THR 80 예약 전환 실패(cron 에 ROOT 환경 없음) → 09:04 run 4387 = `_mid3_pidfix` 2 h 런(11:04 뒤 대기). 시트 Description 에 설정 파일명 + 채널별 THR 전→후 기록(소급은 `--update-desc ours`)
 §11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. 07:17 에 80 고정 전환 예약(02:2x). chain_down 메일 12 h 휴지(13:50 자동 복귀)
 §11.217         ★★ MTHRSM 16 10 분 런(run 4383, 76.1 Hz)으로 N−1 채널 효율 : ∏ε 0.9746 ± 0.0009, 최저 ch16 0.9926 · ch8 0.9938, 끝 패널 0.86 은 기하, 패널 4 정렬 의심. 4384 로 MTHRSM 18 원복
@@ -4502,6 +4540,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
 | **/scratch 마운트 + postrun pane 재기동** | 저장소 서버 10.0.0.10 무응답으로 10-15 부터 /scratch 없음, 후처리 정지 (root, 서버 복구 뒤) | §11.215 |
