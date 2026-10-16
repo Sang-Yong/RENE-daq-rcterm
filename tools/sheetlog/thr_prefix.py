@@ -25,7 +25,7 @@
    사용 : thr_prefix.py 4340 4341 4344      → 런마다 '런<TAB>문구' 한 줄 (판정 불가면 '?사유')
    모듈 : from thr_prefix import describe, prefix_for, strip_prefix
 """
-import glob, os, sqlite3, subprocess, sys
+import glob, os, re, sqlite3, subprocess, sys
 
 TABLE = os.environ.get("THR_TABLE", "/scratch/RunSummary/psd/thr_by_run.tsv")
 ROOTS = os.environ.get("RENE_RAW_ROOTS", "/Data_ssd/RAW:/data/RAW:/scratch/RAW").split(":")
@@ -35,6 +35,9 @@ PREFIX = "비토 문턱값 변경"
 PREFIX_CFG = "설정 파일 변경"
 CONFIG_DIRS = [d for d in os.environ.get("RENE_CONFIG_DIRS", "/Data_ssd/CONFIG:/data/CONFIG:/scratch/CONFIG").split(":") if d]
 RUNDB = os.environ.get("RENE_RUNDB", "/Data_ssd/runcatalog.db")
+#  ★ 이 아래의 CONFIG 디렉터리는 그 루트가 실제로 마운트돼 있을 때만 본다. /scratch 는 hard NFS 라 서버가 죽은 채
+#    마운트가 빠져 있거나 걸려 있으면 isfile 이 멎을 수 있다 -- cron 이 매시 매달리지 않게 (리뷰 2026-10-16)
+MOUNT_ROOTS = [d.rstrip("/") for d in os.environ.get("RENE_MOUNT_ROOTS", "/scratch").split(":") if d]
 OFF = 100000           # 이 이상인 문턱은 꺼 둔 채널이다 (500000 · 5000000)
 MANY = 8               # 바뀐 채널이 이보다 많으면 채널별로 늘어놓지 않고 새 값 전체를 줄여 적는다
 
@@ -144,8 +147,20 @@ def parse_config(path):
     return r if r["sthr"] else None
 
 
+def _dir_usable(d):
+    """d 가 MOUNT_ROOTS 중 하나의 밑이면 그 루트가 마운트돼 있을 때만 참"""
+    for m in MOUNT_ROOTS:
+        if d == m or d.startswith(m + "/"):
+            return os.path.ismount(m)
+    return True
+
+
+def config_dirs():
+    return [d for d in CONFIG_DIRS if _dir_usable(d)]
+
+
 def _config_copy(run):
-    for d in CONFIG_DIRS:
+    for d in config_dirs():
         p = os.path.join(d, "%06d.config" % run)
         if os.path.isfile(p):
             return p
@@ -203,7 +218,7 @@ def run_info(run, table=None, allow_scan=True):
 def known_runs(table):
     """eligible 이 없을 때의 비교 후보 = 표의 런 + 설정 사본이 있는 런"""
     cand = set(table.keys())
-    for d in CONFIG_DIRS:
+    for d in config_dirs():
         for f in glob.glob(os.path.join(d, "[0-9]" * 6 + ".config")):
             cand.add(int(os.path.basename(f)[:6]))
     return cand
@@ -282,6 +297,9 @@ def prefix_for(run, table=None, allow_scan=True, eligible=None):
     return p
 
 
+OURS_RE = re.compile(r"\.config|\bch\d+|\d+ch 변경|PID 순서 변경|FADC 문턱|채널 수")
+
+
 def strip_prefix(desc):
     """이미 붙은 문구를 뗀다 — 옛 형식 '비토 문턱값 변경(X) ' 와 새 형식 '… [ … ] ' 둘 다, 겹쳐 있어도 전부."""
     d = desc or ""
@@ -293,9 +311,9 @@ def strip_prefix(desc):
             d = d[len(PREFIX_CFG):].lstrip()
         else:
             return d
-        if d.startswith("["):              # 우리 문구 바로 뒤의 [ … ] 만 뗀다 (rundesc 자체의 괄호는 안 건드린다)
-            j = d.find("]")
-            if j > 0:
+        if d.startswith("["):              # 우리 문구 바로 뒤의 [ … ] 만, 그것도 우리가 쓰는 낱말이 있을 때만 뗀다
+            j = d.find("]")                #   (옛 형식 뒤 rundesc 가 '[m] = 1 …' 처럼 괄호로 시작하는 경우를 지키려고)
+            if j > 0 and OURS_RE.search(d[1:j]):
                 d = d[j + 1:].lstrip()
 
 

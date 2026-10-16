@@ -13,8 +13,8 @@ import thr_prefix                      # 설정이 직전 런과 다르면 Descr
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
 GID      = 0
-DB       = "/Data_ssd/runcatalog.db"
-ROOTS    = ["/Data_ssd/RAW", "/data/RAW", "/scratch/RAW"]
+DB       = os.environ.get("RENE_RUNDB", "/Data_ssd/runcatalog.db")
+ROOTS    = os.environ.get("RENE_RAW_ROOTS", "/Data_ssd/RAW:/data/RAW:/scratch/RAW").split(":")
 
 #  ---- 시트의 소유권 경계 (CLAUDE.md 11.5) ----------------------------
 #  금지선은 '기존 행' 이 아니라 '남의 행' 이다. 다른 계정의 사람들이 써 놓은
@@ -209,7 +209,7 @@ def make_row(dbrow, pre, hdr, col, carry):
         #  ★ 설정이 직전 런(시트에 실리는 런 중)과 다르면 서두에 무엇이 바뀌었는지 붙인다 (2026-09-14 · 10-16 사용자 지시).
         #    '비토 문턱값 변경(감소) [파일: ch8(PMT18) 100→80] ' / '설정 파일 변경 [파일] '. 판정은 런마다의 설정 사본
         #    (<RAW루트>/../CONFIG/<런>.config) → PRD S_THR 표 → PRD 순서 (tools/sheetlog/thr_prefix.py)
-        "description": thr_prefix.prefix_for(run, THR_TABLE, eligible=ELIGIBLE) + thr_prefix.strip_prefix((desc or "").strip()),
+        "description": thr_prefix.prefix_for(run, THR_TABLE, allow_scan=ALLOW_SCAN, eligible=ELIGIBLE) + thr_prefix.strip_prefix((desc or "").strip()),
         "data issue": issue,
     }
     for c in CARRY:
@@ -222,7 +222,8 @@ def make_row(dbrow, pre, hdr, col, carry):
 
 
 THR_TABLE = thr_prefix.load_table()
-ELIGIBLE = None        # 비교 대상 후보 = 시트에 실린(실릴) 런.  main 이 채운다
+ELIGIBLE = None        # 비교 대상 후보 = 시트에 실린(실릴) 런.  main · do_insert 가 채운다
+ALLOW_SCAN = False     # PRD 를 ROOT 로 읽어 thr_by_run.tsv 에 덧붙이는 것은 --commit 일 때만 (미리보기는 바깥을 안 바꾼다)
 
 
 def sheet_runs(grid, hdr_i, run_c):
@@ -257,7 +258,7 @@ def do_update_desc(a, ws, grid, hdr_i, hdr, col, run_c):
             print("  ★ run %d 는 남의 행이다 -- 건드리지 않는다" % run)
             continue
         old = grid[i][dcol] if dcol < len(grid[i]) else ""
-        pfx, why = thr_prefix.describe(run, THR_TABLE, eligible=elig)
+        pfx, why = thr_prefix.describe(run, THR_TABLE, eligible=elig, allow_scan=ALLOW_SCAN)
         if pfx is None:
             skipped.append((run, why))
             print("  run %d : 판정 불가, 그대로 둔다 -- %s" % (run, why))
@@ -312,8 +313,6 @@ def do_insert(a, ws, grid, hdr_i, hdr, col, run_c):
       * 아래에서 위로 넣는다 -- 위에서부터 넣으면 다음 삽입 위치가 어긋난다
       * 쓰기 전에 기존 격자를 통째로 들고 있다가, 쓴 뒤 한 줄씩 대조한다
     """
-    import gspread
-
     want = sorted({int(x) for x in re.split(r"[,\s]+", a.insert) if x.strip().isdigit()})
     have = {}
     for i in range(hdr_i + 1, len(grid)):
@@ -328,6 +327,9 @@ def do_insert(a, ws, grid, hdr_i, hdr, col, run_c):
         print("끼워 넣을 런이 없다")
         return
 
+    #  ★ 직전 런은 main 과 같은 규칙 -- 시트에 있는 런 + 이번에 넣을 런 중에서 (실패 런과 비교하지 않게, 리뷰 2026-10-16)
+    global ELIGIBLE
+    ELIGIBLE = sheet_runs(grid, hdr_i, run_c) | set(want)
     db = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
     plans = []
     for run in want:
@@ -354,15 +356,18 @@ def do_insert(a, ws, grid, hdr_i, hdr, col, run_c):
         print("  run %-5d -> %d행 앞  [%s]  %s"
               % (run, at + 1, "우리" if is_ours(run) else "★남의 구간",
                  [str(x)[:24] for x in line[:6]]))
+        if a.full and "description" in col:
+            print("     Description : %s" % line[col["description"]])
     alien = [r for r, _, _ in plans if not is_ours(r)]
     if alien:
         print("  ※ %s 은(는) 남의 행 사이에 들어간다. 내용은 그대로이고 위치만 밀린다."
               % " ".join(map(str, alien)))
 
-    if not a.commit:
+    if not a.commit or ws is None:
         print("\n미리보기다. 실제로 쓰려면 --commit")
         return
 
+    import gspread                           # noqa: F401  (쓰기 경로에서만)
     before = [r[:] for r in grid]
     #  아래에서 위로 넣는다. 같은 자리에 여럿이 들어갈 때는 **런 번호도 내림차순**
     #  이어야 한다 -- 같은 index 에 계속 밀어 넣으면 나중 것이 위로 올라가므로,
@@ -398,18 +403,20 @@ def main():
     ap.add_argument("--update-desc", metavar="RUNS",
                     help="우리가 쓴 행의 Description 만 다시 쓴다 (설정·문턱값 변경 문구). 남의 행은 안 건드린다. "
                          "'ours' 면 시트의 우리 행 전부")
-    ap.add_argument("--full", action="store_true", help="--update-desc 미리보기에서 Description 전후를 자르지 않고 보인다")
+    ap.add_argument("--full", action="store_true", help="--update-desc · --insert 미리보기에서 Description 을 자르지 않고 보인다")
     ap.add_argument("--sheet-tsv", metavar="FILE",
-                    help="시험용 : 구글 대신 이 TSV 를 시트로 읽는다 (--update-desc 미리보기만. 쓰지 않는다)")
+                    help="시험용 : 구글 대신 이 TSV 를 시트로 읽는다 (--update-desc · --insert 미리보기만. 쓰지 않는다)")
     ap.add_argument("--insert", metavar="RUNS",
                     help="빠진 런을 번호 순서에 맞게 끼워 넣는다 (쉼표로 구분). "
                          "기존 행의 내용은 그대로이고 위치만 아래로 밀린다")
     a = ap.parse_args()
+    global ALLOW_SCAN
+    ALLOW_SCAN = bool(a.commit)
 
     if a.sheet_tsv:
         #  구글 무접촉 시험 경로. 쓰기 동작은 막는다
-        if a.commit or a.insert or not a.update_desc:
-            sys.exit("--sheet-tsv 는 --update-desc 미리보기에만 쓴다 (--commit · --insert · 추가 금지)")
+        if a.commit or not (a.update_desc or a.insert):
+            sys.exit("--sheet-tsv 는 --update-desc · --insert 미리보기에만 쓴다 (--commit · 추가 금지)")
         ws = None
         grid = [ln.rstrip("\n").split("\t") for ln in open(a.sheet_tsv, encoding="utf-8")]
         print("TSV '%s'  %d행" % (a.sheet_tsv, len(grid)))

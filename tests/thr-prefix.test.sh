@@ -34,14 +34,16 @@ chk 900006 '\?.*못 읽었다.*' 'ERR 런 → 판정 불가 (스캔 없이)'
 mkdir -p "$T/cfg"; cp "$FX"/*.config "$T/cfg/"
 python3 - "$T/run.db" <<'PY'
 import sqlite3, sys
-d = sqlite3.connect(sys.argv[1]); d.execute("create table runcatalog (runnum integer primary key, config text)")
+d = sqlite3.connect(sys.argv[1])
+d.execute("create table runcatalog (runnum integer primary key, stime text, etime text, onlbit integer, runlog text, rundesc text, nfadc integer, tfadc real, config text)")
 cf = '/home/frontend/ConfigFiles/'
-for r, c in [(4381, 'DataTaking_IBD_sykim_2026_thr4067_trg9L.config'), (4382, 'VETO_test_9layers_v2_mid3.config'),
+for r, c in [(4380, 'DataTaking_IBD_sykim_2026_thr4067.config'),
+             (4381, 'DataTaking_IBD_sykim_2026_thr4067_trg9L.config'), (4382, 'VETO_test_9layers_v2_mid3.config'),
              (4383, 'VETO_test_9layers_v2_mid3_mthrsm16.config'), (4384, 'VETO_test_9layers_v2_mid3.config'),
              (4385, 'VETO_test_9layers_v2_mid3_mthrsm16_ch8thr80.config'), (4386, 'VETO_test_9layers_v2_mid3.config'),
              (4387, 'VETO_test_9layers_v2_mid3_pidfix.config')]:
-    d.execute("insert into runcatalog values (?,?)", (r, cf + c))
-d.execute("insert into runcatalog values (4380, ?)", (cf + 'DataTaking_IBD_sykim_2026_thr4067.config',))
+    d.execute("insert into runcatalog values (?,?,?,?,?,?,?,?,?)",
+              (r, '2026-10-16 01:00:00', '2026-10-16 02:00:00', 1, '', 'site A', 1000, 10.0, cf + c))
 d.commit()
 PY
 #  우선순위 확인용 : 표에는 4385 를 엉뚱한 값으로 둔다. 설정 사본이 이겨야 한다
@@ -79,6 +81,9 @@ assert tp.strip_prefix('비토 문턱값 변경(감소) [f.config: ch8(PMT18) 10
 assert tp.strip_prefix('설정 파일 변경 [f.config] 비토 문턱값 변경(증가) abc') == 'abc'
 assert tp.strip_prefix('설정 파일 변경 [f.config: PID 순서 변경] [rundesc 괄호] x') == '[rundesc 괄호] x'
 assert tp.strip_prefix('[rundesc 괄호] x') == '[rundesc 괄호] x'
+assert tp.strip_prefix('비토 문턱값 변경(증가) [m] = 1 test') == '[m] = 1 test'
+assert tp.strip_prefix('설정 파일 변경 [check list] x') == '[check list] x'
+assert tp.strip_prefix('비토 문턱값 변경(증가) [18ch 변경 → 100×18 off×12 (이전 7×30)] y') == 'y'
 assert tp.strip_prefix('abc') == 'abc' and tp.strip_prefix('') == ''
 p = tp.prefix_for(4385)
 once = p + tp.strip_prefix('비토 문턱값 변경(감소) Yeong-Gwang site')
@@ -118,5 +123,28 @@ echo "$OUT" | grep -q 'run 4383 : 판정 불가.*직전 런 4246' && ok "4383 �
 echo "$OUT" | grep -q '미리보기다' && ok "--sheet-tsv 는 미리보기로 끝난다" || bad "미리보기"
 python3 "$DIR/tools/sheetlog/append_runs.py" --sheet-tsv "$T/sheet.tsv" --update-desc ours --commit >/dev/null 2>&1 \
    && bad "--sheet-tsv --commit 이 막히지 않았다" || ok "--sheet-tsv 와 --commit 은 함께 못 쓴다"
+
+python3 - "$DIR" "$T" <<'PY' && ok "describe(allow_scan=False) 는 PRD 스캔을 부르지 않는다 · 미리보기(--commit 없음)도" || bad "allow_scan"
+import sys, io, contextlib; sys.path.insert(0, sys.argv[1] + '/tools/sheetlog'); import thr_prefix as tp
+def boom(*a, **k): raise AssertionError('scan_run called')
+tp.scan_run = boom
+assert tp.describe(4390, tp.load_table(), eligible={4387, 4390}, allow_scan=False)[0] is None
+import append_runs as ar
+sys.argv = ['append_runs.py', '--sheet-tsv', sys.argv[2] + '/sheet.tsv', '--update-desc', 'ours']
+with contextlib.redirect_stdout(io.StringIO()): ar.main()
+assert ar.ALLOW_SCAN is False
+PY
+
+# ---- [4] --insert 미리보기도 시트의 직전 런과 비교한다 (리뷰 필수 1) ----
+printf 'Run\tMax subrun\tDescription\n4384\t9\tsite A\n4387\t9\tx\n' > "$T/sheet2.tsv"
+OUT=$(python3 "$DIR/tools/sheetlog/append_runs.py" --sheet-tsv "$T/sheet2.tsv" --insert 4386 --full 2>&1)
+echo "$OUT" | grep -qx '     Description : site A' && ok "--insert 4386 : 시트 직전 런 4384 와 같은 설정 → 문구 없음 (시트 밖 4385 와 비교하지 않는다)" || bad "--insert eligible" "$(echo "$OUT" | grep -E 'Description|run 4386')"
+echo "$OUT" | grep -q '미리보기다' && ok "--insert --sheet-tsv 는 미리보기로 끝난다" || bad "insert 미리보기"
+
+# ---- [5] 마운트 안 된 루트 밑의 CONFIG 는 보지 않는다 (리뷰 권고 4) ----
+mkdir -p "$T/mnt/CONFIG"; cp "$FX/004385.config" "$FX/004384.config" "$T/mnt/CONFIG/"
+OUT=$(THR_TABLE=$T/none.tsv RENE_CONFIG_DIRS=$T/mnt/CONFIG RENE_MOUNT_ROOTS=$T/mnt python3 "$DIR/tools/sheetlog/thr_prefix.py" 4385 2>&1)
+OUT2=$(RENE_CONFIG_DIRS=$T/mnt/CONFIG RENE_MOUNT_ROOTS=$T/elsewhere python3 "$DIR/tools/sheetlog/thr_prefix.py" 4385 2>&1)
+echo "$OUT" | grep -qP '^4385\t\?' && echo "$OUT2" | grep -qP '^4385\t비토 문턱값 변경\(감소\)' && ok "미마운트 루트 밑 CONFIG 는 건너뛴다 · 마운트 대상이 아니면 그대로 읽는다" || bad "mount guard" "$OUT / $OUT2"
 
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]
