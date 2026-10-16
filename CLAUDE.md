@@ -997,9 +997,14 @@ B2 여섯 채널 모두 ≥100 인 사건 0, 한 채널이라도 ≥50 인 사�
 
 | run | 시각 | 설정 / MTHRSM | 결과 |
 |---|---|---|---|
-| 4390 | 16:16:28 시작 (24 h 로테이션, 다음 교체 10-17 16:16) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |
+| 4390 | 16:16:28 ~ 16:47:43 (사용자 지시로 subrun 30 까지 받고 16:48:06 종료, 아래 마감 단락) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |
 
 run 4389 의 0 사건 원인은 HV 미인가로 확정(사용자 확인). 감시 `veto-check-4390.sh`(pid 2287851, 4388 과 패널 비교, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4390 을 따라감. threshold-changes.log 16:21 행(설정 변경 없음·HV 조정 뒤 재시작). 메일은 정상 재기동이라 책임자에게만.
+
+**run 4390 마감 (16:47~16:48, 사용자 지시 "subrun 을 30 까지만 받고 이번 run 종료시켜줘").** 16:47:43 heartbeat subrun 31 확인 → 감시자(pid 2281020)에 TERM 1 회 → 16:48:06 run 4390 exit 0, phase=ended. daq·tcb 는 16:48:09 스스로 닫힘(TCB 로그 "all ADCs are closed"), 고아 0, 7809/7814/7815 비어 있음.
+DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, nsadc 75,008. FADC·SADC 파일 각 32 (00000~00031). TCB·FADCDAQ·SADCDAQ 로그 LIBUSB/TIMEOUT/OVERFLOW 0.
+★ **재기동 없음 → 수집 대기 상태.** `config/rcterm.params` 는 `_typeB_2` 그대로 (백업 `.bak-20261016h` = _typeB) — 다음 런은 사용자 결정, 재기동 시 설정 확인. veto-check-4390(pid 2287851)·4388·4387 대기자와 daqerr-watch-4380 은 그대로.
+오늘 Type B 시험 자료 : run 4388 (B1, ch18~23, 31.4 분, 42.9 Hz) + run 4390 (B2, ch24~29, 31.1 분, 40.3 Hz). 4389 는 HV 미인가 0 사건(onlbit 0). /scratch 미마운트라 후처리·veto 비교는 마운트 뒤.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4424,7 +4429,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★ run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★★ 16:48 부터 **대기 상태** (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
