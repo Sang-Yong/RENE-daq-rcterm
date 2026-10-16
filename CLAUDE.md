@@ -999,7 +999,8 @@ B2 여섯 채널 모두 ≥100 인 사건 0, 한 채널이라도 ≥50 인 사�
 | run | 시각 | 설정 / MTHRSM | 결과 |
 |---|---|---|---|
 | 4390 | 16:16:28 ~ 16:47:43 (사용자 지시로 subrun 30 까지 받고 16:48:06 종료, 아래 마감 단락) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |  ★ 사용자 확인(16:5x) : ch18~29 HV 가 전부 켜진 채 받은 잘못된 런 (B1 ch18~23 포함). DB runlog 에 HV 메모 덧붙임
-| 4391 | 16:51:19 ~ (진행 중, 24 h 로테이션, 다음 교체 10-17 16:51) | `_typeB_2` (파일 무변경) / MTHRSM 6 | 검증 전부 합격 (아래 4391 단락). FADC 40.7 · SADC 40.7 Hz (180 s) |
+| 4391 | 16:51:19 ~ 20:13:55 (사용자 지시로 감시자 TERM 20:13:54, exit 0 20:14:15) | `_typeB_2` (파일 무변경) / MTHRSM 6 | 검증 전부 합격. onlbit 1, nfadc 487,136 / 12,157.6 s = 40.1 Hz, nsadc 486,656, FADC 203 파일, USB 오류 0, PRD 203/203 완결 (꼬리 200~202 는 postrun.sh 수동) |
+| 4392 | 20:16:16 ~ (진행 중, 24 h 로테이션, 다음 교체 10-17 20:16) | `_typeB` (B1, ch18~23) / MTHRSM 6 | 검증 전부 합격 (아래 4392 단락). FADC 40.08 · SADC 40.12 Hz (192 s) |
 
 run 4389 의 0 사건 원인은 HV 미인가로 확정(사용자 확인). 감시 `veto-check-4390.sh`(pid 2287851, 4388 과 패널 비교, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4390 을 따라감. threshold-changes.log 16:21 행(설정 변경 없음·HV 조정 뒤 재시작). 메일은 정상 재기동이라 책임자에게만.
 
@@ -1030,6 +1031,18 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
   끝나면 websummary(:27) · sheetlog(:07) · veto-check 대기자(4387 · 4388 · 4390 · 4391)가 차례로 돈다.
 - 메일 : chain_down 은 15:15 와 16:20 에 전문가 목록 + 책임자로 나갔고(rc=0), resumed(run 4388 15:40, run 4390 16:20)도 나갔다. 17:0x~17:2x 의 chain_down 해소/resumed 는 `/Data/LOG/daq-notify.log` 에 기록이 **없다**(확인 시점 마지막 기록이 16:20) — 이 세션은 메일을 보내지 않았다.
 - **곁들여 확인 : GoodRuns 시트 Y2026B 탭이 358 행으로 꽉 차**, `append_runs.py` 가 359 행 쓰기에서 `exceeds grid limits` 로 매시 07분 실패 메일(13:07 · 14:07 · 15:07 …)을 낸다. 원인 확정, 조치(시트에 빈 행 추가 또는 코드 수정)는 사용자 결정 대기.
+
+**이어서 (17:2x~20:2x) — 재처리 완료 · run 4391 마감 · run 4392 (`_typeB` 재개).** 정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md` 끝 "이어서 (20:1x~) — run 4392".
+- 재처리 : `reprocess-4380-4390.sh` 가 17:27:54 에 전부 끝(rc 0). 4380~4388 전 런 FADC = PRD, dataflow 가 이미 `/scratch/RAW` 로 옮김. 4390 은 PRD 32/32 (`/Data_ssd`).
+- 사용자 지시 "지금 받고 있는 런 종료" → 20:13:54 감시자 TERM → 20:14:15 run 4391 exit 0. DB 16:51:17~20:13:55, onlbit 1, nfadc 487,136 / 12,157.6 s = 40.1 Hz, nsadc 486,656, FADC 203 파일, USB 오류 0.
+  `postrun --follow` 는 `--lag 3` 이라 꼬리 200~202 를 못 하므로(§6 백로그 그대로) `postrun.sh 4391 --from 200 --to 202 --heartbeat /dev/null` 로 마무리 → PRD 203/203 완결. `runcheck.sh` 는 heartbeat `run=` 만 봐서 "수집 중" 으로 답함(같은 백로그). 이로써 **4380~4391 전부 PRD 완결.**
+- 10.0.0.10 점검 : 17:24~17:26 arpwatch(`/Data_ssd/LOG/arpwatch-20261016.log`) — 이 포트(enp3s0f1)로 들어온 ARP 브로드캐스트 0, 10.0.0.10 이웃 60 회 모두 FAILED. 사용자는 서버 콘솔에서 `nmcli con up ens6f1` 을 쳤고 "서버에서 10.0.0.11 로 ping 이 간다" 고 하나, 이쪽에서는 서버의 ARP 요청·응답이 전혀 안 보임 → 10.0.0.10 이 이 케이블의 포트가 아닌 다른 포트에 붙어 있을 가능성(추정, 확인 못 함). 서버의 `ip -br addr` · `ip route get 10.0.0.11` 출력 대기. `/scratch` 는 IPv6 임시 마운트 그대로.
+- 사용자 지시 "다시 `_typeB` 로 변경해서 run 시작" → `rcterm.params` 백업 `.bak-20261016i`(= `_typeB_2`), config= `_typeB`(결과가 `.bak-20261016h` 와 바이트 동일), 20:16:16 감시자 기동(tmux %2, 24 h 로테이션) → **run 4392**.
+  검증(실측) : SADCT THR CID 19~24 (PMT 29 28 11 26 23 25) = 100 · 나머지 500000 파일과 일치 · PID pidfix 순서 · MTHRSM 6/6 · MTHRF 4 · TSWF/TSWSM 0 1 0 0 · CW 400 · FADCT mid 3 · SADCT mid 65 · is aligned 8 / Fail 0 · LIBUSB·TIMEOUT·OVERFLOW 192 s 동안 0 · CONFIG/004392.config 동일 · DB config `…_pidfix_typeB.config`.
+  계수율 daqtime 192.3 s : FADC 40.08 Hz · SADC 40.12 Hz (7,708 / 7,488 사건). 4388(`_typeB`)의 42.9 Hz 보다 7 % 낮으나 0 이 아니므로 B1 HV 는 걸린 것으로 본다(추정, HV 직접 확인 안 함).
+- 감시 : `veto-check-4392.sh`(pid 3019903, 비교 대상 4388, 출력 `veto-check-4392.log`) · `daqerr-watch-4380.sh` 가 20:16:22 에 4392 를 잡음. threshold-changes.log 20:20 행. 다음 로테이션 10-17 20:16:16. 되돌리려면 `cp -p config/rcterm.params.bak-20261016i config/rcterm.params` 뒤 감시자 TERM·재기동.
+- 오늘 런 : 4388 B1 15:32~16:04 (42.9 Hz) · 4389 HV 미인가 0 사건 · 4390 잘못 받은 런(HV 전부 켜짐) 16:16~16:47 · 4391 B2 16:51~20:13 (40.1 Hz) · 4392 B1 20:16~ (40.1 Hz).
+- 남은 것 : 서버 `ip -br addr` 출력 → 10.0.0.10 복구 후 정식 마운트 · 시트 Y2026B 행 부족(sheetlog 매시 실패 메일) · run 4390 시트 제외 여부 · 4392 의 PRD 뒤 veto-check-4392 비교.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4454,7 +4467,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★ run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★★★ run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4463,7 +4476,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3  (★ 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4390 은 reprocess-4380-4390.sh 가 재처리, §11.220)
+후처리     postrun --follow --jobs 3 --lag 3  (★ 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
@@ -4625,7 +4638,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
-| **/scratch: IPv6 임시 마운트 중 — 서버 콘솔에서 ens6f1 IPv4(10.0.0.10) 복구 뒤 정식 마운트로 교체, fstab 에 nofail** | 지금 마운트는 fe80 링크로컬(서버 재부팅 시 바뀔 수 있음). postrun 은 10-16 17:07 재기동됨 | §11.220 |
+| **/scratch: IPv6 임시 마운트 중 — 서버 콘솔에서 ens6f1 IPv4(10.0.0.10) 복구 뒤 정식 마운트로 교체, fstab 에 nofail** | 서버 `ip -br addr` · `ip route get 10.0.0.11` 출력 필요 (10.0.0.10 이 ens6f1 에 없는 것으로 추정, 이쪽 arpwatch 에 서버 ARP 0). 지금 마운트는 fe80 링크로컬(서버 재부팅 시 바뀔 수 있음). postrun 은 10-16 17:07 재기동됨 | §11.220 |
 | **GoodRuns 시트 Y2026B 행 부족 (358 행 꽉 참)** | `append_runs.py` 가 매시 07분 `exceeds grid limits` 실패 메일. 시트에 빈 행 추가 또는 코드 수정 결정 | §11.220 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
