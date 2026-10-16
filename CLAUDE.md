@@ -767,6 +767,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   마운트된 채 뽑혀 두 하드의 저널이 끊겼다. **full 로 옮긴 마지막 조각은 `parts_index` 에 없다** —
   어느 런이 어느 하드에 있는지는 §11.170 의 표(1회차 하드 8장 A~H)를 볼 것. 1회차는 09-09 에 끝났고
   런 1,681 개가 남았다 — 새 하드 두 장을 꽂고 같은 명령이면 002452 부터 이어진다.
+- **★ cron 에서 rcterm 을 부르는 예약 스크립트는 ROOT 환경을 source 할 것** (`thisroot.sh` · `cupdaq_env.sh`). cron 환경에는 없어 rcterm dry-run 이 `libTree.so` 로드 실패(rc=127)로 빈 출력을 낸다 (§11.219, 10-16 07:17 예약 전환이 이렇게 실패했다).
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
@@ -844,7 +845,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 | **`RAW (GB)`** | `<런>` **바로 아래**(하위 폴더 제외)의 `FADC_<런>.root*` + `SADC_<런>.root*` 용량 합 |
 | **`PRD (GB)`** | `<런>/PRD` 의 `PRD_<런>.*.root` 용량 합 |
 | `Detector` `Source` `PMT-A HV (V)` `PMT-B HV (V)` `THR (mV)` `Coincidence (ns)` `Record length` `Time after HV ON` `TLT` | **비어 있는 런 바로 이전 행의 값을 그대로 복사**한다. 사용자가 나중에 직접 고치며, 고친 뒤에는 그 고친 값을 이어서 복사한다 |
-| `Description` | `runcatalog.db` 의 `rundesc`. DAQ 수집 때 사용자가 입력한 것을 **그대로** 옮긴다. **★ 2026-09-14 부터 : 그 런의 veto(SADC) 문턱값이 직전 런과 다르면 서두에 `비토 문턱값 변경(증가) ` 또는 `(감소) ` 를 붙인다** (바뀐 채널 중 오른 것이 많으면 증가, 내린 것이 많으면 감소, 같으면 변경). 판정은 PRD 의 `S_THR`(`tools/sheetlog/thr_prefix.py`, 표 `thr_by_run.tsv`). 우리 행은 `append_runs.py --update-desc RUNS --commit` 으로 다시 쓸 수 있다 (남의 행은 안 건드린다) |
+| `Description` | `runcatalog.db` 의 `rundesc`. DAQ 수집 때 사용자가 입력한 것을 **그대로** 옮긴다. **★ 2026-09-14 부터 : 그 런의 veto(SADC) 문턱값이 직전 런과 다르면 서두에 `비토 문턱값 변경(증가) ` 또는 `(감소) ` 를 붙인다** (바뀐 채널 중 오른 것이 많으면 증가, 내린 것이 많으면 감소, 같으면 변경). 판정은 PRD 의 `S_THR`(`tools/sheetlog/thr_prefix.py`, 표 `thr_by_run.tsv`). 우리 행은 `append_runs.py --update-desc RUNS --commit` 으로 다시 쓸 수 있다 (남의 행은 안 건드린다). **★ 2026-10-16 부터 : 접두어에 설정 파일명과 채널별 전→후를 넣는다** — `비토 문턱값 변경(증가|감소|변경) [<파일명>: ch8(PMT18) 100→80] ` (9 채널 이상이면 `Nch 변경 → <새 30 값 압축> (이전 …)`, 덧붙임 `; PID 순서 변경` · `; FADC 문턱 …`, THR 같고 파일만 바뀌면 `설정 파일 변경 [<파일명>] `). 값의 정본은 런별 설정 사본 `<루트>/CONFIG/<런>.config`(`RENE_CONFIG_DIRS`, 기본 `/Data_ssd/CONFIG:/data/CONFIG:/scratch/CONFIG`) → `thr_by_run.tsv` → PRD 순. 직전 런은 시트에 있는(또는 함께 실릴) 직전 런. 소급은 `append_runs.py --update-desc ours`. 판정 불가 행은 그대로 둔다 |
 | `Data issue` | postrun 또는 DAQ 의 **비정상 종료 메시지**. 없으면 **비워 둔다** (`onlbit=0` 이면 `runlog` 를 본다) |
 
 런 디렉터리는 dataflow 가 옮기므로 **`/Data_ssd/RAW` -> `/data/RAW` ->
@@ -914,6 +915,29 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
 
+#### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
+
+정본: `/Data_ssd/LOG/harness/20261015_threshold-change-operator_thr4067-cosmic.md` 끝 "pidfix 설정으로 2 h 런" · `20261016_code-engineer_sheet-thr-detail.md` · `20261016_code-reviewer_sheet-thr-detail.md`.
+
+**07:17 예약(§11.218) 실패.** cron 환경에 ROOT 환경이 없어 rcterm dry-run 이 `libTree.so` 로드 실패(rc=127)로 빈 출력 → 스크립트가 rcterm.params 를 되돌리고 실패 메일(책임자) 후 crontab 줄을 스스로 지웠다. 감시자 무접촉, run 4386 은 그대로 돌았다.
+**교훈** : cron 이 rcterm 을 부르는 예약 스크립트는 `thisroot.sh` · `cupdaq_env.sh` 를 source 해야 한다 (§10). ch8 THR 80 고정 계획은 사용자의 pidfix 지시로 대체됐다.
+
+| run | 시각 | 설정 | 결과 |
+|---|---|---|---|
+| 4386 | 01:53 ~ 09:03:40 (TERM 1 회, exit 0) | `_mid3` / MTHRSM 18 | onlbit 1, FADC 1,477,584 / 25,813.7 s = 57.24 Hz, SADC 1,477,056, 고아 0 |
+| 4387 | 09:04:13 ~ (예정 11:04) | `VETO_test_9layers_v2_mid3_pidfix.config` | 감시자 pid 1338808 `--run-length 2 --max-cycles 1`, 재기동 없음 → 11:04 뒤 대기 |
+
+pidfix 설정(사용자가 08:51 작성) : `_mid3` 대비 SADCT PID 줄을 물리 런 순서 `38 27 9 24 15 30 4 5 2 18 1 3 12 33 7 10 19 8 29 28 11 26 23 25 13 21 17 16 6 20` 로, THR 을 `266 201 131 300 146 150 234 289 120 160 268 210 206 164 298 179 160 172` + 500000×12 로. MTHRF 4 · MTHRSM 18 · SWF/SWSM 0 1 0 0 · CW 400 · FADCT 3 그대로. rcterm.params 백업 `.bak-20261016f`.
+검증(실측) : TCB THR 30 값·PID 30 값 pidfix 와 일치, MTHRSM 18/18, FADCT mid 3, is aligned 8 / Fail 0, LIBUSB·TIMEOUT·OVERFLOW 0, CONFIG/004387.config diff 없음, DB config pidfix.
+계수율 첫 169 s : FADC 46.88 · SADC 46.88 Hz (4386 의 57.2 보다 18 % 낮음, 문턱 상승 방향과 일치 — 이상으로 단정하지 않음). 감시 : `veto-check-4387.sh`(pid 1352413) · daqerr-watch-4380 그대로 · 대기자 `after-run-4387.sh`(pid 1352414)가 종료 뒤 DB·고아·원시 파일·USB 오류 확인 + 책임자 메일, rcterm.params 는 pidfix 그대로 둠.
+★ 11:04 뒤 수집은 대기 상태이고 rcterm.params 는 pidfix 를 가리킨다. 재기동하면 pidfix 설정으로 24 h 런이 돈다.
+
+**시트 Description 규칙 변경** (사용자 지시 09:1x, work-web 커밋 39b71dc → d5cdab0, code-reviewer 2 라운드 승인, 시험 thr-prefix 8 → 28). 규칙은 §11.5 Description 행.
+소급 미리보기(시트 읽기만) : 바뀌는 우리 행 6 개 = 4340 · 4341 · 4344 · 4347 · 4374 · 4377. 판정 불가 11 행 = 4276 4280 4282~4290 (설정 사본이 /scratch/CONFIG 에만 있을 것으로 추정 — 확인 못 함; /scratch 마운트 뒤 다시 `--update-desc ours`). 4380 이후는 cron 등재 때 자동.
+미리보기 재현 시 /Data_ssd/CONFIG·/data/CONFIG 만으로는 6 행이 아니라 0 행이다 — 경희대 config/ 의 읽기 전용 사본을 `RENE_CONFIG_DIRS` 에 더해야 한다(4288 부터만 있음).
+★ **시트 소급 쓰기(`--commit`)는 이 기록 시점에 아직 실행되지 않았다** (권한 분류기가 거부, 사용자 승인 대기). 6 행 미리보기까지만 확인했다.
+**남은 것** : ① 시트 `--update-desc ours --commit` ② /scratch 마운트 뒤 postrun 재기동 · THRESHOLD-HISTORY 재생 · 건너뛴 11 행 재시도 ③ 11:04 뒤 대기 상태에서 다음 설정 결정.
+
 #### 11.218 ★★ ch8(PMT 18) 문턱 80 10 분 런(4385) — ε 0.9938 → 0.9961 (4.3σ), 부작용 없음, 80 고정 권고. chain_down 메일 12 h 휴지 (오케스트레이터 지시, 10-16 01:4x ~ 02:2x)
 
 정본 보고서 : 수집 `/Data_ssd/LOG/harness/20261015_threshold-change-operator_thr4067-cosmic.md` 끝 "이어서 (01:4x~)" · 분석 `/Data_ssd/LOG/harness/20261016_monitor-analyst_n-1-efficiency-4385.md`.
@@ -974,6 +998,7 @@ n=14·15 감소(253 → 53)는 원인 미상 (꺼진 채널이 주로 끝 두 �
 예약 스크립트 `/Data_ssd/LOG/switch-ch8thr80-20261016.sh` (로그 `.log`) 를 crontab `17 7 16 10 *` 에 걸었다 (백업 `~/crontab.bak-20261016021859`, 13:50 restore-realert 줄은 유지). 순서 : tmux daq pane %2 확인 → rcterm.params 백업 `.bak-20261016e` + 전환 + dry-run 검증 →
 감시자 TERM (최대 5 분 대기, 강제 종료 없음) → DB 에서 4386 etime 확인 → send-keys 로 평소 감시자 재기동 → 새 런 (≥ 4387) 검증 : THR 9 번째 = 80 · MTHRSM 18 · `is aligned` 8 · USB 오류 0 · CONFIG 사본 · 계수율 → veto-check 교체 → threshold-changes.log → 책임자 메일 (검증이 실패해도 보냄) → crontab 자기 줄 삭제.
 dry-run 02:18:45 통과 (감시자 pid 496489, pane %2, 파서가 TCB_004385 THR9=80/MTHRSM 16 · TCB_004386 THR9=100/MTHRSM 18 로 맞게 읽음). 로테이션 10-17 01:53 과는 겹치지 않는다. 결과 메일·로그는 07:2x 에 확인 (아직 실행 전이라 결과는 없다).
+→ **실패 (§11.219)** — cron 에 ROOT 환경이 없어 dry-run 이 rc=127, 롤백·실패 메일 후 자기 줄 삭제. 4386 은 그대로 돌았다.
 rundesc 는 사용자가 10-15 23:54 에 `Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP` 로 바꿔 두었다 (run 4383 부터 적용).
 
 #### 11.217 ★★ MTHRSM 16 10 분 런(4383)으로 N−1 채널 효율 — ∏ε 0.975, 끝 패널 손실은 기하, 패널 4 정렬 의심 (오케스트레이터 지시, 10-16 00:4x ~ 01:3x)
@@ -4313,7 +4338,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★ 07:17 예약 전환 (switch-ch8thr80, run 4386 → 4387 예정, `_mid3_ch8thr80`). run 4386 (10-16 01:53 부터, 24 h 로테이션, 설정 = _mid3 (ch8 THR 100, MTHRSM 18), ~57.8 Hz). 4385 는 ch8 THR 80 10 분 런 (§11.218), 4384 는 01:42 마감. 이하 4384 줄은 직전 기록
+수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
 수집       run 4344 (09-11 15:56 부터, 24h 로테이션). ch1·2·17·22·23 = 100 이 적용된 첫 런, ~1055 Hz (§11.178 · §11.179)
@@ -4356,6 +4381,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.219         ★★ 10-16 07:17 ch8 THR 80 예약 전환 실패(cron 에 ROOT 환경 없음) → 09:04 run 4387 = `_mid3_pidfix` 2 h 런(11:04 뒤 대기). 시트 Description 에 설정 파일명 + 채널별 THR 전→후 기록(소급은 `--update-desc ours`)
 §11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. 07:17 에 80 고정 전환 예약(02:2x). chain_down 메일 12 h 휴지(13:50 자동 복귀)
 §11.217         ★★ MTHRSM 16 10 분 런(run 4383, 76.1 Hz)으로 N−1 채널 효율 : ∏ε 0.9746 ± 0.0009, 최저 ch16 0.9926 · ch8 0.9938, 끝 패널 0.86 은 기하, 패널 4 정렬 의심. 4384 로 MTHRSM 18 원복
 §11.216         ★★ 개활지 9 층 스택 계수율 58 Hz 는 기대 51~100 Hz 안 (기하 수용이 주원인). TCB MTHRSM N = 문턱 넘은 SADC 채널 수 ≥ N 을 데이터로 확정. 분석만, 수집 무접촉
@@ -4476,7 +4502,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **07:17 ch8 THR 80 자동 전환 예약됨 — 07:2x 메일·로그 확인** | `switch-ch8thr80-20261016.sh` (crontab 17 7 16 10). 결과는 `/Data_ssd/LOG/switch-ch8thr80-20261016.log` 와 책임자 메일. 실패하면 4386(THR 100)이 계속 돌거나 감시자 재기동을 사람이 | §11.218 |
+| ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
 | **/scratch 마운트 + postrun pane 재기동** | 저장소 서버 10.0.0.10 무응답으로 10-15 부터 /scratch 없음, 후처리 정지 (root, 서버 복구 뒤) | §11.215 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
