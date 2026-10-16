@@ -935,7 +935,7 @@ pidfix 설정(사용자가 08:51 작성) : `_mid3` 대비 SADCT PID 줄을 물�
 **시트 Description 규칙 변경** (사용자 지시 09:1x, work-web 커밋 39b71dc → d5cdab0, code-reviewer 2 라운드 승인, 시험 thr-prefix 8 → 28). 규칙은 §11.5 Description 행.
 소급 미리보기(시트 읽기만) : 바뀌는 우리 행 6 개 = 4340 · 4341 · 4344 · 4347 · 4374 · 4377. 판정 불가 11 행 = 4276 4280 4282~4290 (설정 사본이 /scratch/CONFIG 에만 있을 것으로 추정 — 확인 못 함; /scratch 마운트 뒤 다시 `--update-desc ours`). 4380 이후는 cron 등재 때 자동.
 미리보기 재현 시 /Data_ssd/CONFIG·/data/CONFIG 만으로는 6 행이 아니라 0 행이다 — 경희대 config/ 의 읽기 전용 사본을 `RENE_CONFIG_DIRS` 에 더해야 한다(4288 부터만 있음).
-★ **시트 소급 쓰기(`--commit`)는 이 기록 시점에 아직 실행되지 않았다** (권한 분류기가 거부, 사용자 승인 대기). 6 행 미리보기까지만 확인했다.
+✅ **시트 소급 쓰기 완료 (10-16 09:3x, 오케스트레이터가 직접)** — `RENE_CONFIG_DIRS=/Data_ssd/CONFIG:/data/CONFIG:<경희대 config 읽기 전용 사본> … --update-desc ours --commit` : 4340(R325) · 4341(R326) · 4344(R327) · 4347(R330) · 4374(R355) · 4377(R358) 여섯 행만 씀, 되대조 "358행 중 Description 밖의 어긋남 0건". 4276 · 4280 · 4282~4290 열한 행은 설정 사본이 없어 그대로(/scratch 마운트 뒤 같은 명령으로 다시). ★ 4340 등 옛 런의 설정 사본은 `/Data_ssd/CONFIG`·`/data/CONFIG` 에 없어 경희대 `config/` 사본을 `RENE_CONFIG_DIRS` 에 더해야 판정된다 — cron 기본값에는 없으므로 소급은 수동.
 **남은 것** : ① 시트 `--update-desc ours --commit` ② /scratch 마운트 뒤 postrun 재기동 · THRESHOLD-HISTORY 재생 · 건너뛴 11 행 재시도 ③ 11:04 뒤 대기 상태에서 다음 설정 결정.
 
 #### 11.218 ★★ ch8(PMT 18) 문턱 80 10 분 런(4385) — ε 0.9938 → 0.9961 (4.3σ), 부작용 없음, 80 고정 권고. chain_down 메일 12 h 휴지 (오케스트레이터 지시, 10-16 01:4x ~ 02:2x)
