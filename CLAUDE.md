@@ -951,6 +951,48 @@ GECO     15:05:59·15:06:29 두 번 실행 모두 로그인 창 뒤 12~15 s 만�
 다음 로테이션 10-17 15:32:48. 되돌리려면 `cp -p config/rcterm.params.bak-20261016g config/rcterm.params` 뒤 감시자 TERM·재기동.
 **남은 것.** ① 사용자의 HV 망 프로파일 복구 확인 ② /scratch 마운트 + postrun 재기동 ③ chain_min_rate 100 복귀 · 물리 설정 복귀는 시험 뒤 사용자 결정 ④ THRESHOLD-HISTORY.md 는 PRD 뒤 재생.
 
+**이어서 (15:5x~16:1x) — `_typeB_2`(ch24~29) 전환, run 4389 는 0 사건, 16:12 부터 대기.** 정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB2.md` · `/Data_ssd/LOG/harness/20261016_monitor-analyst_ch24-29-4388.md` (산출물 `/Data_ssd/LOG/cosmic-check-4388/`, PRD 작업 폴더 `prd_work*` 는 지워도 된다).
+사용자가 `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3_pidfix_typeB_2.config` 를 만들었다 (= `_typeB` 에서 SADCT THR 활성 줄만 ch24~29 = CID 25~30, PMT 13 21 17 16 6 20 이 100, 나머지 500000, MTHRSM 6 그대로). 오케스트레이터 점검 통과. 지시 "subrun 30 까지 받아지면 _typeB_2 로 변경해서 받아줘".
+
+| run | 시각 | 설정 | 결과 |
+|---|---|---|---|
+| 4388 | 15:32:59 ~ 16:04:23 (heartbeat subrun 31 확인 뒤 TERM 16:04:23, exit 0 16:04:45) | `_typeB` / MTHRSM 6 | onlbit 1, nfadc 80,704 / 1881.93 s = 42.9 Hz, nsadc 80,512 / 1877.66 s, FADC·SADC 각 32 파일 (00000~00031), 고아 0, 포트 비어 있음 |
+| 4389 | 16:05:24 Running ~ 16:11:54 (TERM, exit 0 16:12:15) | `_typeB_2` (ch24~29) / MTHRSM 6 | **FADC 0 · SADC 0 사건 6.5 분 내내** (daqtime 0, 서브런 7 개 00000~00006 각 8 kB 빈 파일). DB onlbit 0, nfadc 0, runlog `no trigger: typeB_2 (ch24-29 only, MTHRSM 6) gave 0 events in 6.5 min; stopped by user 16:11:54, not physics` |
+
+rcterm.params 백업 `.bak-20261016h`(= `_typeB`) → `_typeB_2`, dry-run 에서 INSERT config · cp 대상 확인, 16:05:13 tmux daq:1.2 (%2) 에서 평소 명령으로 재기동.
+
+**run 4389 검증 (실측) — DAQ 쪽은 정상.**
+| 항목 | 결과 |
+|---|---|
+| SADCT THR (config · register) | 500000×24 + 100×6, 100 = CID 25~30 / PMT 13 21 17 16 6 20, 파일과 일치 |
+| PID 30 값 | pidfix 그대로 (38 27 9 24 15 30 4 5 2 18 1 3 12 33 7 10 19 8 29 28 11 26 23 25 13 21 17 16 6 20) |
+| TCB MTHRSM / MTHRF / TSWF / TSWSM / CW | 6/6 · 4 · 0 1 0 0 · 0 1 0 0 · 400 (config = register) |
+| FADCT / SADCT | mid 3 found @ 3 / mid 65 found @ 4 |
+| DRAM | is aligned 8 / Fail 0 |
+| LIBUSB · TIMEOUT · OVERFLOW · ERROR | TCB 0 · FADCDAQ 0 · SADCDAQ 0 |
+| SADC pedestal ch25~30 | 485 457 461 455 451 461 (다른 채널과 같은 범위) |
+| CONFIG/004389.config | 새 파일과 diff 없음 |
+| 4388 대비 TCB 로그 diff | THR 여섯 자리 이동 + 보정 delay 1 틱뿐 |
+
+**정지.** 사용자 지시 "지금 run 은 일단 멈춰줘" → 오케스트레이터가 16:11:54 감시자 TERM → 16:12:15 run 4389 exit 0, 고아 0, 포트 비어 있음, **재기동 없음 → 수집 대기 상태**. DB 4389 를 onlbit 0 + 위 runlog 로 표시 (시트 제외). veto-check-4389 는 걸지 않음 (자료 없음), `veto-check-4388.sh`(pid 2187629) · `daqerr-watch-4380.sh` 는 그대로. threshold-changes.log 에 4389 행은 작업자가 적음.
+★ **rcterm.params 는 지금 `_typeB_2` 를 가리킨다.** 재기동하면 같은 0 사건 설정으로 뜬다. 되돌리기: `cp -p config/rcterm.params.bak-20261016h config/rcterm.params` (= `_typeB`).
+
+**ch24~29 (B2) 신호 분석 (monitor-analyst, run 4388 서브런 0~5, 15,716 사건, 약 360 s, 43.6 Hz + 대조 run 4380 서브런 0~1, 123,602 사건).**
+| 묶음 | 채널 | S_ADC 평균 | 최대 | >50 | >100 | 비트 켜짐 |
+|---|---|---|---|---|---|---|
+| B1 (트리거, 4388) | ch18~23 (PMT 29 28 11 26 23 25) | 391~1,158 (중앙값 251~821) | 15,702~26,100 | 95.9~98.0 % | 95.4~97.9 % | 95.3~97.9 % (6 비트 모두 켜짐 14,371 / 15,716 = 91 %) |
+| B2 (질문, 4388) | ch24~29 (PMT 13 21 17 16 6 20) | 0.1~19.8 | 16~37 | 0 | 0 | 0 |
+| Type A (4388) | ch0~17 | 0~21 (ch13 만 57.6) | 24~55 (ch13 124) | 0 (ch10 0.24 %, ch13 62.9 %) | 0 (ch13 8.8 %) | 0 |
+| 대조 4380 Type A | ch0~17 | — | 11,625~65,592 | — | 23~32 % | 12~31 % |
+| 대조 4380 B1 | ch18~23 | — | 28~38 | — | 0 | 0 |
+| 대조 4380 B2 | ch24~29 | — | 20~50 (≥50 은 123,602 중 1 건, ch27) | — | 0 | 0 |
+
+B2 여섯 채널 모두 ≥100 인 사건 0, 한 채널이라도 ≥50 인 사건 0. 짝(24·25 / 26·27 / 28·29) 모두 신호 없음이라 'PMT 하나 죽음' 과 '패널째 없음' 을 가를 수 없다.
+**판정: 판정 불가 (B1 과의 동시 사건으로는).** 대조 run 4380 에서 B1 은 4388 에서 MIP 봉우리를 냈는데도 Type A 트리거 사건에서 0 이었으므로 '다른 묶음 트리거에서 0' 은 죽음의 증거가 아니다 (세 묶음이 서로의 뮤온 경로에 없거나 4380 때 B1 이 연결·HV 전이었을 수 있음, 추정). ch25 중앙값 0 도 ch8·12·16 처럼 '0 아래 잘림' 꼴이라 죽음의 증거가 아니다 (추정).
+**run 4389 의 0 사건 원인 후보 (4388 자료로는 셋을 못 가른다)**: (a) 한 채널 이상이 문턱 100 을 못 넘음 (HV · 케이블 · PMT), (b) B2 세 장이 안 겹쳐 6 채널 AND 가 기하적으로 불가, (c) B2 신호 케이블이 다른 채널에 꽂힘. FADC 는 SWF 0 1 0 0 이라 자체 트리거가 없어 같이 0 이 된다.
+**제안 (분석자)**: ① B2 만 THR 100 + MTHRSM 1 (또는 2 = 패널별) 로 1~2 분 받아 채널별 단독 계수율과 S_ADC 를 본다. ② 현장에서 B2 HV · SADC ch24~29 케이블 · 세 장의 적층 확인. 표본은 '0' 판정에는 충분하나 효율 같은 정량은 아니다.
+**남은 것.** ① B2 확인 뒤 `_typeB_2` 재시도 또는 `_typeB` 복귀 결정 (사용자) ② HV 망 프로파일 복구 확인 (미확인 유지) ③ /scratch 미마운트 지속 (postrun 정지, veto-check-4388 은 PRD 대기) ④ 16:11:54 TERM 은 사용자 지시로 오케스트레이터가 보냄.
+
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
 정본: `/Data_ssd/LOG/harness/20261015_threshold-change-operator_thr4067-cosmic.md` 끝 "pidfix 설정으로 2 h 런" · `20261016_code-engineer_sheet-thr-detail.md` · `20261016_code-reviewer_sheet-thr-detail.md`.
@@ -4374,7 +4416,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★ run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★ 10-16 16:12 부터 **대기 상태** (rcterm.params = `_typeB_2`, run 4389 는 0 사건 · onlbit 0, §11.220). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4418,7 +4460,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
-§11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h
+§11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h → 16:05 run 4389 `_typeB_2`(ch24~29) 는 6.5 분 0 사건(DAQ 정상, B2 신호 분석은 판정 불가) → 16:12 사용자 지시로 정지·대기, rcterm.params 가 `_typeB_2` 임에 주의
 §11.219         ★★ 10-16 07:17 ch8 THR 80 예약 전환 실패(cron 에 ROOT 환경 없음) → 09:04 run 4387 = `_mid3_pidfix` 2 h 런(11:04 뒤 대기). 시트 Description 에 설정 파일명 + 채널별 THR 전→후 기록(소급은 `--update-desc ours`)
 §11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. 07:17 에 80 고정 전환 예약(02:2x). chain_down 메일 12 h 휴지(13:50 자동 복귀)
 §11.217         ★★ MTHRSM 16 10 분 런(run 4383, 76.1 Hz)으로 N−1 채널 효율 : ∏ε 0.9746 ± 0.0009, 최저 ch16 0.9926 · ch8 0.9938, 끝 패널 0.86 은 기하, 패널 4 정렬 의심. 4384 로 MTHRSM 18 원복
@@ -4540,6 +4582,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| **B2 (PMT 13 21 17 16 6 20, SADC ch24~29) HV · 케이블 · 적층 확인** | `_typeB_2` 로 6 채널 AND 를 걸면 0 사건 (run 4389), 분석으로 죽음/기하/배선을 못 가름. 확인 뒤 재시도 또는 `_typeB` 복귀. 지금 수집 대기, rcterm.params = `_typeB_2` | §11.220 |
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
