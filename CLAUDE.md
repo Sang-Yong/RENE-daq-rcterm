@@ -997,7 +997,8 @@ B2 여섯 채널 모두 ≥100 인 사건 0, 한 채널이라도 ≥50 인 사�
 
 | run | 시각 | 설정 / MTHRSM | 결과 |
 |---|---|---|---|
-| 4390 | 16:16:28 ~ 16:47:43 (사용자 지시로 subrun 30 까지 받고 16:48:06 종료, 아래 마감 단락) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |
+| 4390 | 16:16:28 ~ 16:47:43 (사용자 지시로 subrun 30 까지 받고 16:48:06 종료, 아래 마감 단락) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |  ★ 사용자 확인(16:5x) : ch18~29 HV 가 전부 켜진 채 받은 잘못된 런 (B1 ch18~23 포함). DB runlog 에 HV 메모 덧붙임
+| 4391 | 16:51:19 ~ (진행 중, 24 h 로테이션, 다음 교체 10-17 16:51) | `_typeB_2` (파일 무변경) / MTHRSM 6 | 검증 전부 합격 (아래 4391 단락). FADC 40.7 · SADC 40.7 Hz (180 s) |
 
 run 4389 의 0 사건 원인은 HV 미인가로 확정(사용자 확인). 감시 `veto-check-4390.sh`(pid 2287851, 4388 과 패널 비교, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4390 을 따라감. threshold-changes.log 16:21 행(설정 변경 없음·HV 조정 뒤 재시작). 메일은 정상 재기동이라 책임자에게만.
 
@@ -1005,6 +1006,15 @@ run 4389 의 0 사건 원인은 HV 미인가로 확정(사용자 확인). 감시
 DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, nsadc 75,008. FADC·SADC 파일 각 32 (00000~00031). TCB·FADCDAQ·SADCDAQ 로그 LIBUSB/TIMEOUT/OVERFLOW 0.
 ★ **재기동 없음 → 수집 대기 상태.** `config/rcterm.params` 는 `_typeB_2` 그대로 (백업 `.bak-20261016h` = _typeB) — 다음 런은 사용자 결정, 재기동 시 설정 확인. veto-check-4390(pid 2287851)·4388·4387 대기자와 daqerr-watch-4380 은 그대로.
 오늘 Type B 시험 자료 : run 4388 (B1, ch18~23, 31.4 분, 42.9 Hz) + run 4390 (B2, ch24~29, 31.1 분, 40.3 Hz). 4389 는 HV 미인가 0 사건(onlbit 0). /scratch 미마운트라 후처리·veto 비교는 마운트 뒤.
+
+**이어서 (16:5x~, ch18~23 HV 끈 뒤 재기동) — run 4391.** 정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB2.md` 끝 "이어서 (16:5x~, ch18~23 HV 끈 뒤 재기동) — run 4391". 사용자 16:5x : "방금 run(4390) 은 ch18~29 HV 가 모두 켜져 있었다(잘못 받은 run). ch18~23 은 이제 껐다. 기록하고 다시 시작해 달라." 설정 파일은 바꾸지 않았다.
+- DB 4390 runlog 에 HV 메모("ch18-29 PMT HV were all ON …")를 덧붙였다. onlbit 은 1 그대로 → 시트 자동 등재 대상이다. 시트에서 뺄지(onlbit 0 으로) 는 사용자 결정 대기.
+- 16:51:05 tmux daq:1.2 에서 평소 명령으로 감시자 기동(24 h 로테이션, notify/recover 켜짐), 16:51:19 run 4391 Running (rcterm pid 2352975).
+- 검증 전부 합격 : SADCT THR 500000×24 + 100×6 (CID 25~30) 파일과 일치 · MTHRSM 6/6 · MTHRF 4 · TSWF/TSWSM 0 1 0 0 · FADCT mid 3 · SADCT mid 65 · is aligned 8 / Fail 0 · LIBUSB·TIMEOUT·OVERFLOW 180 s 동안 0 · CONFIG/004391.config 와 파일 비주석 diff 없음 · DB config `…_pidfix_typeB_2.config`.
+- 계수율 daqtime 180.1 s : FADC 7,324 사건 40.7 Hz · SADC 6,848 사건 40.7 Hz. 4390 의 40.3 Hz 와 1 % 차 — 트리거가 ch24~29 만 쓰므로 B1 HV 유무가 계수율에 안 나타난 것과 맞는다(추정).
+- 감시 : `veto-check-4391.sh`(pid 2359818, 비교 대상 4390, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4391 을 따라감. threshold-changes.log 16:55 행(설정 변경 없음, 4390 이 HV 전부 켜진 채였음 명시).
+- 오늘 Type B 런 : 4388 = B1 (ch18~23 트리거, 42.9 Hz, 31 분) · 4389 = HV 미인가 0 사건(onlbit 0) · 4390 = B2 트리거이나 ch18~29 HV 전부 켜짐(잘못 받은 런, 40.3 Hz, 31 분) · 4391 = B2 (ch24~29 만 HV, 40.7 Hz, 진행 중).
+- 남은 것 : run 4390 시트 제외 여부 결정 · /scratch 마운트 뒤 postrun → veto-check-4391 이 4390 과 비교.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4429,7 +4439,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★ 16:48 부터 **대기 상태** (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★★ run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4595,6 +4605,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| **run 4390 을 시트에서 뺄지 결정 (onlbit 0 으로)** | ch18~29 HV 전부 켜진 잘못 받은 런인데 onlbit=1 이라 sheetlog 자동 등재 대상 | §11.220 |
 | **B2 (PMT 13 21 17 16 6 20, SADC ch24~29) HV · 케이블 · 적층 확인** | `_typeB_2` 로 6 채널 AND 를 걸면 0 사건 (run 4389), 분석으로 죽음/기하/배선을 못 가름. 확인 뒤 재시도 또는 `_typeB` 복귀. HV 조정 뒤 run 4390 으로 재시작됨(수집 중), rcterm.params = `_typeB_2` | §11.220 |
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
