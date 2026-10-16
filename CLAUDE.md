@@ -721,6 +721,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   **알림이 안 오는데 이상하다 싶으면 cron 이 사는지부터 볼 것** (`crontab -l`).
 - **★ 계수율이 떨어지면 보드보다 HV 를 먼저 의심할 것.** 2026-09-01 에 0 Hz 의
   원인이 PMT HV 였는데 보드 진단에 30분을 헛되이 썼다 (§11.131).
+- **/scratch 서버가 IPv4 로 안 잡혀도 IPv6 링크로컬로 NFS 가 열려 있으면 임시 마운트할 수 있다** (`ping -6 ff02::1%enp3s0f1` → `nmap -6` → `[fe80::…%enp3s0f1]:/data`). 정석 복구는 서버의 IPv4 복구 뒤 fstab 마운트 (§11.220).
 - **★ `df` 가 멀쩡해 보여도 마운트가 유령일 수 있다** (§11.124). USB 디스크가
   떨어졌다 다른 이름으로 붙으면 `findmnt` 는 옛 장치를 가리키고 `df` 는 캐시된
   수치를 낸다. `ls /dev/sd*` 로 **그 장치가 실제로 있는지** 먼저 볼 것.
@@ -1015,6 +1016,20 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
 - 감시 : `veto-check-4391.sh`(pid 2359818, 비교 대상 4390, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4391 을 따라감. threshold-changes.log 16:55 행(설정 변경 없음, 4390 이 HV 전부 켜진 채였음 명시).
 - 오늘 Type B 런 : 4388 = B1 (ch18~23 트리거, 42.9 Hz, 31 분) · 4389 = HV 미인가 0 사건(onlbit 0) · 4390 = B2 트리거이나 ch18~29 HV 전부 켜짐(잘못 받은 런, 40.3 Hz, 31 분) · 4391 = B2 (ch24~29 만 HV, 40.7 Hz, 진행 중).
 - 남은 것 : run 4390 시트 제외 여부 결정 · /scratch 마운트 뒤 postrun → veto-check-4391 이 4390 과 비교.
+
+**이어서 (16:5x~17:1x) — /scratch IPv6 임시 마운트 · postrun 재기동 · 4380~4390 재처리.**
+- 진단 : 저장소 서버 10G 포트는 살아 있었다. IPv6 이웃 탐색(`ping -6 ff02::1%enp3s0f1`)에 fe80::6d1:5790:50e6:201c (MAC 44:49:88:0d:5c:25)가 0.05 ms 로 응답, `nmap -6` 로 111 rpcbind · 2049 NFS 열림(syn-ack), ssh 22/7777 은 IPv6 에 없음(conn-refused), `showmount -e` 가 `/data *`.
+  반면 IPv4 10.0.0.10 은 ARP INCOMPLETE, port.rx_unicast 0~2 — §11.133 과 같은 모양(서버 ens6f1 의 IPv4 프로파일이 안 올라온 것으로 보임, 추정). enp3s0f1 carrier 가 14:26~14:56 에 31 회 "link connected" 반복(서버 쪽 작업 흔적, 추정). 이 PC 설정은 손대지 않았다.
+- 사용자가 17:03 에 `sudo mount /scratch`(IPv4)를 쳤으나 굳어 Ctrl-C 로 빠졌고, 17:0x 에 **IPv6 링크로컬로 임시 마운트** 성공 :
+  `sudo mount -t nfs -o vers=4.2 '[fe80::6d1:5790:50e6:201c%enp3s0f1]:/data' /scratch` → 140T, 사용 51T, 여유 83T (38 %).
+  ★ 임시다 — 서버 재부팅 시 링크로컬 주소가 바뀔 수 있다. 정석은 서버 콘솔에서 `nmcli con up ens6f1` 로 10.0.0.10 을 복구한 뒤 `umount` → fstab 마운트. fstab 의 /scratch 줄은 여전히 `nofail` 이 없다(§11.133 에서 넣은 것이 되돌아간 상태) — 수정 명령을 사용자에게 안내했고 실행 여부는 확인 못 함.
+- 17:07:00 postrun 을 tmux daq:1.3(%3) 에 평소 명령으로 재기동(`scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot /Data_ssd/RAW --log-fallback /scratch/LOG`, pid 2386789). run 4391 서브런 0 부터 따라붙어 서브런당 1 초(40 Hz 라 파일이 작음).
+  chainwatch --status 17:07:55 : /scratch 마운트됨 · postrun · dataflow 살아 있음, chain_down 카운터 216(해소되면 자동으로 '해소' 로그).
+- `--follow` 는 heartbeat 의 런만 따르므로 /scratch 가 없던 동안의 런(4380~4390, FADC 합 786 파일, PRD 0)은 별도 : `/Data_ssd/LOG/reprocess-4380-4390.sh`(setsid, 로그 `.log`)가 작은 런부터 순서대로
+  `postrun.sh R --from 0 --to N --rawroot /Data_ssd/RAW --log-fallback /scratch/LOG --jobs 2 --nice 15`(nice 15 · ionice -c2 -n7). 4389 는 HV 미인가 빈 런(8 kB 파일)이라 제외. 17:08 시작, 4380 서브런당 ~6 s.
+  끝나면 websummary(:27) · sheetlog(:07) · veto-check 대기자(4387 · 4388 · 4390 · 4391)가 차례로 돈다.
+- 메일 : chain_down 은 15:15 와 16:20 에 전문가 목록 + 책임자로 나갔고(rc=0), resumed(run 4388 15:40, run 4390 16:20)도 나갔다. 17:0x~17:2x 의 chain_down 해소/resumed 는 `/Data/LOG/daq-notify.log` 에 기록이 **없다**(확인 시점 마지막 기록이 16:20) — 이 세션은 메일을 보내지 않았다.
+- **곁들여 확인 : GoodRuns 시트 Y2026B 탭이 358 행으로 꽉 차**, `append_runs.py` 가 359 행 쓰기에서 `exceeds grid limits` 로 매시 07분 실패 메일(13:07 · 14:07 · 15:07 …)을 낸다. 원인 확정, 조치(시트에 빈 행 추가 또는 코드 수정)는 사용자 결정 대기.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4448,7 +4463,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3
+후처리     postrun --follow --jobs 3 --lag 3  (★ 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4390 은 reprocess-4380-4390.sh 가 재처리, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
@@ -4610,7 +4625,8 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
-| **/scratch 마운트 + postrun pane 재기동** | 저장소 서버 10.0.0.10 무응답으로 10-15 부터 /scratch 없음, 후처리 정지 (root, 서버 복구 뒤) | §11.215 |
+| **/scratch: IPv6 임시 마운트 중 — 서버 콘솔에서 ens6f1 IPv4(10.0.0.10) 복구 뒤 정식 마운트로 교체, fstab 에 nofail** | 지금 마운트는 fe80 링크로컬(서버 재부팅 시 바뀔 수 있음). postrun 은 10-16 17:07 재기동됨 | §11.220 |
+| **GoodRuns 시트 Y2026B 행 부족 (358 행 꽉 참)** | `append_runs.py` 가 매시 07분 `exceeds grid limits` 실패 메일. 시트에 빈 행 추가 또는 코드 수정 결정 | §11.220 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
