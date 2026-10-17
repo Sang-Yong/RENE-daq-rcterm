@@ -444,6 +444,8 @@ def main():
         back = [ln.split("\t") for ln in read_lines(a.sheet_tsv) if ln.strip()][1:]
     else:
         #  ★ 먼저 쓰고, 남는 아랫줄만 지운다. clear() 뒤에 update() 가 실패하면 시트가 통째로 빈다 (2026-09-13 00:3x 에 겪었다)
+        import sheet_grid                      # 행이 그리드보다 많으면 범위 쓰기가 400 으로 거부된다 (2026-10-17)
+        sheet_grid.ensure_rows(ws, len(out) + 1, True)
         ws.update(range_name="A1", values=[HEADER] + out, value_input_option="RAW")
         old_n = len(grid)
         if old_n > len(out) + 1:

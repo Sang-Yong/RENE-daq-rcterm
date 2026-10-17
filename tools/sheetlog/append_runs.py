@@ -9,6 +9,7 @@
 """
 import argparse, glob, os, sqlite3, subprocess, sys, datetime, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sheet_grid                      # 범위 쓰기 전에 그리드 행 수를 늘린다 (2026-10-17)
 import thr_prefix                      # 설정이 직전 런과 다르면 Description 앞에 무엇이 바뀌었는지 (2026-09-14 · 10-16 사용자 지시)
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
@@ -509,15 +510,32 @@ def main():
     for l in show:
         print([str(x)[:40] for x in l])
 
+    first = last_i + 2                      # 1-base, 마지막 줄 바로 다음
+    last = first + len(out) - 1
+    #  ★ 범위 쓰기는 그리드 밖이면 400 'exceeds grid limits' 로 거부된다 (2026-10-16 Y2026B 358행).
+    #    미리보기에서는 그리드를 건드리지 않고 늘릴 행 수만 알린다
+    sheet_grid.ensure_rows(ws, last, a.commit)
+
     if not a.commit:
         print("\n미리보기다. 실제로 쓰려면 --commit")
         return
 
-    first = last_i + 2                      # 1-base, 마지막 줄 바로 다음
+    before = [r[:] for r in grid[:last_i + 1]]
     rng = gspread.utils.rowcol_to_a1(first, 1) + ":" + \
-          gspread.utils.rowcol_to_a1(first + len(out) - 1, len(hdr))
+          gspread.utils.rowcol_to_a1(last, len(hdr))
     ws.update(values=out, range_name=rng, value_input_option="USER_ENTERED")
     print("기록함 : %s  (%d행)" % (rng, len(out)))
+
+    # ---- 대조 : 기존 행이 그대로이고 새 행의 Run 이 맞는지 (11.5 규칙 4) ----
+    back = ws.get_all_values()
+    bad = sum(1 for x, y in zip(before, back) if [c.strip() for c in x] != [c.strip() for c in y])
+    bad += 0 if len(back) >= len(before) else len(before) - len(back)
+    got = [back[i][run_c].strip() if i < len(back) and run_c < len(back[i]) else "" for i in range(first - 1, last)]
+    miss = [str(r[0]) for r, g in zip(rows, got) if g != str(r[0])]
+    print("대조 : 기존 %d행 중 어긋남 %d건 · 새 행 Run 불일치 %d건%s"
+          % (len(before), bad, len(miss), "" if bad == 0 and not miss else "  ← 확인 필요 " + " ".join(miss)))
+    if bad or miss:
+        sys.exit(3)
 
 
 if __name__ == "__main__":
