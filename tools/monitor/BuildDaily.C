@@ -212,23 +212,34 @@ static void DrawBgComponents(const TString &dir, const char *file, const char *t
 }
 
 //  신호창 분해 : 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음). 선형축
-static void DrawDecomposition(const TString &dir, const char *file, const char *title, TH1D *hAll, TH1D *hSig, std::vector<BgComp> comps) {
-   TCanvas *c = new TCanvas(Form("c_%s", file), title, 1400, 700);
+//  logy = true 면 y 축만 로그로 그린 판을 <file>_log.png 로 낸다 (선형 판은 그대로 <file>.png, 사용자 규칙 : 로그는 따로).
+//  쌓기의 0 빈은 로그에서 사라지므로 y 최소 = min(0.5, 전체 쌍의 양수 최소값 / 2), 최대 = 최댓값 × 1000 (위 절반은 범례 자리)
+static void DrawDecomposition(const TString &dir, const char *file, const char *title, TH1D *hAll, TH1D *hSig, std::vector<BgComp> comps, bool logy = false) {
+   TString tag = logy ? TString(file) + "_log" : TString(file);
+   TCanvas *c = new TCanvas(Form("c_%s", tag.Data()), title, 1400, 700);
    c->SetLeftMargin(0.11); c->SetBottomMargin(0.13); c->SetRightMargin(0.04); c->SetGridx(); c->SetGridy();
-   THStack *st = new THStack(Form("st_%s", file), Form("%s;Energy [MeV];Events / %.2f MeV", title, hAll->GetBinWidth(1)));
-   TH1D *sig = (TH1D *)hSig->Clone(Form("%s_stack", hSig->GetName()));
+   if (logy) c->SetLogy();
+   THStack *st = new THStack(Form("st_%s", tag.Data()), Form("%s;Energy [MeV];Events / %.2f MeV", title, hAll->GetBinWidth(1)));
+   TH1D *sig = (TH1D *)hSig->Clone(Form("%s_stack%s", hSig->GetName(), logy ? "_log" : ""));
    for (int b = 1; b <= sig->GetNbinsX(); ++b) if (sig->GetBinContent(b) < 0) sig->SetBinContent(b, 0);
    sig->SetFillColorAlpha(kRed + 1, 0.35); sig->SetLineColor(kRed + 1); st->Add(sig);
-   for (auto &cp : comps) { TH1D *h2 = (TH1D *)cp.h->Clone(Form("%s_stack", cp.h->GetName())); h2->SetFillColorAlpha(cp.color, 0.35); h2->SetLineColor(cp.color); st->Add(h2); }
-   st->Draw("HIST"); st->SetMaximum(hAll->GetMaximum() * 1.25);
+   for (auto &cp : comps) { TH1D *h2 = (TH1D *)cp.h->Clone(Form("%s_stack%s", cp.h->GetName(), logy ? "_log" : "")); h2->SetFillColorAlpha(cp.color, 0.35); h2->SetLineColor(cp.color); st->Add(h2); }
+   if (logy) {
+      double mnPos = 0; for (int b = 1; b <= hAll->GetNbinsX(); ++b) { double v = hAll->GetBinContent(b); if (v > 0 && (mnPos == 0 || v < mnPos)) mnPos = v; }
+      const double yMin = mnPos > 0 ? std::min(0.5, mnPos / 2) : 0.5, yMax = std::max(1.0, hAll->GetMaximum()) * 1000;   // 위 절반은 범례 자리
+      for (TObject *o : *st->GetHists()) { ((TH1 *)o)->SetMinimum(); ((TH1 *)o)->SetMaximum(); }   // 저장된 SetMinimum(0) 이 로그를 막는다
+      st->SetMinimum(yMin); st->SetMaximum(yMax); st->Draw("HIST"); st->SetMinimum(yMin); st->SetMaximum(yMax);
+   } else { st->Draw("HIST"); st->SetMaximum(hAll->GetMaximum() * 1.25); }
    st->GetXaxis()->SetTitleSize(0.045); st->GetYaxis()->SetTitleSize(0.045); st->GetYaxis()->SetTitleOffset(1.1);
-   TH1D *all = (TH1D *)hAll->Clone(Form("%s_pts", hAll->GetName())); all->SetStats(0); all->SetMarkerStyle(20); all->SetMarkerSize(0.9); all->SetLineColor(kBlack); all->Draw("E SAME");
+   TH1D *all = (TH1D *)hAll->Clone(Form("%s_pts%s", hAll->GetName(), logy ? "_log" : "")); all->SetStats(0); if (logy) { all->SetMinimum(); all->SetMaximum(); } all->SetMarkerStyle(20); all->SetMarkerSize(0.9); all->SetLineColor(kBlack); all->Draw("E SAME");
    TLegend *leg = new TLegend(0.58, 0.55, 0.95, 0.88); leg->SetBorderSize(0); leg->SetFillStyle(1001); leg->SetFillColor(kWhite); leg->SetTextSize(0.030);
    leg->AddEntry(all, Form("all pairs (on-window)  N = %.0f", hAll->Integral()), "lp");
    leg->AddEntry(sig, Form("signal (after subtraction)  N = %.0f", hSig->Integral()), "f");
    for (size_t i = 0; i < comps.size(); ++i) leg->AddEntry(st->GetHists()->At((int)i + 1), Form("%s  N = %.1f", comps[i].label.c_str(), comps[i].h->Integral()), "f");
+   if (logy) { int nNeg = 0; for (int b = 1; b <= hSig->GetNbinsX(); ++b) if (hSig->GetBinContent(b) < 0) nNeg++;
+               if (nNeg > 0) leg->AddEntry((TObject *)nullptr, Form("signal < 0 in %d bins (drawn as 0)", nNeg), ""); }
    leg->Draw();
-   c->Print(dir + file + ".png");
+   c->Print(dir + tag + ".png");
 }
 
 // ---------------------------------------------------------------------------
@@ -725,12 +736,14 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          hp2->Draw("HIST"); hn2->Draw("HIST SAME"); c->cd();
          c->Print(out + Form("%02d_bgspec_lihe_dt_%s.png", 51 + k, fileTag[k]));
       }
-      DrawDecomposition(out, Form("%02d_decomp_prompt_%s", 45 + 2 * k, fileTag[k]),
-                        Form("Prompt spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
-                        pAll, pSub, {{pAcc, "accidental", (int)kBlue + 1}, {pFn, "fast-n [prelim]", (int)kGreen + 2}, {pLi, "Li/He [prelim]", (int)kMagenta + 1}});
-      DrawDecomposition(out, Form("%02d_decomp_delayed_%s", 46 + 2 * k, fileTag[k]),
-                        Form("Delayed spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
-                        dAll, dSub, {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}, {dLi, "Li/He [prelim]", (int)kMagenta + 1}});
+      for (int lg = 0; lg < 2; ++lg) {                     //  선형 + 로그(_log) 두 판
+         DrawDecomposition(out, Form("%02d_decomp_prompt_%s", 45 + 2 * k, fileTag[k]),
+                           Form("Prompt spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
+                           pAll, pSub, {{pAcc, "accidental", (int)kBlue + 1}, {pFn, "fast-n [prelim]", (int)kGreen + 2}, {pLi, "Li/He [prelim]", (int)kMagenta + 1}}, lg == 1);
+         DrawDecomposition(out, Form("%02d_decomp_delayed_%s", 46 + 2 * k, fileTag[k]),
+                           Form("Delayed spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
+                           dAll, dSub, {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}, {dLi, "Li/He [prelim]", (int)kMagenta + 1}}, lg == 1);
+      }
       //  53~54 다중도 분포와 포아송 외삽 : 창 안 다른 single 수 n 의 on−acc 초과분 N(n). 뮤온 파쇄 중성자 다발이 포아송이면
       //  N(0) 의 다중중성자 몫 ≈ N(1)²/(2·N(2)). 이것이 남는 '신호' 와 비슷하면 신호가 2-중성자 배경이라는 뜻이다
       double nxN[3] = {0, 0, 0}, n0est = -1, n0estErr = -1;

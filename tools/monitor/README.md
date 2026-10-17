@@ -625,7 +625,7 @@ livetime 도 두 단계가 맞는다 — 4291 이 1단계 `51,899.941 s`, 2단�
 | 32~36 | `32_daily_livetime.png` · `33/34_daily_candidates_<ch>.png` · `35/36_daily_rate_<ch>.png` | **날짜 기준** (4d, `daily.sh`) : 날짜별 라이브타임 · 후보 수 · rate |
 | 37~40 | `37/39_spectrum_prompt_<ch>.png` · `38/40_spectrum_delayed_<ch>.png` | **전체 사건 에너지 스펙트럼** — 배경 빼기 전(검정) / 우발·fast-n·Li/He 를 뺀 뒤(빨강) |
 | 41~44 | `41/43_bgspec_prompt_<ch>.png` · `42/44_bgspec_delayed_<ch>.png` | **배경 성분별 에너지 스펙트럼** (전체 양) — 우발(파랑) · fast-n(초록) · Li/He 템플릿(자홍) · multiplicity 로 걸러낸 초과분(주황) · PSD 로 버린 것(청록, 컷을 켰을 때). prompt 쪽은 사이드밴드 쌍의 원 prompt(0~50 MeV, 회색 점선)도 같이 |
-| 45~48 | `45/47_decomp_prompt_<ch>.png` · `46/48_decomp_delayed_<ch>.png` | **신호창 분해** — 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음) |
+| 45~48 | `45/47_decomp_prompt_<ch>.png` · `46/48_decomp_delayed_<ch>.png` | **신호창 분해** — 전체 쌍(검정 점) = 신호(빨강, 맨 아래) + 배경들(쌓음). 같은 이름에 `_log` 를 붙인 판은 y 축만 로그 (2026-10-18). 신호가 음수인 빈 수를 범례에 적는다 |
 | 49~50 | `49/50_bgspec_psd_<ch>.png` | prompt 의 **p_psd** 분포 : on(검정) 대 off(파랑 = γ 참조). p_psd > 3 비율과 컷 선(`daily_psd_nsig`) |
 | 51~52 | `51/52_bgspec_lihe_dt_<ch>.png` | 직전 샤워링 뮤온까지의 **Δt** (검정) · 직후(회색, 역방향 대조) · 전체 합의 Daya Bay Eq.2 적합(빨강). Li/He 빼기의 근거 |
 | 53~54 | `53/54_bgspec_multiplicity_<ch>.png` | 쌍마다 multiplicity 창 안 **다른 single 수 n_extra** 의 분포 (on · off · 초과분). 다중중성자 가족이 포아송이면 n_extra=0 에 남는 몫 ≈ N(1)²/(2N(2)) — 남는 '신호' 와 비교 |

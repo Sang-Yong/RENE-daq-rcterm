@@ -56,7 +56,9 @@ RON=$(sed -n 's/.*on=\([0-9]*\).*/\1/p' "$T/cnt.txt"); ROFF=$(sed -n 's/.*off=\(
 DON=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$6} END{print s+0}' "$TSV"); DOFF=$(awk -F'\t' '!/^#/ && $2=="_nGd"{s+=$7} END{print s+0}' "$TSV")
 [ "$DON" = "$RON" ] && [ "$DOFF" = "$ROFF" ] && ok "★ 날짜별 IBD/우발 합 = 런별 PairAndCountW (on $RON, off $ROFF)" || bad "쌍 개수 불일치" "daily on=$DON off=$DOFF / run on=$RON off=$ROFF"
 #  ③ 산출물
-N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-8]_*.png "$T/out"/6[0-3]_*.png 2>/dev/null | wc -l)
+N=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-8]_*.png "$T/out"/6[0-3]_*.png 2>/dev/null | grep -vc '_log\.png$')
+NLOG=$(ls "$T/out"/4[5-8]_decomp_*_log.png 2>/dev/null | wc -l)
+[ "$NLOG" -eq 4 ] && ok "분해 45~48 의 로그 판 _log 네 장" || bad "분해 _log $NLOG 장"
 [ "$N" -eq 31 ] && ok "그림 32~63 서른한 장 (추이 5 · 스펙트럼 4 · 배경 성분 4 · 분해 4 · PSD 2 · Li/He dt 2 · 다중도 2 · 모양 대조 2 · Δt 2 · 신호창 검수 2 · 창 rate 2)" || bad "그림 $N 장" "$(ls "$T/out" | grep png)"
 echo "$OUT" | grep -qE '^\s*\[DT  \] n-Gd all : tau [0-9.]+ us' && ok "[DT] 줄 : Δt 적합" || bad "[DT] 줄" "$(echo "$OUT" | grep 'DT  ')"
 echo "$OUT" | grep -qE '^\s*\[MULT\] n-Gd : N\(0\)=[0-9.]+ N\(1\)=' && ok "[MULT] 줄 : 다중도 N(0)·N(1)·N(2) 와 포아송 외삽" || bad "[MULT] 줄" "$(echo "$OUT" | grep MULT)"
