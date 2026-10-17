@@ -21,7 +21,8 @@
 #
 #  ★ 포맷은 하지 않는다. ext4 가 아니면 멈춘다 (포맷은 사람이 정한다)
 #  ★ 재부팅하면 마운트는 풀린다 (fstab 에 안 적으므로). 다시 이 스크립트를 같은 인자로
-#  ★ 하드가 떨어지면 : umount <마운트> (안 되면 umount -l) -> ls -l /dev/disk/by-id | grep ata- -> 같은 인자로 다시
+#  ★ 하드가 떨어지면 : umount <마운트> (안 되면 umount -l) -> e2fsck -f /dev/disk/by-id/<이름>
+#                      -> ls -l /dev/disk/by-id | grep ata- 로 재인식 확인 -> 같은 인자로 다시
 #  ★ 프로세스 검사에 pgrep -f 를 쓰지 않는다 (§11.142 의 3)
 # =====================================================================
 
@@ -228,7 +229,10 @@ resolve() {   # $1 = 인자  ->  장치 이름(sdX) 을 찍는다
 	local a=${1#/dev/disk/by-id/} n
 	for n in "${CAND[@]}"; do [ -n "${LNAME[$n]}" ] && [ "${LNAME[$n]}" = "$a" ] && { echo "$n"; return 0; }; done
 	for n in "${CAND[@]}"; do [ "${SER[$n]}" = "$a" ] && { echo "$n"; return 0; }; done
-	if [ -e "$BYID/$a" ]; then echo "notusb"; return 1; fi
+	if [ -e "$BYID/$a" ]; then
+		case $a in *-part[0-9]*) echo "notusb" ;; *) echo "nopart" ;; esac
+		return 1
+	fi
 	return 1
 }
 ROLE_MP=("$MP_RAW" "$MP_PRD"); ROLE=(RAW PRD)
@@ -236,6 +240,9 @@ PAIRS=(); USED=" "
 for i in "${!ARGS[@]}"; do
 	a=${ARGS[$i]}; mp=${ROLE_MP[$i]}
 	if ! n=$(resolve "$a"); then
+		if [ "$n" = nopart ]; then
+			fail "$a 는 디스크 이름입니다. 파티션 이름(-part1)을 주세요" "예 : ${a}-part1   (위 표의 by-id 이름)"
+		fi
 		if [ "$n" = notusb ]; then
 			fail "$a 는 by-id 에 있지만 USB 외장하드가 아닙니다" "위 표의 by-id 이름을 쓰세요."
 		fi
@@ -283,9 +290,10 @@ for pr in "${PAIRS[@]}"; do
 		if [ "$src" != "$dv" ]; then
 			fail "$mp 에 다른 장치($src)가 마운트돼 있습니다. 기대 : $dv (${SER[$n]})" \
 				"지난 회차 하드이거나, 떨어졌다 다시 붙은 유령 마운트일 수 있습니다 (§11.124)." \
-				"umount $mp  (안 되면 umount -l $mp)  ->  같은 인자로 이 스크립트 다시"
+				"umount $mp  (안 되면 umount -l $mp)  ->  e2fsck -f $lk" \
+				"->  ls -l /dev/disk/by-id | grep ata-  (재인식 확인)  ->  같은 인자로 이 스크립트 다시"
 		fi
-		[ -e "$src" ] || fail "$mp 의 장치 $src 가 /dev 에 없습니다 (유령 마운트)" "umount -l $mp 뒤 같은 인자로 다시"
+		[ -e "$src" ] || fail "$mp 의 장치 $src 가 /dev 에 없습니다 (유령 마운트)" "umount $mp (안 되면 umount -l $mp)  ->  e2fsck -f $lk" "->  ls -l /dev/disk/by-id | grep ata-  (재인식 확인)  ->  같은 인자로 다시"
 		echo "    (이미 마운트됨 : 건너뜁니다)"
 	else
 		act mount -t ext4 "$lk" "$mp" || fail "mount $lk $mp 실패" "dmesg | tail -20 으로 사유를 보세요."
@@ -428,6 +436,9 @@ grep -E '쓰기|담는 종류|하드 순서|^  런 [0-9]|전송 시작|❌|오�
 if [ -z "$pids" ]; then fail "백업 세션이 떠 있지 않습니다" "cat $LOGDIR/code9.log $LOGDIR/chain.out"; fi
 ok "백업 기동"
 
+E2LINES=""
+for pr in "${PAIRS[@]}"; do E2LINES="$E2LINES          e2fsck -f $BYID/${LNAME[${pr#*:}]}
+"; done
 cat <<EOF
 
 ==========================================================
@@ -438,10 +449,11 @@ cat <<EOF
   - DAQ PC 에서 : scripts/mailq-send.sh --status   (메일 큐)
   - 하드가 떨어지면 (메일 '전송 도중 떨어졌습니다') :
        1) umount $MP_RAW ${PRDD:+$MP_PRD}      (안 되면 umount -l <마운트>)
-       2) ls -l /dev/disk/by-id | grep ata-    (하드가 다시 보이는지)
-       3) sudo bash $SELF ${ARGS[*]}
+       2) 저널이 끊겼을 수 있으니 재마운트 전에 검사 :
+$E2LINES       3) ls -l /dev/disk/by-id | grep ata-    (하드가 다시 보이는지)
+       4) sudo bash $SELF ${ARGS[*]}
           (code9 는 이미 옮긴 파일을 건너뛰고 이어간다)
-  - 재부팅하면 마운트가 풀린다 (fstab 에 안 적었다) -> 3) 과 같은 명령
+  - 재부팅하면 마운트가 풀린다 (fstab 에 안 적었다) -> 4) 와 같은 명령
   - 뽑을 때는 umount 부터 (독은 한 USB 장치라 둘이 같이 떨어진다)
 ==========================================================
 EOF

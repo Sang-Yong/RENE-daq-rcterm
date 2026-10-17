@@ -155,6 +155,9 @@ chk "1 개 : RAW 만" '[ $RC = 0 ] && grep -q "PRD 세션은 건너뜁니다" <<
 done_
 
 echo "[4] 잘못된 인자"
+setup 2; ln -s $T/dev/sdb1 $T/byid/ata-ST2000DM008-2FR102_ZK206HAY; runsut ata-ST2000DM008-2FR102_ZK206HAY --no-start
+chk "-part1 없는 디스크 이름 → 파티션 이름 안내" '[ $RC = 1 ] && grep -q "파티션 이름(-part1)을 주세요" <<<"$OUT"'
+done_
 setup 2; runsut ata-NOPE_XXXX-part1 --no-start
 chk "없는 이름 FAIL" '[ $RC = 1 ] && grep -q "FAIL: ata-NOPE_XXXX-part1 에 해당하는 USB 하드가 없습니다" <<<"$OUT" && ! grep -q "^mount" $F/calls'
 done_
@@ -174,6 +177,7 @@ done_
 echo "[5] 다른 장치가 마운트지점에 붙어 있으면 FAIL + umount 안내"
 setup 2; echo "$T/mp1 /dev/sdz1" > $F/mounts; runsut $B1 $B2 --no-start
 chk "rc 1 + 안내" '[ $RC = 1 ] && grep -q "다른 장치(/dev/sdz1)" <<<"$OUT" && grep -q "umount $T/mp1  (안 되면 umount -l" <<<"$OUT"'
+chk "유령 안내에 e2fsck" 'grep -q "e2fsck -f $T/byid/$B1" <<<"$OUT"'
 done_
 
 echo "[6] 지난 회차 하드가 붙은 채"
@@ -242,6 +246,9 @@ runsut $B1 $B2
 chk "rc 0 + 사슬 그대로" '[ $RC = 0 ] && grep -q "사슬 스크립트 그대로" <<<"$OUT"'
 chk "code9 실행 (raw, prd)" 'grep -q -- "--only raw$" $F/code9.calls && grep -q -- "--only prd$" $F/code9.calls'
 chk "지난 code9.log 보관" 'ls $T/home/sykim/backup_log/code9.log.prev-* >/dev/null 2>&1'
+G=$(sed -n '/하드가 떨어지면/,/재부팅하면/p' <<<"$OUT")
+ln_() { grep -n -- "$1" <<<"$G" | head -1 | cut -d: -f1; }
+chk "떨어졌을 때 안내에 e2fsck (두 하드) · 순서" 'u=$(ln_ "1) umount"); e=$(ln_ "e2fsck -f $T/byid/$B1"); f=$(ln_ "e2fsck -f $T/byid/$B2"); l=$(ln_ "ls -l /dev/disk/by-id"); r=$(ln_ "sudo bash"); [ -n "$u" ] && [ -n "$e" ] && [ -n "$f" ] && [ "$u" -lt "$e" ] && [ "$e" -lt "$l" ] && [ "$f" -lt "$l" ] && [ "$l" -lt "$r" ]'
 chk "세션 pid · 다음에 볼 것 · 떨어졌을 때 절차" 'grep -q "4343 " <<<"$OUT" && grep -q "다음에 볼 것" <<<"$OUT" && grep -q "ls -l /dev/disk/by-id | grep ata-" <<<"$OUT" && grep -q "sudo bash .* $B1 $B2$" <<<"$OUT"'
 done_
 
