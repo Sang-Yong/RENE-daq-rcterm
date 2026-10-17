@@ -576,6 +576,10 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   뿐이라 `USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT` 과 한 글자도 안 겹친다.
   실측 : 오류 43건짜리 로그를 0건으로 센다 (§11.120). **둘 다 고쳐야 잡힌다**
 - **`badrun.sh` 가 SADC entries 0 인 꼬리 서브런을 못 잡는다.** 열리기만 하면 `gap` 으로 분류해 영영 미완결로 둔다 (run 4392 00962, §11.220). 'SADC entries 0' 을 bad_raw 로 치는 보강이 필요하다
+- **시트 그리드 확장 후속 넷** (2026-10-17 code-reviewer, 막지 않음, §11.220) : ① `sheetlog-auto.sh` 가 성공을 출력의
+  '기록함' 으로만 보고 python 종료코드가 `$( | grep )` 에 묻혀 새 exit 3(되대조 어긋남)이 [OK] 로 읽힌다 -> 출력에 '확인 필요' 가
+  있으면 실패 처리. ② `rebuild_backup_sheet.py` 의 `batch_clear A{n+2}:Z{old_n+5}` 가 꽉 찬 탭에서 행이 줄면 그리드를 넘을 수 있다 ->
+  끝 행을 `min(old_n+5, ws.row_count)` 로. ③ 추가 경로에 '쓰기 전 시트 전체 백업'(§11.5 규칙 4)이 원래부터 없다. ④ 되대조의 Run 비교를 숫자 비교로
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -716,6 +720,8 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   로 밀린 런을 본다. 쓸 때마다 메일이 오므로 **메일이 안 오는데 런이 쌓이면**
   후처리가 덜 끝났거나(완결 게이트가 미루는 중) cron 이 죽은 것이다.
   손으로 밀어 넣으려면 `--force`, 시험은 `--dry-run`.
+- **시트에 범위 쓰기를 하는 코드는 쓰기 전에 그리드 행 수를 늘려야 한다** (`tools/sheetlog/sheet_grid.ensure_rows`) --
+  2026-10-16 Y2026B 가 358 행에서 꽉 차 20 시간 동안 매시 `exceeds grid limits` 로 실패했다 (§11.220).
 - **★ 감시자는 '수집이 도는가' 만 본다. 그 밖은 `scripts/chainwatch.sh` 가 본다.**
   후처리가 죽거나(`/scratch` 가 빠지면 그렇게 된다) 계수율이 떨어져도 감시자는
   조용하다. 2026-09-01 에 둘 다 겪었다 (§11.138). `--status` 로 언제든 볼 수 있다.
@@ -797,6 +803,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-10 | 첫 실전 코드 갈래(구현→검토 2 라운드→배포) | skills/rene-daq-orchestrator (절차 변경 없음) | websummary 드라이브 실패 비치명화 |
 | 2026-10-10 | 코드 갈래 중 오케스트레이터는 work-web 에 미커밋 변경을 두지 않는다 | skills/rene-daq-orchestrator | 구현자가 남의 미커밋 변경을 보고 멈춤(첫 실전) |
 | 2026-10-10 | 금지 3 확장: probe·시험도 알림 경로를 가짜로 갈아끼운 뒤에만 | skills/rene-code-change | 검토자 probe 가 운영 daq-notify.log 에 가짜 사건을 남김(메일은 안 나감) |
+| 2026-10-17 | 코드 갈래 2 회째(시트 그리드 확장) -- 리뷰 1 라운드 승인 | skills/rene-daq-orchestrator (절차 변경 없음) | 시트 행 부족으로 20 시간 매시 실패 -> 18d9529 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -821,10 +828,9 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 우리 것    29개.  런 4280 이상  +  되메운 4208 4209 4210 4211 4276
 ```
 
-우리가 쓴 29개 : 4208 4209 4210 4211 4276 4280 4282 4283 4284 4285 4286 4287
-4288 4289 4290 4291 4292 4293 4294 4300 4301 4302 4303 4304 4305 4306 4307
-4313 4314.
-**여기에 행을 더할 때마다 이 목록도 늘린다.**
+우리가 쓴 것 : **런 4280 이상 전부** + 되메운 5개(4208 4209 4210 4211 4276).
+(옛 29개 목록은 4314 까지였다. 그 뒤 cron 이 계속 써 왔고 2026-10-17 에 4379 4380 4381 4382 4383
+4384 4385 4386 4387 4388 4390 4391 4392 13개가 더해졌다 -- §11.220. 개별 목록은 더 두지 않는다.)
 코드에도 같은 경계가 `append_runs.py` 의 `OURS_MIN` · `OURS_EXTRA` 로 박혀 있다.
 
 1. **남의 행은 내용도 위치도 건드리지 않는다.** 값이 틀려 보여도 손대지 않는다.
@@ -1052,7 +1058,17 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
   FADC 00962 = AbsEvent 100 개(110,587 B), SADC 00962 = AbsEvent **0 개**(7,958 B, 헤더뿐). 둘 다 ROOT 로 열림(zombie 0, keys 1)이나 SADC 에 사건이 없어 merge 가 구조적으로 불가 → PRD 를 만들 수 없음.
   §5.9 대로 짝을 함께 `badrun/` 으로 격리(`mv -T`, 같은 파일시스템, README.txt 작성) → **FADC 962 = SADC 962 = Merged 962 = PRD 962 완결.** `badrun.sh --scan --run 4392 --update-list` → 범주 `truncated_tail`, 목록 628 런(사본 `docs/BADRUNS.md` 는 `--export` 로 재생성). 물리 손실은 마지막 3 초의 FADC 100 사건뿐(SADC 가 없어 분석 불가였음).
 - ★ 교훈 후보 : §5.9 의 '열리는 파일은 격리하지 않는다' 는 재처리 가능성을 전제한 규칙인데, SADC 가 0 사건인 꼬리는 열려도 merge 가 안 된다. badrun.sh 의 3 단계 판정은 '열리는가' 만 보므로 이런 꼬리를 `gap` 으로 분류해 영영 미완결로 둔다 — 'SADC entries 0' 을 bad_raw 로 치는 보강이 백로그(§6). run 4391 의 꼬리(1 분 남짓)는 사건이 있어 정상 처리됐다.
-- 진행 중 : 시트 행 부족(Y2026B grid) 코드 수정은 code-engineer 커밋 18d9529(work-web, 미push)를 code-reviewer 가 검토 중 — 배포·운영 등재는 리뷰 뒤. 남은 것 : 서버 10.0.0.10 복구 후 정식 마운트 · 4392 의 veto-check-4392 비교(PRD 962 완결이라 가능) · 다음 런 결정.
+- 시트 행 부족 수정은 아래 '이어서 (10-17 12:2x)' 로 완료
+
+**이어서 (10-17 12:2x) — 시트 행 부족 수정·배포·13 런 등재.** 정본 `/Data_ssd/LOG/harness/20261017_code-engineer_sheet-rowlimit.md` · `20261017_code-reviewer_sheet-rowlimit.md`.
+- 원인 : Y2026B 그리드가 358 행에서 꽉 찬 채 `append_runs.py` 가 범위(A359:…)를 써서 `exceeds grid limits` (400). 10-16 13:07 부터 매시 실패 메일.
+- 수정 : 사용자 지시 "코드 고쳐서 해결" -> code-engineer 커밋 **18d9529** (`tools/sheetlog/sheet_grid.py` `ensure_rows(ws,last_row,commit,margin=20)`; `append_runs.py` 추가 경로에 범위 쓰기 전 호출 + 되대조(기존 행 불변 · 새 행 Run 셀, 어긋나면 exit 3);
+  `rebuild_backup_sheet.py` A1 통째 쓰기 앞에도. `--insert`/`publish_google.py`/`append_backup_rows.py` 는 insert_row/append_rows 라 API 가 그리드를 늘려 미수정). 시험 `tests/sheet-grid.test.sh` 9 신설, thr-prefix 28 · backup-sheetlog 60 · backup-rebuild 66 통과.
+- 검토 : code-reviewer **승인**(막는 지적 없음). 고치기 전 코드로 시험이 운영과 같은 400 으로 실패함을 재현, 실제 Y2026B 를 읽기 전용으로 확인(row_count 358 · col_count 21).
+- 배포 : 12:24 work-web push(b4f4686..8c28012) -> 운영 `git pull --ff-only` 성공. 등재 : `sheetlog-auto.sh --dry-run` 13 런 미리보기 -> `--force` 12:24:52 **[OK] 13 런 -> A359:S371** (되대조 통과).
+  런 : 4379 4380 4381 4382 4383 4384 4385 4386 4387 4388 4390 4391 4392 (4389 는 onlbit 0 으로 제외, 4390 은 사용자 "일단 놔둬" 로 onlbit 1 그대로 등재). `--status` 밀린 런 0. Description 접두어는 규칙대로 붙음.
+- 메일 : `/Data/LOG/daq-notify.log` 12:24:52 sheetlog 사건 `시트에 13 런 등재 -- A359:S371`, 12:24:56 **mail rc=0** (책임자). 마지막 실패 메일은 12:07:10. 이 기록 작업에서 메일은 따로 보내지 않았다.
+- 리뷰 후속 4 건(막지 않음)은 §6 작업 6 백로그에 올렸다.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4494,7 +4510,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
            002455~002457 완료 · 002458 1171 개 조각. 런 1,681 개 남음. 새 하드 2장 + 같은 명령이면 새 판으로 이어진다 (cron 이 build=NEW 알림)
            code9 는 이탈 감지 + 시리얼 + 시트 링크 + full 색인판 — 다음 세션부터. 시트 자동 등재 cron 37분 (§11.184).
            독 교체 검토 (§11.180)
-감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 · mailq-send 5분
+감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 (시트 그리드 자동 확장) · mailq-send 5분
            · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
                 시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
@@ -4649,7 +4665,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
 | **/scratch: IPv6 임시 마운트 중 — 서버 콘솔에서 ens6f1 IPv4(10.0.0.10) 복구 뒤 정식 마운트로 교체, fstab 에 nofail** | 서버 `ip -br addr` · `ip route get 10.0.0.11` 출력 필요 (10.0.0.10 이 ens6f1 에 없는 것으로 추정, 이쪽 arpwatch 에 서버 ARP 0). 지금 마운트는 fe80 링크로컬(서버 재부팅 시 바뀔 수 있음). postrun 은 10-16 17:07 재기동됨 | §11.220 |
-| **GoodRuns 시트 Y2026B 행 부족 (358 행 꽉 참)** | `append_runs.py` 가 매시 07분 `exceeds grid limits` 실패 메일. 시트에 빈 행 추가 또는 코드 수정 결정 | §11.220 |
+| ✅ GoodRuns 시트 Y2026B 행 부족 | 코드로 해결(18d9529, 그리드 자동 확장) · 10-17 12:24 13 런 등재 | §11.220 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
