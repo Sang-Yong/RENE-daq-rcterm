@@ -12,7 +12,7 @@
 #
 # 갱신 : scripts/badrun.sh --scan --update-list
 # 사본 : docs/BADRUNS.md  (scripts/badrun.sh --export)
-# 생성 : 2026-08-22 23:57:22
+# 생성 : 2026-10-17 12:21:01
 #
 # 범주
 #   boot_failed     부팅 실패. 런이 시작되지 못했고 데이터가 없다
@@ -28,14 +28,14 @@
 #
 # run  분류일시        범주                 서브런              메모
 # ── 요약 ─────────────────────────────────────────────────────────
-#  문제 런 624 개
-#    not_processed             289
+#  문제 런 628 개
+#    not_processed             288
 #    aborted                   254
-#    boot_failed                27
-#    no_data                    19
-#    prd_gap                    17
-#    truncated_tail             14
-#    truncated_tail+prd_gap      4
+#    boot_failed                28
+#    no_data                    20
+#    truncated_tail             17
+#    prd_gap                    16
+#    truncated_tail+prd_gap      5
 #
 #  ★ 사람이 손볼 것 — 원본이 죽어 격리가 필요하거나 이미 격리한 런
 #    run 2466   격리됨      truncated_tail           00038
@@ -50,12 +50,16 @@
 #    run 2683   격리됨      truncated_tail           00031
 #    run 2957   격리됨      truncated_tail           00035
 #    run 3207   격리됨      truncated_tail+prd_gap   01532,01533,01534,01535,01536,01537,01538,01539...외33개
-#    run 3520   격리됨      truncated_tail+prd_gap   00570,00571,00572,00573
-#    run 3523   격리됨      truncated_tail+prd_gap   00324,00325,00326
+#    run 3520   격리됨      truncated_tail+prd_gap   00571,00573
+#    run 3523   격리됨      truncated_tail+prd_gap   00325,00326
 #    run 3855   격리됨      truncated_tail           00010
 #    run 3923   격리됨      truncated_tail+prd_gap   00742,00743
+#    run 4138   격리됨      truncated_tail           00009
 #    run 4291   격리됨      truncated_tail           00869
 #    run 4293   격리됨      truncated_tail           00091
+#    run 4318   격리됨      truncated_tail           00147
+#    run 4372   격리됨      truncated_tail+prd_gap   00512,00513
+#    run 4392   격리됨      truncated_tail           00962
 # ─────────────────────────────────────────────────────────────────
 #
   27   2026-08-21 03:57:40 aborted                -                      DB onlbit=0
@@ -430,7 +434,7 @@
   3474 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3475 2026-08-21 03:57:41 aborted                -                      DB onlbit=0; 다만 후처리는 완결됐다 (FADC 98 = PRD 98)
   3477 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 6 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
-  3478 2026-08-21 03:57:41 prd_gap                00950,00951,00952,00953,00954,00955,00956,00957...외4개 FADC 962 / PRD 950. 서브런 00950 00951 00952 00953 00954 00955 00956 00957 00958 00959 00960 00961 은 원본이 멀쩡하다. 재처리하면 된다
+  3478 2026-08-21 03:57:41 prd_gap                00951,00953,00955,00957 FADC 962 / PRD 958. 서브런 00951 00953 00955 00957 은 원본이 멀쩡하다. 재처리하면 된다
   3479 2026-08-21 03:57:41 not_processed          -                      FADC 127 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3480 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3481 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
@@ -461,8 +465,8 @@
   3517 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 3 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3518 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3519 2026-08-21 03:57:41 prd_gap                00678                  FADC 679 / PRD 678. 서브런 00678 은 원본이 멀쩡하다. 재처리하면 된다
-  3520 2026-08-21 03:57:41 truncated_tail+prd_gap 00570,00571,00572,00573 FADC 573 / PRD 570. 원시 파일 2 개 격리됨(서브런 00573). 서브런 00570 00571 00572 은 원본이 멀쩡하다. 재처리하면 된다
-  3523 2026-08-21 03:57:41 truncated_tail+prd_gap 00324,00325,00326      FADC 326 / PRD 324. 원시 파일 2 개 격리됨(서브런 00326). 서브런 00324 00325 은 원본이 멀쩡하다. 재처리하면 된다
+  3520 2026-08-21 03:57:41 truncated_tail+prd_gap 00571,00573            FADC 573 / PRD 572. 원시 파일 2 개 격리됨(서브런 00573). 서브런 00571 은 원본이 멀쩡하다. 재처리하면 된다
+  3523 2026-08-21 03:57:41 truncated_tail+prd_gap 00325,00326            FADC 326 / PRD 325. 원시 파일 2 개 격리됨(서브런 00326). 서브런 00325 은 원본이 멀쩡하다. 재처리하면 된다
   3525 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3526 2026-08-21 03:57:41 prd_gap                00081,00082,00083,00084,00085,00086,00087,00088...외28개 FADC 117 / PRD 81. 서브런 00081 00082 00083 00084 00085 00086 00087 00088 00089 00090 00091 00092 00093 00094 00095 00096 00097 00098 00099 00100 00101 00102 00103 00104 00105 00106 00107 00108 00109 00110 00111 00112 00113 00114 00115 00116 은 원본이 멀쩡하다. 재처리하면 된다
   3527 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 2 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
@@ -511,7 +515,7 @@
   3730 2026-08-21 03:57:41 not_processed          -                      FADC 2 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3734 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 2 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3744 2026-08-21 03:57:41 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
-  3761 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
+  3761 2026-08-21 03:57:41 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
   3784 2026-08-21 03:57:41 not_processed          -                      FADC 3 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3786 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   3787 2026-08-21 03:57:41 not_processed          -                      FADC 91 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
@@ -613,7 +617,7 @@
   4104 2026-08-21 03:57:41 not_processed          -                      FADC 18 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   4109 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   4110 2026-08-21 03:57:41 aborted                -                      DB onlbit=0; 다만 후처리는 완결됐다 (FADC 1 = PRD 1)
-  4138 2026-08-21 03:57:41 prd_gap                00009                  FADC 10 / PRD 9. 서브런 00009 은 원본이 멀쩡하다. 재처리하면 된다
+  4138 2026-08-21 03:57:41 truncated_tail         00009                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 9 = PRD 9). 사유는 badrun/README.txt
   4153 2026-08-21 03:57:41 no_data                -                      런 디렉터리가 있으나 FADC 도 PRD 도 없다
   4170 2026-08-21 03:57:41 not_processed          -                      FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
   4171 2026-08-21 03:57:41 not_processed          -                      aborted; FADC 1 / PRD 0. 로컬에 후처리 산출물이 없다 — 후처리를 안 했거나 산출물이 이 PC 에 없다
@@ -682,4 +686,8 @@
   4297 2026-08-21 03:57:41 boot_failed            -                      boot failed; run never started
   4298 2026-08-21 03:57:41 boot_failed            -                      boot failed; run never started
   4299 2026-08-21 03:57:41 boot_failed            -                      boot failed; run never started
+  4318 2026-09-01 03:49:20 truncated_tail         00147                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 147 = PRD 147). 사유는 badrun/README.txt
+  4324 2026-09-07 13:56:33 boot_failed            -                      boot failed; run never started; 런 디렉터리는 있으나 비었다
+  4372 2026-10-09 08:30:20 truncated_tail+prd_gap 00512,00513            aborted; FADC 513 / PRD 512. 원시 파일 2 개 격리됨(서브런 00513). 서브런 00512 은 원본이 멀쩡하다. 재처리하면 된다
+  4392 2026-10-17 12:21:01 truncated_tail         00962                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 962 = PRD 962). 사유는 badrun/README.txt
 ```

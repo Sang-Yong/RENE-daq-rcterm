@@ -575,6 +575,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   훑고(`usb-recover.sh:148,152`), 오류 패턴도 `LIBUSB_ERROR_IO`·`read error` 계열
   뿐이라 `USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT` 과 한 글자도 안 겹친다.
   실측 : 오류 43건짜리 로그를 0건으로 센다 (§11.120). **둘 다 고쳐야 잡힌다**
+- **`badrun.sh` 가 SADC entries 0 인 꼬리 서브런을 못 잡는다.** 열리기만 하면 `gap` 으로 분류해 영영 미완결로 둔다 (run 4392 00962, §11.220). 'SADC entries 0' 을 bad_raw 로 치는 보강이 필요하다
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -1000,7 +1001,7 @@ B2 여섯 채널 모두 ≥100 인 사건 0, 한 채널이라도 ≥50 인 사�
 |---|---|---|---|
 | 4390 | 16:16:28 ~ 16:47:43 (사용자 지시로 subrun 30 까지 받고 16:48:06 종료, 아래 마감 단락) | `_typeB_2` (파일 무변경, ch24~29 만 THR 100) / MTHRSM 6 | 검증 전부 합격 : THR 30 값 · MTHRSM 6/6 · FADCT 3 · SADCT 65 · is aligned 8 · USB 오류 0 · CONFIG/004390.config diff 없음 · DB config `…_typeB_2.config`. 계수율 daqtime 182.9 s 에 FADC 40.2 Hz (7,356 사건) · SADC 40.3 Hz (6,784 사건), 4388(`_typeB`) 42.9 Hz 와 비슷 |  ★ 사용자 확인(16:5x) : ch18~29 HV 가 전부 켜진 채 받은 잘못된 런 (B1 ch18~23 포함). DB runlog 에 HV 메모 덧붙임
 | 4391 | 16:51:19 ~ 20:13:55 (사용자 지시로 감시자 TERM 20:13:54, exit 0 20:14:15) | `_typeB_2` (파일 무변경) / MTHRSM 6 | 검증 전부 합격. onlbit 1, nfadc 487,136 / 12,157.6 s = 40.1 Hz, nsadc 486,656, FADC 203 파일, USB 오류 0, PRD 203/203 완결 (꼬리 200~202 는 postrun.sh 수동) |
-| 4392 | 20:16:16 ~ (진행 중, 24 h 로테이션, 다음 교체 10-17 20:16) | `_typeB` (B1, ch18~23) / MTHRSM 6 | 검증 전부 합격 (아래 4392 단락). FADC 40.08 · SADC 40.12 Hz (192 s) |
+| 4392 | 20:16:16 ~ 10-17 12:18:34 (사용자 지시로 감시자 TERM, exit 0, 16 h 2 m, 40.9 Hz, onlbit 1; 이후 대기) | `_typeB` (B1, ch18~23) / MTHRSM 6 | 검증 전부 합격 (아래 4392 단락). FADC 40.08 · SADC 40.12 Hz (192 s) |
 
 run 4389 의 0 사건 원인은 HV 미인가로 확정(사용자 확인). 감시 `veto-check-4390.sh`(pid 2287851, 4388 과 패널 비교, PRD 는 /scratch 마운트 뒤) · `daqerr-watch-4380.sh` 가 4390 을 따라감. threshold-changes.log 16:21 행(설정 변경 없음·HV 조정 뒤 재시작). 메일은 정상 재기동이라 책임자에게만.
 
@@ -1043,6 +1044,15 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
 - 감시 : `veto-check-4392.sh`(pid 3019903, 비교 대상 4388, 출력 `veto-check-4392.log`) · `daqerr-watch-4380.sh` 가 20:16:22 에 4392 를 잡음. threshold-changes.log 20:20 행. 다음 로테이션 10-17 20:16:16. 되돌리려면 `cp -p config/rcterm.params.bak-20261016i config/rcterm.params` 뒤 감시자 TERM·재기동.
 - 오늘 런 : 4388 B1 15:32~16:04 (42.9 Hz) · 4389 HV 미인가 0 사건 · 4390 잘못 받은 런(HV 전부 켜짐) 16:16~16:47 · 4391 B2 16:51~20:13 (40.1 Hz) · 4392 B1 20:16~ (40.1 Hz).
 - 남은 것 : 서버 `ip -br addr` 출력 → 10.0.0.10 복구 후 정식 마운트 · 시트 Y2026B 행 부족(sheetlog 매시 실패 메일) · run 4390 시트 제외 여부 · 4392 의 PRD 뒤 veto-check-4392 비교.
+
+**이어서 (10-17 12:1x) — run 4392 마감 · 꼬리 00962 격리.** 사용자 지시 "현재 run 종료시켜줘".
+- 12:18:34 감시자(pid 3017456) TERM → 12:18:42 run 4392 exit 0, daq·tcb 스스로 닫힘, 고아 0, 포트 비어 있음. **재기동 없음 → 수집 대기 상태.** `config/rcterm.params` 는 `_typeB`(B1 ch18~23) 그대로 — 다음 런은 사용자 결정.
+- DB 4392 : 10-16 20:16:27 ~ 10-17 12:18:34 (16 h 2 m), onlbit 1, nfadc 2,359,908 / 57,725.5 s = 40.9 Hz, nsadc 2,359,104. TCB·FADCDAQ·SADCDAQ USB 오류 0. 어제 밤 이후 rcsupervisor.log 에 restart 없음.
+- 후처리 : postrun --follow 가 PRD 960 까지. 꼬리 `postrun.sh 4392 --from 958 --to 962 --heartbeat /dev/null` → 960·961 완료, **962 는 merge rc=1 (ZOMBIE 표시)**. 진단 : 00962 는 TERM 때 생긴 3 초 꼬리(FADCDAQ 로그 12:18:33 opened → 12:18:36 closed).
+  FADC 00962 = AbsEvent 100 개(110,587 B), SADC 00962 = AbsEvent **0 개**(7,958 B, 헤더뿐). 둘 다 ROOT 로 열림(zombie 0, keys 1)이나 SADC 에 사건이 없어 merge 가 구조적으로 불가 → PRD 를 만들 수 없음.
+  §5.9 대로 짝을 함께 `badrun/` 으로 격리(`mv -T`, 같은 파일시스템, README.txt 작성) → **FADC 962 = SADC 962 = Merged 962 = PRD 962 완결.** `badrun.sh --scan --run 4392 --update-list` → 범주 `truncated_tail`, 목록 628 런(사본 `docs/BADRUNS.md` 는 `--export` 로 재생성). 물리 손실은 마지막 3 초의 FADC 100 사건뿐(SADC 가 없어 분석 불가였음).
+- ★ 교훈 후보 : §5.9 의 '열리는 파일은 격리하지 않는다' 는 재처리 가능성을 전제한 규칙인데, SADC 가 0 사건인 꼬리는 열려도 merge 가 안 된다. badrun.sh 의 3 단계 판정은 '열리는가' 만 보므로 이런 꼬리를 `gap` 으로 분류해 영영 미완결로 둔다 — 'SADC entries 0' 을 bad_raw 로 치는 보강이 백로그(§6). run 4391 의 꼬리(1 분 남짓)는 사건이 있어 정상 처리됐다.
+- 진행 중 : 시트 행 부족(Y2026B grid) 코드 수정은 code-engineer 커밋 18d9529(work-web, 미push)를 code-reviewer 가 검토 중 — 배포·운영 등재는 리뷰 뒤. 남은 것 : 서버 10.0.0.10 복구 후 정식 마운트 · 4392 의 veto-check-4392 비교(PRD 962 완결이라 가능) · 다음 런 결정.
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4467,7 +4477,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★★ run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★★★★ 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4476,7 +4486,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3  (★ 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4391 전부 PRD 완결, §11.220)
+후처리     postrun --follow --jobs 3 --lag 3  (★ 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
