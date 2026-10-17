@@ -37,6 +37,8 @@ threshold-changes.log 에 한 줄(시각 · 누가 · 적용 런 · 내용 30 �
 `daq-incident-playbook` §3 의 1·4·5 단계와 같다 (usbreset 은 필요 없다). 감시자 TERM → 런 정상 마감 확인(exit 0, phase=ended, 고아 0, 포트 0) → 같은 명령으로 재기동 → 45 초 뒤 검증.
 다음 로테이션에 적용할 때는 재시작 없이 2 까지만 하고 적용 예정 시각을 적는다 — rcterm 이 런 시작 때 파일을 읽는다.
 
+**금지:** 프로세스를 찾을 때 `pgrep -f` / `pgrep -fa` 를 쓰지 않는다 (저장소 경로에 `rcterm` 이 들어 있어 자기 셸·postrun·dataflow 까지 잡힌다). `pgrep -x rcsupervisor|rcterm|daq|tcb|merger` 나 heartbeat 로 본다 (CLAUDE.md §10).
+
 ## 4. 검증 (새 런)
 
 ```bash

@@ -808,6 +808,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-10 | 금지 3 확장: probe·시험도 알림 경로를 가짜로 갈아끼운 뒤에만 | skills/rene-code-change | 검토자 probe 가 운영 daq-notify.log 에 가짜 사건을 남김(메일은 안 나감) |
 | 2026-10-18 | 코드 갈래 3 회째(백업 마운트 스크립트) — 리뷰 3 라운드 + 설계 변경 1 회(사용자 지시로 fstab 판 → by-id 인자 판) | skills/rene-daq-orchestrator (절차 변경 없음) | root 로 /etc 를 고치는 코드는 실패 경로 재현이 필수라는 것을 리뷰가 확인 (§11.221) |
 | 2026-10-17 | 코드 갈래 2 회째(시트 그리드 확장) -- 리뷰 1 라운드 승인 | skills/rene-daq-orchestrator (절차 변경 없음) | 시트 행 부족으로 20 시간 매시 실패 -> 18d9529 |
+| 2026-10-18 | threshold-change-operator 가 pgrep -fa 를 1 회 사용(읽기 전용, 결과 무해) -- 프롬프트 금지 문구를 스킬에도 명시 | skills/veto-threshold-change | 에이전트 프롬프트에만 있던 `pgrep -f` 금지를 스킬 본문에 한 줄 추가 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -1153,6 +1154,24 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
 - DB 4393 : 2026-10-17 12:23:30 ~ 10-18 03:33:09 (15 h 10 m), onlbit 1, nfadc 2,189,616 / 54,577.0 s = 40.1 Hz, nsadc 2,188,800. TCB·FADCDAQ·SADCDAQ USB 오류 0.
 - 후처리 : postrun --follow 907 까지, 꼬리 `postrun.sh 4393 --from 905 --to 909 --heartbeat /dev/null` 로 **FADC 910 = Merged 910 = PRD 910 완결**. 마지막 파일 00909 는 사건이 있어(FADC 1,420 · SADC 2,048 entries) 4392 때와 달리 정상 처리됨 -- 꼬리 문제는 TERM 순간 파일이 몇 초짜리로 잘릴 때만 난다.
 - 서버 백업 9 회차 RAW 세션(01:51 시작, §11.221)은 그대로 도는 중(수집과 무관). 그 밖에 오늘 밤 사건 없음.
+
+**이어서 (10-18 03:3x~) — run 4394 (`_pidfix_all100`).** 정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md` 끝 "이어서 (10-18 03:4x~) — run 4394 (_all100)". 사용자 지시 10-18 03:3x "VETO_test_9layers_v2_mid3_pidfix_all100.config 으로 변경해서 다시 run 시작".
+- 새 파일(사용자 작성 03:32) `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3_pidfix_all100.config` = `_pidfix` 에서 SADC THR 활성 줄만 `100×18 (ch0~17 Type A) + 500000×12` 로 (옛 266 201… 줄은 주석). MTHRSM 18 · MTHRF 4 · SWF/SWSM 0 1 0 0 · CW 400 · FADCT 3 · PID 는 pidfix 순서 그대로. 즉 10-15 run 4382~4386 의 `VETO_test_9layers_v2_mid3` 과 THR·트리거가 같고 PID 순서만 pidfix 다.
+- 작업: rcterm.params 백업 `.bak-20261018a`(= `_typeB_2`) -> `_all100` -> dry-run 통과 -> 03:37:37 run 4394 기동 (감시자 평소 명령, 24 h 로테이션).
+| 항목 | 결과 (실측) |
+|---|---|
+| SADCT THR | 100 ×18 (CID 1~18) + 500000 ×12, 설정 파일과 일치 |
+| PID | pidfix 순서와 일치 |
+| TCB config / register | CW 400 · MTHRF 4 · MTHRSM 18/18 · TSWF 0 1 0 0 · TSWSM 0 1 0 0 |
+| FADC / SADC 링크 / DRAM | FADCT[mid=3] found @ 3, THR 100×4 / SADCT[mid=65] found @ 4 / is aligned 8 · Fail 0 |
+| USB 오류 (182 s) | TCB 0 · FADCDAQ 0 · SADCDAQ 0 |
+| CONFIG/004394.config · DB config | 설정 파일과 diff 없음 · `…_pidfix_all100.config` |
+| 계수율 (daqtime 182.1 s) | FADC 56.9 Hz · SADC 57.0 Hz (10,364 / 10,048 사건) |
+계수율 ~57 Hz 는 같은 THR·MTHRSM 의 4382~4386 (~57.6 Hz) 과 같은 크기라 Type A ch0~17 의 HV 가 걸려 있는 것으로 본다 (추정, HV 직접 확인 안 함). PID 순서 변경의 영향은 계수율에서 보이지 않는다.
+- 설정 파일 변천(10-16 이후): `_pidfix`(run 4387, 2 h) -> `_pidfix_typeB`(4388·4392, ch18~23, ~40 Hz) -> `_pidfix_typeB_2`(4390·4391·4393, ch24~29, ~40 Hz) -> **`_pidfix_all100`(4394~, ch0~17 THR 100, ~57 Hz)**. 오늘 런: 4393 B2 12:23~03:33 (40.1 Hz) · 4394 03:37~ (56.9 Hz).
+- 감시: `/Data_ssd/LOG/veto-check-4394.sh` (pid 3998214, 비교 대상 4386). `daqerr-watch-4380.sh` 는 10-17 23:08:47 에 48 h 상한으로 종료됐고 새 감시는 걸지 않았다 (사용자 결정 대기). threshold-changes.log 03:42 행.
+- 다음 로테이션 10-19 03:37:37. 되돌리려면 `cp -p config/rcterm.params.bak-20261018a config/rcterm.params` 뒤 감시자 TERM·재기동.
+- 작업자가 `pgrep -fa` 를 읽기 전용으로 한 번 썼다고 자진 보고했다 (결과 무해, §10 의 `pgrep -f` 금지 위반 -- 하네스 이력 참조).
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4578,7 +4597,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★★★★★ **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
@@ -4742,7 +4761,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **daqerr-watch-4380 이 10-17 23:08 경 끝남 -- 계속 볼지 결정** | 48 h 상한 스크립트라 run 4393 중에 종료. 새 48 h 감시를 걸지 사용자 결정 | §11.220 |
+| **daqerr-watch-4380 종료됨(10-17 23:08) -- 다시 걸지 결정** | 48 h 상한 스크립트라 종료. run 4394 도 감시 없이 돈다. 새 48 h 감시를 걸지 사용자 결정 | §11.220 |
 | **run 4390 을 시트에서 뺄지 결정 (onlbit 0 으로)** | ch18~29 HV 전부 켜진 잘못 받은 런인데 onlbit=1 이라 sheetlog 자동 등재 대상 | §11.220 |
 | **B2 (PMT 13 21 17 16 6 20, SADC ch24~29) HV · 케이블 · 적층 확인** | `_typeB_2` 로 6 채널 AND 를 걸면 0 사건 (run 4389), 분석으로 죽음/기하/배선을 못 가름. 확인 뒤 재시도 또는 `_typeB` 복귀. HV 조정 뒤 run 4390 으로 재시작됨(수집 중), rcterm.params = `_typeB_2` | §11.220 |
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
