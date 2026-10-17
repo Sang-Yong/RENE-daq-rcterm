@@ -159,7 +159,7 @@ echo "[4] --dry-run 은 fstab·mount·chown 을 안 건드린다"
 setup 2; cp $T/fstab $T/fstab.orig; runsut "${MPS[@]}" --dry-run
 chk "rc 0" '[ $RC = 0 ]'
 chk "fstab 그대로" 'cmp -s $T/fstab $T/fstab.orig && ! ls $T/fstab.bak-* >/dev/null 2>&1'
-chk "mount·chown·systemctl·code9 호출 없음" '! grep -qE "^(mount|chown|systemctl)" $F/calls && [ ! -e $F/code9.calls ]'
+chk "mount·chown·systemctl·code9 호출 없음" '! grep -v mount-and-backup- $F/calls | grep -qE "^(mount|chown|systemctl)" && [ ! -e $F/code9.calls ]'
 chk "RENE_data_backup 안 만듦" '[ ! -e $T/mp1/RENE_data_backup ]'
 chk "할 명령을 보인다" 'grep -q "(dry-run) \$ mount $T/mp1" <<<"$OUT"'
 chk "탐지는 실제로" 'grep -q "ZK206HAY" <<<"$OUT"'
@@ -180,7 +180,7 @@ done_
 
 echo "[7] 도는 세션이 있으면 FAIL"
 setup 2; : > $T/home/sykim/backup_log/.backup.lock; export FAKE_FUSER=1; runsut "${MPS[@]}" --no-start
-chk "잠금 보유자 FAIL" '[ $RC = 1 ] && grep -q "잠금을 쥐고" <<<"$OUT" && [ ! -s $F/calls ]'
+chk "잠금 보유자 FAIL" '[ $RC = 1 ] && grep -q "잠금을 쥐고" <<<"$OUT" && [ -z "$(grep -v mount-and-backup- $F/calls)" ]'
 unset FAKE_FUSER
 echo "21588 /bin/bash ./data_backup_simple_code9.sh --only raw" > $F/ps.txt
 runsut "${MPS[@]}" --no-start
@@ -193,7 +193,7 @@ done_
 echo "[10] root 가 아니면 안내"
 setup 2; export BACKUP_MOUNT_EUID=1001; runsut "${MPS[@]}"
 chk "rc 1 + sudo 안내" '[ $RC = 1 ] && grep -q "root 로 실행해야" <<<"$OUT" && grep -q "sudo bash" <<<"$OUT"'
-chk "아무것도 안 함" '[ ! -s $F/calls ]'
+chk "아무것도 안 함" '[ -z "$(grep -v mount-and-backup- $F/calls)" ]'
 done_
 
 echo "[11] 1 장 : RAW 만, PRD 건너뜀"
@@ -238,6 +238,51 @@ chk "inline 사슬 파일" 'ls $T/home/sykim/backup_log/chain-inline-*.sh >/dev/
 chk "inline 문법" 'bash -n $T/home/sykim/backup_log/chain-inline-*.sh'
 chk "RAW 세션 실행" 'grep -q -- "--disks $T/mp1 --only raw$" $F/code9.calls'
 chk "chain.log 시작 줄" 'grep -q "chain start (storage-backup-mount)" $T/home/sykim/backup_log/chain.log'
+done_
+
+echo "[18] 임시 파일을 못 만들면 fstab 은 바이트 그대로 (리뷰 1-1)"
+setup 2; cp -p $T/fstab $T/fstab.orig
+OUT=$(TMPDIR=/nonexistent-dir bash "$SUT" "${MPS[@]}" --no-start 2>&1); RC=$?
+chk "rc 1 + 손대지 않았다" '[ $RC = 1 ] && grep -q "임시 파일을 만들 수 없습니다" <<<"$OUT"'
+chk "fstab 바이트 동일" 'cmp -s $T/fstab $T/fstab.orig'
+chk "mount 안 함" '! grep -q "^mount " $F/calls'
+done_
+
+echo "[19] 정상 실행 뒤 '/' · '/data' 줄이 바이트 그대로 (리뷰 1-2)"
+setup 2; grep -v '^#' $T/fstab > $T/sys.lines
+runsut "${MPS[@]}" --no-start
+chk "rc 0" '[ $RC = 0 ]'
+chk "시스템 줄 보존" 'while IFS= read -r l; do grep -Fxq -- "$l" $T/fstab || exit 1; done < $T/sys.lines'
+chk "LABEL=data 탭 줄 그대로" 'grep -qP "^LABEL=data\t/data\text4\tdefaults\t0\t0$" $T/fstab'
+chk "스테이징 파일 안 남음" '! ls $T/fstab.new-* >/dev/null 2>&1'
+done_
+
+echo "[20] 같은 장치·마운트지점 줄이라도 nofail 이 없으면 바꾼다 (리뷰 2)"
+setup 1; printf '%s %s ext4 defaults 0 0\n' "$T/byid/ata-ST2000DM008-2FR102_ZK206HAY-part1" "$T/mp1" >> $T/fstab
+runsut "${MPS[@]}" --no-start
+chk "rc 0" '[ $RC = 0 ]'
+chk "옛 줄 주석" 'grep -q "^#(storage-backup-mount .*) $T/byid/ata-ST2000DM008-2FR102_ZK206HAY-part1 $T/mp1 ext4 defaults 0 0" $T/fstab'
+chk "살아 있는 mp1 줄은 nofail 하나" '[ "$(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | grep -c nofail)" = 1 ] && [ "$(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | wc -l)" = 1 ]'
+done_
+
+echo "[21] 지난 회차 하드가 우리 마운트지점에 붙은 채면 fstab 전에 멈춘다 (리뷰 3)"
+setup 2
+sed -i "s#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"\"#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"$T/mp2\"#" $F/parts
+echo "$T/mp2 $T/dev/sdb1" > $F/mounts
+cp -p $T/fstab $T/fstab.orig; cp $F/mounts $F/mounts.orig
+runsut "${MPS[@]}" --no-start
+chk "rc 1 + 지난 회차 안내" '[ $RC = 1 ] && grep -q "에 /dev/sdb ZK206HAY (지난 회차 하드?) 가 붙어 있는데" <<<"$OUT" && grep -q "umount $T/mp2" <<<"$OUT"'
+chk "fstab 바이트 동일" 'cmp -s $T/fstab $T/fstab.orig'
+chk "마운트 그대로 (두 번 붙이지 않음)" 'cmp -s $F/mounts $F/mounts.orig && ! grep -q "^mount " $F/calls'
+chk "[3/8] 에 안 감" '! grep -q "^\[3/8\]" <<<"$OUT"'
+chk "표에 지금 마운트 표시" 'grep -q "sdb .*ZK206HAY .*$T/mp2" <<<"$OUT"'
+runsut "${MPS[@]}" --no-start --raw Z4ZBZE0A --prd ZK206HAY
+chk "지금 마운트와 맞게 지정하면 된다" '[ $RC = 0 ] && grep -q "이미 $T/mp2 에 붙어 있고 배정과 같습니다" <<<"$OUT"'
+done_
+
+echo "[22] 로그 폴더가 없으면 만든다"
+setup 2; rm -rf $T/home/sykim/backup_log; runsut "${MPS[@]}" --dry-run
+chk "rc 0 + 로그 생김" '[ $RC = 0 ] && ls $T/home/sykim/backup_log/mount-and-backup-*.log >/dev/null'
 done_
 
 echo "[16] -h"

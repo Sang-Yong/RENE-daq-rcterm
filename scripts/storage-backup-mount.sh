@@ -66,8 +66,11 @@ else C_OK=""; C_NG=""; C_WR=""; C_HD=""; C_0=""; fi
 
 # 화면 + 로그 파일 (로그 디렉터리가 없으면 화면만)
 LOGFILE=""
-if mkdir -p "$LOGDIR" 2>/dev/null && touch "$LOGDIR/mount-and-backup-$TS.log" 2>/dev/null; then
+# 없으면 $BUSER 소유로 만든다 (root 소유로 생기면 code9 가 backup_log.txt 를 못 쓴다)
+[ -d "$LOGDIR" ] || install -d -o "$BUSER" -g "$BUSER" "$LOGDIR" 2>/dev/null || mkdir -p "$LOGDIR" 2>/dev/null
+if touch "$LOGDIR/mount-and-backup-$TS.log" 2>/dev/null; then
 	LOGFILE=$LOGDIR/mount-and-backup-$TS.log
+	chown "$BUSER:$BUSER" "$LOGFILE" 2>/dev/null
 	exec > >(tee -a "$LOGFILE") 2>&1
 fi
 
@@ -159,6 +162,7 @@ PARTS=$(lsblk -n -P -o NAME,TYPE,FSTYPE,MOUNTPOINT,PKNAME 2>/dev/null)
 
 # 후보 : TRAN=usb · TYPE=disk · 그 파티션이 우리 마운트지점 밖에 마운트돼 있지 않은 것
 CAND=()
+declare -A ATMP     # 이미 우리 마운트지점에 붙은 USB 하드 : 장치 -> 마운트지점
 while IFS= read -r line; do
 	[ -z "$line" ] && continue
 	[ "$(kv TRAN "$line")" = usb ] || continue
@@ -169,7 +173,7 @@ while IFS= read -r line; do
 		[ "$(kv PKNAME "$pl")" = "$nm" ] || continue
 		m=$(kv MOUNTPOINT "$pl")
 		[ -z "$m" ] && continue
-		[ "$m" = "$MP_RAW" ] || [ "$m" = "$MP_PRD" ] && continue
+		if [ "$m" = "$MP_RAW" ] || [ "$m" = "$MP_PRD" ]; then ATMP[$nm]=$m; continue; fi
 		busy=$m
 	done <<<"$PARTS"
 	if [ -n "$busy" ]; then echo "    ($nm 는 $busy 에 마운트된 시스템/다른 디스크라 뺍니다)"; continue; fi
@@ -180,7 +184,7 @@ done <<<"$DISKS"
 
 declare -A SER MOD LINK DEV FST SIZ
 echo
-printf '  %-6s %-6s %-20s %-10s %-6s %s\n' "장치" "크기" "모델" "시리얼" "fs" "by-id"
+printf '  %-6s %-6s %-20s %-10s %-6s %-14s %s\n' "장치" "크기" "모델" "시리얼" "fs" "지금 마운트" "by-id"
 for nm in "${CAND[@]}"; do
 	props=$(udevadm info --query=property --name="/dev/$nm" 2>/dev/null)
 	s=$(sed -n 's/^ID_SERIAL_SHORT=//p' <<<"$props" | head -1)
@@ -202,7 +206,7 @@ for nm in "${CAND[@]}"; do
 	done <<<"$PARTS"
 	sz=$(kv SIZE "$(grep "NAME=\"$nm\"" <<<"$DISKS")")
 	SER[$nm]=$s; MOD[$nm]=$md; LINK[$nm]=$lk; DEV[$nm]=$dv; FST[$nm]=$fs; SIZ[$nm]=$sz
-	printf '  %-6s %-6s %-20s %-10s %-6s %s\n' "$nm" "$sz" "${md:-?}" "$s" "${fs:-없음}" "$lk"
+	printf '  %-6s %-6s %-20s %-10s %-6s %-14s %s\n' "$nm" "$sz" "${md:-?}" "$s" "${fs:-없음}" "${ATMP[$nm]:--}" "$lk"
 done
 echo
 
@@ -229,6 +233,20 @@ elif [ -z "$WANT_RAW" ]; then
 	RAWD=${rest[0]}
 fi
 
+# 이미 우리 마운트지점에 붙은 하드가 있으면 배정과 맞아야 한다 (지난 회차 하드가 붙은 채일 수 있다)
+for n in "${!ATMP[@]}"; do
+	m=${ATMP[$n]}; want=""
+	[ "$n" = "$RAWD" ] && want=$MP_RAW
+	[ -n "$PRDD" ] && [ "$n" = "$PRDD" ] && want=$MP_PRD
+	if [ "$want" != "$m" ]; then
+		fail "$m 에 /dev/$n ${SER[$n]} (지난 회차 하드?) 가 붙어 있는데, 배정은 ${want:-'(쓰지 않음)'} 입니다" \
+			"fstab·마운트는 아직 손대지 않았습니다." \
+			"그 하드를 뺄 것이면 : umount $m  (뽑을 때는 umount 부터)" \
+			"그대로 쓸 것이면  : --raw <시리얼> --prd <시리얼> 로 지금 마운트와 맞게 지정"
+	fi
+	echo "  (/dev/$n ${SER[$n]} 는 이미 $m 에 붙어 있고 배정과 같습니다)"
+done
+
 for n in $RAWD $PRDD; do
 	[ "${FST[$n]}" = ext4 ] || fail "/dev/$n (${SER[$n]}) 의 첫 파티션이 ext4 가 아닙니다 (fs=${FST[$n]:-없음})" \
 		"포맷은 하지 않습니다. 포맷할지(자료가 지워진다)는 사람이 정합니다 :" \
@@ -250,39 +268,74 @@ PAIRS=("$MP_RAW:$RAWD")
 step 3 "/etc/fstab 에 by-id 줄 넣기 (백업 · 옛 줄 주석 · 이미 있으면 그대로)"
 # =====================================================================
 OPTS="defaults,nofail,x-systemd.device-timeout=10"
+TAG="#(storage-backup-mount $STAMP) "
 [ -f "$FSTAB" ] || fail "$FSTAB 가 없습니다"
-NEW=$(mktemp); cp -p "$FSTAB" "$NEW"
+[ -s "$FSTAB" ] || fail "$FSTAB 가 비어 있습니다 — 손대지 않습니다"
+NEW=$(mktemp 2>/dev/null) && [ -n "$NEW" ] || fail "임시 파일을 만들 수 없습니다 (TMPDIR=${TMPDIR:-/tmp} 가 찼거나 없음)" "$FSTAB 는 손대지 않았습니다."
+TMPW=$(mktemp 2>/dev/null) && [ -n "$TMPW" ] || { rm -f "$NEW"; fail "임시 파일을 만들 수 없습니다 (TMPDIR=${TMPDIR:-/tmp})" "$FSTAB 는 손대지 않았습니다."; }
+trap 'rm -f "$NEW" "$TMPW"' EXIT
+cat "$FSTAB" > "$NEW" || fail "임시 파일에 쓸 수 없습니다" "$FSTAB 는 손대지 않았습니다."
+ADDED=0
 for pr in "${PAIRS[@]}"; do
-	mp=${pr%%:*}; n=${pr#*:}; lk=${LINK[$n]}
-	tmp=$(mktemp)
-	# 같은 마운트지점 · 같은 장치의 다른 줄은 주석으로. 같은 줄(장치+마운트지점)이 있으면 둔다
-	awk -v mp="$mp" -v lk="$lk" -v tag="#(storage-backup-mount $STAMP) " '
+	mp=${pr%%:*}; n=${pr#*:}; lk=${LINK[$n]}; dv=${DEV[$n]}
+	# 같은 장치(by-id 또는 /dev/sdX1)·같은 마운트지점의 다른 줄은 주석으로.
+	# 우리 형식(장치+마운트지점+ext4+nofail)의 줄이 이미 있으면 그 하나만 둔다
+	awk -v mp="$mp" -v lk="$lk" -v dv="$dv" -v tag="$TAG" '
 		BEGIN { have = 0 }
 		/^[[:space:]]*#/ || NF < 2 { print; next }
-		$1 == lk && $2 == mp && have == 0 { have = 1; print; next }
-		$2 == mp || $1 == lk { print tag $0; next }
+		$1 == lk && $2 == mp && $3 == "ext4" && $4 ~ /(^|,)nofail(,|$)/ && have == 0 { have = 1; print; next }
+		$2 == mp || $1 == lk || $1 == dv { print tag $0; next }
 		{ print }
-		END { if (have == 0) exit 3 }' "$NEW" > "$tmp"
+		END { if (have == 0) exit 3 }' "$NEW" > "$TMPW"
 	rc=$?
-	if [ $rc = 3 ]; then printf '%s  %s  ext4  %s  0 2\n' "$lk" "$mp" "$OPTS" >> "$tmp"; fi
-	cat "$tmp" > "$NEW"; rm -f "$tmp"
+	case $rc in
+		0) ;;
+		3) printf '%s  %s  ext4  %s  0 2\n' "$lk" "$mp" "$OPTS" >> "$TMPW" || fail "임시 파일 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
+		   ADDED=$((ADDED+1)) ;;
+		*) fail "fstab 처리(awk) 가 실패했습니다 (rc=$rc)" "$FSTAB 는 손대지 않았습니다." ;;
+	esac
+	cat "$TMPW" > "$NEW" || fail "임시 파일 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
 done
+
+# 쓰기 전 검증 : 비지 않음 · 줄 수 = 원본 + 추가 · 원본의 주석 아닌 줄이 전부 그대로이거나 태그 주석으로 남음
+verify_new() {
+	[ -s "$NEW" ] || { echo "새 내용이 비어 있다"; return 1; }
+	local no nn line
+	no=$(awk 'END{print NR}' "$FSTAB"); nn=$(awk 'END{print NR}' "$NEW")
+	[ "$nn" = $((no + ADDED)) ] || { echo "줄 수가 맞지 않다 (원본 $no + 추가 $ADDED != $nn)"; return 1; }
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in ''|'#'*|[[:space:]]*'#'*) continue ;; esac
+		[ -z "${line//[[:space:]]/}" ] && continue
+		grep -Fxq -- "$line" "$NEW" || grep -Fxq -- "$TAG$line" "$NEW" || { echo "원본 줄이 사라졌다 : $line"; return 1; }
+	done < "$FSTAB"
+	return 0
+}
+
 if cmp -s "$FSTAB" "$NEW"; then
-	echo "  (바꿀 것 없음 : 두 줄이 이미 있습니다)"
-	rm -f "$NEW"
+	echo "  (바꿀 것 없음 : 줄이 이미 있습니다)"
 else
 	echo "  \$ diff -u $FSTAB (새 내용)"
 	diff -u "$FSTAB" "$NEW" | sed 's/^/    /'
-	act cp -p "$FSTAB" "$FSTAB.bak-$TS" || fail "fstab 백업 실패"
+	why=$(verify_new) || fail "새 fstab 검증 실패 : $why" "$FSTAB 는 손대지 않았습니다."
+	echo "    (검증 : 원본 줄 보존 · 줄 수 원본+$ADDED)"
+	act cp -p "$FSTAB" "$FSTAB.bak-$TS" || fail "fstab 백업 실패" "$FSTAB 는 손대지 않았습니다."
 	if [ "$DRYRUN" = 1 ]; then
-		echo "  (dry-run) \$ (위 diff 대로 $FSTAB 를 고친다)"
+		echo "  (dry-run) \$ (위 내용을 $FSTAB.new-$TS 에 쓰고 mv -f $FSTAB.new-$TS $FSTAB)"
 	else
-		echo "  \$ (위 diff 대로 $FSTAB 를 고친다)"
-		cat "$NEW" > "$FSTAB" || fail "$FSTAB 쓰기 실패"
+		STAGE=$FSTAB.new-$TS
+		echo "  \$ (위 내용을 $STAGE 에 쓰고 mv -f $STAGE $FSTAB)"
+		if ! { cp -p "$FSTAB" "$STAGE" && cat "$NEW" > "$STAGE" && sync && cmp -s "$NEW" "$STAGE"; }; then
+			rm -f "$STAGE"; fail "$STAGE 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
+		fi
+		mv -f "$STAGE" "$FSTAB" || { rm -f "$STAGE"; fail "mv 실패" "$FSTAB 는 그대로입니다 (백업 $FSTAB.bak-$TS)."; }
+		if ! cmp -s "$NEW" "$FSTAB"; then
+			cp -p "$FSTAB.bak-$TS" "$FSTAB"
+			fail "쓴 뒤 대조가 어긋나 백업으로 되돌렸습니다" "cmp $FSTAB $FSTAB.bak-$TS"
+		fi
 	fi
-	rm -f "$NEW"
 	act systemctl daemon-reload || fail "systemctl daemon-reload 실패"
 fi
+rm -f "$NEW" "$TMPW"; trap - EXIT
 ok "fstab"
 
 # =====================================================================
