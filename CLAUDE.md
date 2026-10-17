@@ -728,6 +728,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   **알림이 안 오는데 이상하다 싶으면 cron 이 사는지부터 볼 것** (`crontab -l`).
 - **★ 계수율이 떨어지면 보드보다 HV 를 먼저 의심할 것.** 2026-09-01 에 0 Hz 의
   원인이 PMT HV 였는데 보드 진단에 30분을 헛되이 썼다 (§11.131).
+- **★ 저장소 링크가 IPv4 로만 죽고 IPv6 는 살아 있으면 서버에서 10.0.0.10 을 다른 인터페이스에도 할당한 중복을 먼저 의심할 것** (2026-10-17 사용자 지침). 이쪽 카운터는 ARP·ICMP 수신 0, 서버는 "ping 이 간다" 고 한다 (§11.220 · §11.133).
 - **/scratch 서버가 IPv4 로 안 잡혀도 IPv6 링크로컬로 NFS 가 열려 있으면 임시 마운트할 수 있다** (`ping -6 ff02::1%enp3s0f1` → `nmap -6` → `[fe80::…%enp3s0f1]:/data`). 정석 복구는 서버의 IPv4 복구 뒤 fstab 마운트 (§11.220).
 - **★ `df` 가 멀쩡해 보여도 마운트가 유령일 수 있다** (§11.124). USB 디스크가
   떨어졌다 다른 이름으로 붙으면 `findmnt` 는 옛 장치를 가리키고 `df` 는 캐시된
@@ -1078,6 +1079,27 @@ DB 4390 : 16:16:39 ~ 16:47:43, onlbit 1, nfadc 75,120 / 1,863.89 s = 40.3 Hz, ns
 - 감시 : `veto-check-4393.sh`(pid 1456665, 4391 과 비교; PRD 는 postrun 이 따라온 뒤) · `daqerr-watch-4380.sh` 가 4393 을 따라가나 48 h 상한이라 10-17 23:08 경 스스로 끝난다(추정) -- 이후 새 감시 여부는 결정 필요. threshold-changes.log 12:27 행.
 - 시트 : 13 런(4379~4392, 4389 제외) 등재 완료 (위 12:2x 단락).
 - 오늘 런 : ... 4392 B1 20:16~10-17 12:18 (40.9 Hz) · 4393 B2 12:23~ (40.2 Hz).
+
+**이어서 (10-17 22:1x~22:50) — 10.0.0.10 원인 = 서버 IP 중복 할당, 정식 마운트 복귀.**
+- 22:14 사용자 "서버 10.0.0.10 에서 ping 을 계속 보내는데 왜 여기선 안 가나, 네트워크 카드 이상 없나". 10 초 창 실측(이 PC) :
+
+| 항목 | 실측 |
+|---|---|
+| IcmpInEchos 변화 | 0 (어느 인터페이스로도 안 들어옴) |
+| enp3s0f1 rx 프레임 | 0 |
+| port.rx_broadcast 누적 | 8 그대로 (서버의 ARP 요청 없음) |
+| 우리 tx_broadcast | 991 → 997 (송신 정상) |
+| arping 3 회 | 응답 0 |
+| 링크 | 10 Gb Full, 오류 0 |
+| IPv6 피어 44:49:88:0d:5c:25 | 응답, NFS 흐름 |
+
+  결론 보고 : "10.0.0.10 이 이 케이블 반대편 포트에 없다" → 서버 `ip -br link/addr` · `ip route get 10.0.0.11` 요청.
+- 22:3x 사용자 확인 : **서버에서 10.0.0.10 을 다른 네트워크(다른 인터페이스)에도 할당해 충돌**하고 있었다. 사용자 지침(영구) : 같은 질문이 또 나오면 서버에 동일 IP 를 할당한 실수가 있는지 확인하라고 조언할 것 (메모리 `storage-link-duplicate-ip.md`). ★ 저장소 링크가 IPv4 로만 죽고 IPv6 는 살아 있으면 서버의 같은 IP 중복 할당부터 확인.
+- 22:40 10.0.0.10 ping 0.33 ms 복귀, ARP 44:49:88:0d:5c:25, showmount `/data *`.
+- 정식 마운트 교체 : 22:41 postrun(pid 2386789)·dataflow(pid 140204)를 셸 PID TERM 으로 세움(dataflow 는 `sleep 600` 자식 때문에 trap 이 안 돌아 그 sleep 만 TERM → 즉시 종료), `fuser -vm /scratch` 비어 있음 확인 → 사용자(root)가 `umount /scratch` → fstab 줄을 `defaults,nofail,x-systemd.mount-timeout=30` 으로 → `mount /scratch` (10.0.0.10:/data, nfs4.2, 140T/51T 사용).
+  22:48 postrun(pid 3095497)·22:49 dataflow(pid 3100104)를 tmux 1.3/1.5 에 평소 명령으로 재기동, 4393 서브런 즉시 따라붙음(FADC 626/PRD 623), chainwatch 셋 다 살아 있음. 수집 run 4393 은 무영향.
+- tmux : 어제 nmtui 종료로 사라졌던 "work space" pane 을 13:5x 에 다시 만들어(`split-window -v -b -p 70`, `daq-layout.sh` 정규화) 원래 5 pane 배치(1.4 work space, 1.5 dataflow) 복구.
+- 메일 : 보내지 않음 (복구 완료, chainwatch 자동 메일로 충분).
 
 #### 11.219 ★★ 07:17 예약 전환 실패(cron 에 ROOT 환경 없음) · run 4387 `_mid3_pidfix` 2 h 런 · 시트 Description 에 THR 세부 기록 (10-16 07:17 ~ 10:xx)
 
@@ -4193,6 +4215,7 @@ rx_unicast 가 갑자기 +23             -> 그 순간 상대가 올라왔다
 
 `ping` 만 보면 셋이 전부 "안 된다" 로 같아 보인다. **`ethtool -S` 의 종류별 카운터가
 '상대가 죽었나 / 주소가 없나 / 방화벽인가' 를 갈라 준다.**
+(2026-10-17: 같은 증상의 원인이 서버 IP 중복 할당이었다 → §11.220)
 
 **★ 그리고 내 기록 스크립트에 버그가 있어 한 번 잘못 보고했다.** `PU=0` 으로 초기화한
 뒤 `[ "$PU" = 0 ] && PU=$U` 로 첫 표본을 잡게 했는데, `rx_unicast` 가 계속 0 이라
@@ -4511,7 +4534,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3  (★ 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 IPv6 링크로컬 임시 마운트 중, 4380~4391 전부 PRD 완결, §11.220)
+후처리     postrun --follow --jobs 3 --lag 3  (★ 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 10-17 22:4x 부터 정식 마운트(10.0.0.10, nofail), postrun 22:48 재기동, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
@@ -4674,7 +4697,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | **HV 망 프로파일 복구 (root)** | GECO 접속 불가 해소: `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` 뒤 재발 방지 `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`. 실행 여부 미확인 | §11.220 |
 | ✅(실패로 종료) 07:17 ch8 THR 80 전환 예약 | cron 에 ROOT 환경이 없어 실패, 사용자 pidfix 지시로 대체. run 4387 은 11:04 뒤 대기 상태 — 재기동은 tmux daq:1.2 평소 명령 (★ rcterm.params 가 `_mid3_pidfix` 임에 주의) | §11.219 |
 | **13:50 자동 복귀 확인** | `restore-realert-20261016.sh` 가 chain_realert_min 720 → 60 으로 되돌리고 crontab 줄을 지운다. `/Data_ssd/LOG/restore-realert-20261016.log` 와 `crontab -l` 로 확인 | §11.218 |
-| **/scratch: IPv6 임시 마운트 중 — 서버 콘솔에서 ens6f1 IPv4(10.0.0.10) 복구 뒤 정식 마운트로 교체, fstab 에 nofail** | 서버 `ip -br addr` · `ip route get 10.0.0.11` 출력 필요 (10.0.0.10 이 ens6f1 에 없는 것으로 추정, 이쪽 arpwatch 에 서버 ARP 0). 지금 마운트는 fe80 링크로컬(서버 재부팅 시 바뀔 수 있음). postrun 은 10-16 17:07 재기동됨 | §11.220 |
+| ✅ /scratch 정식 마운트 (10-17 22:4x) | 원인은 서버의 10.0.0.10 IP 중복 할당. 10.0.0.10 복귀, fstab `nofail,x-systemd.mount-timeout=30` 반영, postrun·dataflow 재기동 | §11.220 |
 | ✅ GoodRuns 시트 Y2026B 행 부족 | 코드로 해결(18d9529, 그리드 자동 확장) · 10-17 12:24 13 런 등재 | §11.220 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
@@ -4689,7 +4712,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | 시트의 `Storage Location` | 내가 알 수 없는 값이다 (`Disk Label` 은 이제 도구가 채운다) | — |
 | `/backup_hdd*` fstab 에 UUID 로 | 지금은 손으로 마운트 | §11.124 |
 | NM 프로파일 주소를 `.71` 로 | 재부팅하면 공인망이 끊긴다 | §11.132 |
-| fstab 에 `nofail` 복원 | 저장소가 늦게 뜨면 부팅이 멎는다 | §11.133 |
+| ✅ fstab 에 `nofail` 복원 (10-17 22:4x) | 저장소가 늦게 뜨면 부팅이 멎는다 -- 적용됨 | §11.133 · §11.220 |
 
 **★ 이어받을 때 밟기 쉬운 것**
 
