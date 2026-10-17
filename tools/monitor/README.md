@@ -665,6 +665,11 @@ PSD 컷      daily_psd_nsig > 0 이면 prompt 의 p_psd > nsig 인 쌍을 버린
 라이브타임  4d 는 DST 의 벽시계 합에 exp(−R_μ·veto_us) 를 곱한다 (after-muon 데드타임. 패널 AND 864 Hz → −12 %)
 ```
 
+**x 축 시작 (2026-10-18)** — `config/monitorcuts.params` 의 `trend_xmin_date`(01~31·59) · `daily_xmin_date`(32~36·62/63, 없으면 trend 값)
+를 `tools/monitor/trend-xmin.sh` 가 읽어 `RENE_TREND_XMIN` / `RENE_DAILY_XMIN` 으로 넘기고, `DrawTrendPage` 가 그 날짜(KST 자정) 앞의 점을
+그리지 않고 축을 거기서 시작한다. 키가 없으면 자동 범위(산출 불변). 잘라 낸 뒤 inset·범례 구석에 점이 있으면 위 여백을 늘려(자료 최댓값이
+축 높이의 52 %) 위 구석을 비운다 — 이 보정도 키가 있을 때만. 시험 `tests/monitor-trend-xmin.test.sh`.
+
 **2026-09-14 부터의 그림 규칙 (사용자 지시)** — `tools/monitor/ReneTrendPlot.h` 한 곳에서 그린다. ① n-Gd 와 n-H 는 같은 캔버스에 두지 않는다.
 ② 축은 언제나 선형. 값이 열 배 넘게 벌어지는 쪽에는 같은 그림 안에 **로그축 inset** 을 넣는다 — 점·범례가 없는 구석을 골라서(네 구석의 점 수를 세어 가장 빈 곳).
 ③ 범례는 불투명 흰 바탕, 그 다음 빈 구석. ④ 파일 이름은 `NN_<묶음>_<양>[_<채널>].png` 로 웹에 번호순으로 올린다.

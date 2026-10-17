@@ -19,4 +19,6 @@ esac
 command -v root >/dev/null 2>&1 || . /usr/local/bin/thisroot.sh 2>/dev/null
 command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; }
 [ -w "$OUT" ] || { echo "출력 디렉터리에 쓸 수 없다 : $OUT"; exit 1; }
+. "$DIR/trend-xmin.sh"; rene_trend_xmin_export "$(cd "$DIR/../.." && pwd)"
+[ -n "${RENE_TREND_XMIN:-}" ] && echo "x 축 : $RENE_TREND_XMIN 부터 (trend_xmin_date)"
 root -l -b -q "$DIR/BuildBgTrend.C+(\"$OUT/\")"

@@ -26,6 +26,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -44,8 +46,28 @@ struct TrendPageOpt {
    std::vector<TrendMarker> markers;   // 세로 점선 + 라벨 (2026-09-15 : 문턱 변경 런)
    bool legend     = true;    // 계열이 둘 이상이면 범례
    const char *timeFmt = "%y/%m/%d";
+   //  x 축 시작 [epoch] (2026-10-18, 사용자 지시 "날짜가 8월 15일부터 시작되게").
+   //    -2 = 환경변수 RENE_TREND_XMIN 을 따른다 (기본) · -1 = 끔 (자동 범위) · 그 밖 = 이 epoch 부터.
+   //  자료는 버리지 않는다 — 표·누적값은 그대로이고, 축 범위 밖의 점만 그리지 않는다. 축 끝(xmax)은 자동 그대로.
+   double xmin = -2;
    int  width = 1400, height = 700;
 };
+
+//  "YYYY-MM-DD" 또는 "YYYY-MM-DD HH:MM" -> 지역 시각(사이트 = KST) 의 epoch. 비었거나 못 읽으면 -1.
+//  지역 시각으로 읽는 이유 : 날짜별 단계(BuildDaily)의 '하루' 가 지역 자정 기준이고, 운영자가 말하는 날짜도 KST 다.
+static double ReneParseXminDate(const char *v) {
+   if (!v || !*v) return -1;
+   struct tm t = {}; int Y = 0, M = 0, D = 0, h = 0, m = 0;
+   int n = sscanf(v, "%d-%d-%d %d:%d", &Y, &M, &D, &h, &m);
+   if (n < 3 || Y < 1970 || M < 1 || M > 12 || D < 1 || D > 31) return -1;
+   t.tm_year = Y - 1900; t.tm_mon = M - 1; t.tm_mday = D; t.tm_hour = (n >= 4 ? h : 0); t.tm_min = (n >= 5 ? m : 0); t.tm_isdst = -1;
+   return (double)mktime(&t);
+}
+//  opt.xmin 을 실제 값으로 : -2 면 RENE_TREND_XMIN (trend_xmin_date 를 래퍼가 넘긴다), 없으면 -1
+static double ReneResolveXmin(double optXmin) {
+   if (optXmin != -2) return optXmin;
+   return ReneParseXminDate(std::getenv("RENE_TREND_XMIN"));
+}
 
 //  네 구석의 '비어 있는 정도'. 점이 적게 든 구석부터 돌려준다 (0 좌하 1 우하 2 좌상 3 우상).
 //  선형축 범위 : 값이 전부 0 이상이면 0 부터, 위로 15 % 여유 (DrawTrendPage 가 같은 규칙으로 축을 잡는다)
@@ -58,12 +80,15 @@ static void ReneLinearRange(const std::vector<TrendSeries> &ss, double &ylo, dou
    if (ylo >= 0 && yhi > 0) { ylo = 0; yhi *= 1.15; }
 }
 
-static std::vector<int> ReneEmptyCorners(const std::vector<TrendSeries> &ss, bool logy = false) {
+static std::vector<int> ReneEmptyCorners(const std::vector<TrendSeries> &ss, bool logy = false, double xAxisLo = -1,
+                                         double yHiAxis = -1, int *cntOut = nullptr, double yLoAxis = 0, bool yFix = false) {
    double xlo = 1e300, xhi = -1e300, ylo = 1e300, yhi = -1e300;
    for (const auto &s : ss) for (size_t i = 0; i < s.x.size(); ++i) {
       xlo = std::min(xlo, s.x[i]); xhi = std::max(xhi, s.x[i]);
    }
+   if (xAxisLo > 0) xlo = xAxisLo;       // 축 시작을 정했으면 그 값이 그려질 왼쪽 끝이다
    ReneLinearRange(ss, ylo, yhi);        // ★ 자료 범위가 아니라 그려질 축 범위로 잰다 (효율 그림에서 범례가 선 위에 앉았다)
+   if (yFix) { ylo = yLoAxis; yhi = yHiAxis; }   // 축 범위를 따로 정했으면 그것으로
    int cnt[4] = {0, 0, 0, 0};
    double dx = xhi - xlo, dy = yhi - ylo;
    if (dx <= 0) dx = 1; if (dy <= 0) dy = 1;
@@ -78,6 +103,7 @@ static std::vector<int> ReneEmptyCorners(const std::vector<TrendSeries> &ss, boo
    }
    std::vector<int> order = {3, 2, 1, 0};        // 비면 우상 · 좌상 · 우하 · 좌하 순으로 선호
    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return cnt[a] < cnt[b]; });
+   if (cntOut) for (int i = 0; i < 4; ++i) cntOut[i] = cnt[i];
    return order;
 }
 
@@ -168,14 +194,46 @@ static void ReneDrawMarkers(TMultiGraph *mg, const std::vector<TrendMarker> &mk)
 //  fileName 은 확장자 없는 이름 (예 "01_rate_candidates_nGd").
 static bool DrawTrendPage(const TString &pdf, const TString &pngDir, const char *fileName,
                           const char *title, const char *ytitle,
-                          std::vector<TrendSeries> &ss, const char *pdfMode,
+                          std::vector<TrendSeries> &ssIn, const char *pdfMode,
                           const TrendPageOpt &opt = TrendPageOpt()) {
+   //  x 축 시작이 정해졌으면 그 앞의 점은 그리지 않는다 (축 범위·y 범위·inset 판단·구석 계산이 전부 그려질 점으로 잰다).
+   //  정해지지 않았으면 ssIn 을 그대로 쓴다 — 산출이 예전과 바이트 단위로 같다.
+   const double xmin = ReneResolveXmin(opt.xmin);
+   std::vector<TrendSeries> ssCut;
+   if (xmin > 0) {
+      for (const auto &s0 : ssIn) {
+         TrendSeries s = s0; s.x.clear(); s.y.clear(); s.ey.clear();
+         for (size_t i = 0; i < s0.x.size(); ++i) if (s0.x[i] >= xmin)
+            s.add(s0.x[i], s0.y[i], s0.ey.empty() ? 0 : s0.ey[i]);
+         if (s0.ey.empty()) s.ey.clear();
+         ssCut.push_back(s);
+      }
+   }
+   std::vector<TrendSeries> &ss = (xmin > 0) ? ssCut : ssIn;
    TCanvas *c = new TCanvas(Form("c_%s", fileName), title, opt.width, opt.height);
    c->SetLeftMargin(0.11); c->SetBottomMargin(0.15); c->SetRightMargin(0.04);
    c->SetGridx(); c->SetGridy();
 
-   std::vector<int> corners = ReneEmptyCorners(ss, false);
+   int cnt[4] = {0, 0, 0, 0};
+   std::vector<int> corners = ReneEmptyCorners(ss, false, xmin, -1, cnt);
    bool wantInset = opt.logInset && ReneNeedsLog(ss);
+   //  축 시작을 정한 경우만 (2026-10-18) : 잘라 낸 뒤에는 점이 그림 가운데 띠를 채워 빈 구석이 없을 수 있다
+   //  (실측 01_rate_candidates_nGd : inset 이 점 위에 앉았다). 그러면 위 여백을 늘려 위쪽 두 구석을 비운다 —
+   //  자료 최댓값이 축 높이의 52 % 에 오게. 축 시작을 안 정하면 이 블록은 돌지 않는다 (산출 불변).
+   bool yFix = false; double yLoFix = 0, yHiFix = 0;
+   {
+      bool needLeg = opt.legend && ss.size() > 1;
+      int nBox = (wantInset ? 1 : 0) + (needLeg ? 1 : 0);
+      bool crowded = (nBox >= 1 && cnt[corners[0]] > 0) || (nBox >= 2 && cnt[corners[1]] > 0);
+      double ylo0, yhi0; ReneLinearRange(ss, ylo0, yhi0);
+      if (xmin > 0 && crowded && yhi0 > ylo0) {
+         double ymaxData = (ylo0 == 0) ? yhi0 / 1.15 : yhi0;     // ReneLinearRange 가 붙인 15 % 를 걷어 낸 자료 최댓값(오차 포함)
+         yLoFix = (ylo0 == 0) ? 0 : ylo0 - 0.05 * (yhi0 - ylo0);
+         yHiFix = yLoFix + (ymaxData - yLoFix) / 0.52;
+         yFix = true;
+         corners = ReneEmptyCorners(ss, false, xmin, yHiFix, cnt, yLoFix, true);
+      }
+   }
    //  inset 이 있으면 가장 빈 구석, 범례는 그 다음 구석
    double ix1, iy1, ix2, iy2, lx1, ly1, lx2, ly2;
    ReneCornerBox(corners[0], 0.36, 0.40, ix1, iy1, ix2, iy2);
@@ -192,10 +250,12 @@ static bool DrawTrendPage(const TString &pdf, const TString &pngDir, const char 
    mg->SetTitle(Form("%s;DAQ start [YY/MM/DD];%s", title, ytitle));
    mg->Draw("A");
    ReneStyleAxes(mg, opt.timeFmt, 0.045, 0.038);
+   if (xmin > 0) { double xhiAuto = mg->GetXaxis()->GetXmax(); if (xhiAuto > xmin) mg->GetXaxis()->SetLimits(xmin, xhiAuto); gPad->Modified(); }
    //  선형축 : 0 을 포함하도록 아래를 내린다 (음수 값이 없을 때)
    {
       double ylo, yhi; ReneLinearRange(ss, ylo, yhi);
-      if (ylo == 0 && yhi > 0) { mg->SetMinimum(0); mg->SetMaximum(yhi); }
+      if (yFix) { mg->SetMinimum(yLoFix); mg->SetMaximum(yHiFix); }
+      else if (ylo == 0 && yhi > 0) { mg->SetMinimum(0); mg->SetMaximum(yhi); }
    }
    if (opt.legend && ss.size() > 1) leg->Draw();
    ReneDrawMarkers(mg, opt.markers);
@@ -213,6 +273,7 @@ static bool DrawTrendPage(const TString &pdf, const TString &pngDir, const char 
       ReneStyleAxes(mg2, opt.timeFmt, 0.07, 0.06);
       mg2->GetXaxis()->SetTitle(""); mg2->GetXaxis()->SetNdivisions(404);
       mg2->GetYaxis()->SetTitleOffset(1.0); mg2->GetYaxis()->SetNdivisions(505);
+      if (xmin > 0) { double xhiAuto = mg2->GetXaxis()->GetXmax(); if (xhiAuto > xmin) mg2->GetXaxis()->SetLimits(xmin, xhiAuto); gPad->Modified(); }
       c->cd();
    }
    if (pdf.Length()) c->Print(pdf + pdfMode);

@@ -58,6 +58,7 @@ scan_run() {         # $1=run  -> thr_history 에 줄을 덧붙인다
    nice -n 15 root -l -b -q "$REPO/tools/psd/VetoHistoryScan.C+($r, \"$SUBS\", \"$H\")" >/dev/null 2>&1
 }
 plot() {
+   . "$DIR/trend-xmin.sh"; rene_trend_xmin_export "$REPO"
    if [ -n "${VETO_PLOT_CMD:-}" ]; then "$VETO_PLOT_CMD" "$V" "$OUT/"; return $?; fi
    have_root || { echo "[WARN] ROOT 가 없어 그림을 못 그린다"; return 0; }
    nice -n 15 root -l -b -q "$REPO/tools/psd/VetoHistoryPlot.C+(\"$V\", \"$OUT/\")" 2>&1 | grep SAVED

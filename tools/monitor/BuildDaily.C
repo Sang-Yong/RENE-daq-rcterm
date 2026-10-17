@@ -512,11 +512,14 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
    //  ---- 날짜 추이 그림 (32~36) ----
    {
       TString nopdf = "";
-      TrendPageOpt o; o.logInset = true;
+      //  x 축 시작 (daily_xmin_date, 없으면 trend_xmin_date — daily.sh 가 RENE_DAILY_XMIN 으로 넘긴다). 없으면 -1 = 자동 범위.
+      //  자료·표·스펙트럼은 그대로이고 날짜 추이 그림의 축만 바뀐다 (2026-10-18)
+      const double dXmin = ReneParseXminDate(std::getenv("RENE_DAILY_XMIN"));
+      TrendPageOpt o; o.logInset = true; o.xmin = dXmin;
       {  // 32 라이브타임 (두 채널이 같다)
          TrendSeries s; s.label = "live time"; s.color = kBlack; s.marker = 20;
          for (auto &kv : acc[0]) if (kv.second.live > 0) s.add(kv.second.dayStart + 43200, kv.second.live / 3600.0, 0);
-         std::vector<TrendSeries> v{s}; TrendPageOpt o2; o2.logInset = false;
+         std::vector<TrendSeries> v{s}; TrendPageOpt o2; o2.logInset = false; o2.xmin = dXmin;
          DrawTrendPage(nopdf, out, "32_daily_livetime", "Live time per calendar day", "live time [h]", v, "", o2);
       }
       for (int k = 0; k < 2; ++k) {  // 33·34 후보 수/일, 35·36 rate
@@ -537,7 +540,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          //  62·63 원자로 참조 신호창 [win_lo, win_hi) 의 후보 rate (배경 전부 뺀 뒤). 기대는 이 거리에서 ≲ 1 /day × 창 효율
          TrendSeries sw; sw.label = Form("%s, prompt %.1f-%.1f MeV, all bg subtracted", chanName[k], winL[k], winH[k]); sw.color = sr.color; sw.marker = sr.marker;
          for (auto &kv : acc[k]) { const DayAcc &a = kv.second; if (a.live <= 0) continue; double day = a.live / 86400.0; sw.add(a.dayStart + 43200, a.candW / day, a.errW / day); }
-         std::vector<TrendSeries> vw{sw}; TrendPageOpt ow; ow.logInset = false;
+         std::vector<TrendSeries> vw{sw}; TrendPageOpt ow; ow.logInset = false; ow.xmin = dXmin;
          DrawTrendPage(nopdf, out, Form("%02d_daily_rate_window_%s", 62 + k, fileTag[k]),
                        Form("Candidate rate per day in the reactor-referenced prompt window %.1f-%.1f MeV, %s (acc., fast-n, Li/He subtracted)", winL[k], winH[k], chanName[k]), "Rate [/day]", vw, "", ow);
       }

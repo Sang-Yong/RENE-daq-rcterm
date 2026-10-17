@@ -64,5 +64,7 @@ command -v root >/dev/null 2>&1 || { echo "ROOT 를 찾을 수 없다"; exit 1; 
 
 echo "출력  : $OUT/rate_trend.{pdf,tsv} + 01..17_*.png (채널별 쪽)"
 echo "eps_E : $EPSE  (1.0 이면 에너지창 효율은 보정에서 빠진 것이다)"
+. "$DIR/trend-xmin.sh"; rene_trend_xmin_export "$(cd "$DIR/../.." && pwd)"
+[ -n "${RENE_TREND_XMIN:-}" ] && echo "x 축  : $RENE_TREND_XMIN 부터 (trend_xmin_date)"
 
 root -l -b -q "$MACRO+(\"$OUT/\", $EPSE)"
