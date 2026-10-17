@@ -1,53 +1,52 @@
 #!/bin/bash
 # =====================================================================
-#  storage-backup-mount.sh  --  저장소 서버(ssh store)에서 root 로 한 번 실행
+#  storage-backup-mount.sh  --  저장소 서버(ssh store)에서 root 로 실행
 #
-#  새 외장하드 두 장(독 2 베이)을 꽂은 뒤 이것 하나로 :
-#    1 전제 확인 (root · 도는 백업 세션 없음)
-#    2 USB 하드 탐지 -> 제조사 시리얼로 by-id 경로 (ata-<모델>_<시리얼>-part1)
-#    3 /etc/fstab 에 by-id 줄 (백업 · 옛 줄은 주석 · 두 번 돌려도 한 줄)
-#    4 마운트 + 장치 대조 (§11.124 유령 마운트)
-#    5 RENE_data_backup 만들고 frontend 소유로 (§11.148)
-#    6 하드 내용 확인 (빈 하드인가)
-#    7 frontend 로 code9 --only raw / --only prd 의 --dry-run
-#    8 frontend 로 RAW -> PRD 사슬 기동 (backup_raw_then_prd.sh)
+#  외장하드(독 2 베이)를 by-id 이름으로 직접 마운트하고 백업을 띄운다. fstab 은 건드리지 않는다.
 #
-#  단계마다 [n/8] · 실행한 명령 · 그 출력 · OK / FAIL 을 찍는다. FAIL 이면 거기서 멈춘다.
+#  1) 인자 없이 실행 : USB 하드의 by-id 후보 표와, 복사해 쓸 다음 명령을 보여 주고 끝난다 (아무것도 안 바꾼다)
+#       sudo bash /home/frontend/storage-backup-mount.sh
+#  2) by-id 이름 두 개(RAW, PRD 순)를 주어 실행 : 마운트 -> 권한 -> 내용 -> code9 dry-run -> 백업 기동
+#       sudo bash /home/frontend/storage-backup-mount.sh ata-<모델>_<시리얼>-part1 ata-<모델>_<시리얼>-part1
+#     · 첫 번째 -> /backup_hdd (RAW), 두 번째 -> /backup_hdd_2 (PRD). 하나만 주면 RAW 만
+#     · /dev/disk/by-id/ 접두어가 있어도 되고, 시리얼만 줘도 된다 (예 : ZK206HAY Z4ZBZE0A)
+#
+#  옵션
+#     --dry-run    아무것도 바꾸지 않고 할 명령만 보여 준다 (탐지는 실제로)
+#     --no-start   마운트 · 권한 · dry-run 까지만 하고 백업은 띄우지 않는다
+#     -h           이 설명
+#
+#  단계마다 [n/7] · 실행한 명령 · 그 출력 · OK / FAIL 을 찍는다. FAIL 이면 거기서 멈춘다.
 #  출력은 화면과 /home/frontend/sykim/backup_log/mount-and-backup-<시각>.log 둘 다.
 #
-#  쓰는 법
-#    sudo bash storage-backup-mount.sh --dry-run      # 아무것도 바꾸지 않는다 (탐지는 실제로)
-#    sudo bash storage-backup-mount.sh                # 마운트 + dry-run + 백업 기동
-#    sudo bash storage-backup-mount.sh --no-start     # 마운트 · 권한 · dry-run 까지만
-#    sudo bash storage-backup-mount.sh --raw ZK206HAY --prd Z4ZBZE0A
-#
 #  ★ 포맷은 하지 않는다. ext4 가 아니면 멈춘다 (포맷은 사람이 정한다)
-#  ★ 하드가 떨어지면 : umount -l <마운트> -> e2fsck -f -> 이 스크립트 다시 (§11.180)
+#  ★ 재부팅하면 마운트는 풀린다 (fstab 에 안 적으므로). 다시 이 스크립트를 같은 인자로
+#  ★ 하드가 떨어지면 : umount <마운트> (안 되면 umount -l) -> ls -l /dev/disk/by-id | grep ata- -> 같은 인자로 다시
 #  ★ 프로세스 검사에 pgrep -f 를 쓰지 않는다 (§11.142 의 3)
 # =====================================================================
 
-MP_RAW=/backup_hdd
-MP_PRD=/backup_hdd_2
-WANT_RAW=""; WANT_PRD=""
 DRYRUN=0; NOSTART=0
+ARGS=()
 ORIG_ARGS="$*"
 
-usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run)     DRYRUN=1; shift ;;
 		--no-start)    NOSTART=1; shift ;;
-		--raw)         WANT_RAW=$2; shift 2 ;;
-		--prd)         WANT_PRD=$2; shift 2 ;;
-		--mountpoints) MP_RAW=$2; MP_PRD=$3; shift 3 ;;
 		-h|--help)     usage; exit 0 ;;
-		*) echo "알 수 없는 옵션 : $1  (-h 로 사용법)"; exit 2 ;;
+		-*) echo "알 수 없는 옵션 : $1  (-h 로 사용법)"; exit 2 ;;
+		*)  ARGS+=("$1"); shift ;;
 	esac
 done
 
+MP_RAW=${BACKUP_MOUNT_MP_RAW:-/backup_hdd}
+MP_PRD=${BACKUP_MOUNT_MP_PRD:-/backup_hdd_2}
+SELF=$(readlink -f "$0" 2>/dev/null)
+case "$SELF" in *.sh) ;; *) SELF=/home/frontend/storage-backup-mount.sh ;; esac
+
 # ---- 갈아끼울 수 있는 경로 (시험용. 실서버에서는 기본값 그대로) ----
-FSTAB=${BACKUP_MOUNT_FSTAB:-/etc/fstab}
 BYID=${BACKUP_MOUNT_BYID:-/dev/disk/by-id}
 BUSER=${BACKUP_MOUNT_USER:-frontend}
 UHOME=${BACKUP_MOUNT_HOME:-/home/$BUSER}
@@ -74,7 +73,7 @@ if touch "$LOGDIR/mount-and-backup-$TS.log" 2>/dev/null; then
 	exec > >(tee -a "$LOGFILE") 2>&1
 fi
 
-NSTEP=8
+NSTEP=7
 step() { echo; echo "${C_HD}[$1/$NSTEP] $2${C_0}"; }
 ok()   { echo "  ${C_OK}OK${C_0}${1:+ : $1}"; }
 warn() { echo "  ${C_WR}★ 경고 : $*${C_0}"; }
@@ -101,13 +100,81 @@ act() {
 	run "$@"
 }
 
+kv() { sed -n "s/.*\\b$1=\"\\([^\"]*\\)\".*/\\1/p" <<<"$2"; }
+
+# ---- USB 하드 후보 : 표 만들기 (읽기 전용) ----
+DISKS=$(lsblk -d -n -P -o NAME,TRAN,TYPE,SIZE,MODEL 2>/dev/null)
+PARTS=$(lsblk -n -P -o NAME,TYPE,FSTYPE,MOUNTPOINT,PKNAME 2>/dev/null)
+CAND=()
+declare -A SER MOD LNAME DEV FST SIZ MNT
+while IFS= read -r line; do
+	[ -z "$line" ] && continue
+	[ "$(kv TRAN "$line")" = usb ] || continue
+	[ "$(kv TYPE "$line")" = disk ] || continue
+	nm=$(kv NAME "$line")
+	props=$(udevadm info --query=property --name="/dev/$nm" 2>/dev/null)
+	s=$(sed -n 's/^ID_SERIAL_SHORT=//p' <<<"$props" | head -1)
+	md=$(sed -n 's/^ID_MODEL=//p' <<<"$props" | head -1)
+	ln=""
+	if [ -n "$s" ]; then
+		[ -n "$md" ] && [ -e "$BYID/ata-${md}_${s}-part1" ] && ln="ata-${md}_${s}-part1"
+		[ -z "$ln" ] && ln=$(ls -1 "$BYID" 2>/dev/null | grep -E "^ata-.*_${s}-part1\$" | head -1)
+	fi
+	dv=""; fs=""; mt=""
+	[ -n "$ln" ] && dv=$(readlink -f "$BYID/$ln")
+	while IFS= read -r pl; do
+		[ "$(kv PKNAME "$pl")" = "$nm" ] || continue
+		m=$(kv MOUNTPOINT "$pl"); [ -n "$m" ] && mt=$m
+		[ -n "$dv" ] && [ "$(kv NAME "$pl")" = "$(basename "$dv")" ] && fs=$(kv FSTYPE "$pl")
+	done <<<"$PARTS"
+	CAND+=("$nm")
+	SER[$nm]=${s:-?}; MOD[$nm]=${md:-?}; LNAME[$nm]=$ln; DEV[$nm]=$dv; FST[$nm]=$fs; MNT[$nm]=$mt
+	SIZ[$nm]=$(kv SIZE "$line")
+done <<<"$DISKS"
+
+show_table() {
+	printf '  %-6s %-6s %-6s %-10s %-14s %s\n' "장치" "크기" "fs" "시리얼" "지금 마운트" "by-id 이름 (/dev/disk/by-id/...)"
+	local n
+	for n in "${CAND[@]}"; do
+		printf '  %-6s %-6s %-6s %-10s %-14s %s\n' "$n" "${SIZ[$n]}" "${FST[$n]:-없음}" "${SER[$n]}" "${MNT[$n]:--}" "${LNAME[$n]:-(by-id 링크 없음)}"
+	done
+}
+
 echo "=========================================================="
 echo "  외장하드 마운트 + 백업 기동   ($STAMP)"
 [ "$DRYRUN" = 1 ] && echo "  ★ --dry-run : 아무것도 바꾸지 않습니다. 할 명령만 보여 줍니다."
 [ "$NOSTART" = 1 ] && echo "  ★ --no-start : dry-run 까지만 하고 백업은 띄우지 않습니다."
-echo "  RAW 하드 -> $MP_RAW    PRD 하드 -> $MP_PRD"
 [ -n "$LOGFILE" ] && echo "  로그 : $LOGFILE"
 echo "=========================================================="
+
+# ---- 인자 없음 : 후보 표 + 다음 명령 안내 ----
+if [ ${#ARGS[@]} -eq 0 ]; then
+	echo
+	echo "USB 외장하드 후보"
+	if [ ${#CAND[@]} -eq 0 ]; then
+		echo "  (USB 하드가 없습니다. 독 전원·케이블을 보고 lsblk 에 TRAN=usb 가 보이는지 확인하세요)"
+		exit 0
+	fi
+	show_table
+	use=()
+	for n in "${CAND[@]}"; do
+		[ -n "${LNAME[$n]}" ] && [ "${FST[$n]}" = ext4 ] || continue
+		case "${MNT[$n]}" in ''|"$MP_RAW"|"$MP_PRD") use+=("${LNAME[$n]}") ;; esac
+	done
+	echo
+	if [ ${#use[@]} -eq 0 ]; then
+		echo "쓸 수 있는 하드가 없습니다 (by-id 링크가 있고 ext4 이며 다른 곳에 마운트되지 않은 것)."
+		exit 0
+	fi
+	echo "다음과 같이 by-id 이름 두 개를 (RAW, PRD 순으로) 인자로 주어 다시 실행하세요 :"
+	echo
+	echo "  sudo bash $SELF ${use[*]:0:2}"
+	echo
+	echo "  · 첫 번째 -> $MP_RAW (RAW), 두 번째 -> $MP_PRD (PRD). 하나만 주면 RAW 만 합니다"
+	echo "  · 먼저 미리 보려면 끝에 --dry-run, 백업은 띄우지 않으려면 --no-start"
+	[ ${#use[@]} -gt 2 ] && echo "  ★ 후보가 ${#use[@]} 장입니다. 위 예시는 앞의 두 장 — 표를 보고 고르세요."
+	exit 0
+fi
 
 # =====================================================================
 step 1 "전제 확인 : root 인가 · 이미 도는 백업 세션이 없는가"
@@ -117,10 +184,9 @@ if [ "$MY_EUID" != 0 ]; then
 	if [ "$DRYRUN" = 1 ]; then
 		warn "root 가 아니지만 --dry-run 이라 계속합니다 (아무것도 바꾸지 않음)."
 	else
-		fail "root 로 실행해야 합니다" "sudo bash $0 $ORIG_ARGS" "(미리 보기만 하려면 --dry-run)"
+		fail "root 로 실행해야 합니다" "sudo bash $SELF $ORIG_ARGS" "(미리 보기만 하려면 --dry-run)"
 	fi
 fi
-
 # 내 조상 pid (ps 결과에서 뺀다)
 ANC=" $$ "
 p=$$
@@ -151,210 +217,78 @@ echo "    (도는 백업 없음)"
 ok "root · 도는 세션 없음"
 
 # =====================================================================
-step 2 "USB 하드 탐지 : 제조사 시리얼로 by-id 경로 찾기"
+step 2 "하드 확인 : 인자로 받은 by-id 이름"
 # =====================================================================
-kv() { sed -n "s/.*\\b$1=\"\\([^\"]*\\)\".*/\\1/p" <<<"$2"; }
-
 run lsblk -o NAME,SIZE,TRAN,TYPE,FSTYPE,MOUNTPOINT,MODEL
-DISKS=$(lsblk -d -n -P -o NAME,TRAN,TYPE,SIZE,MODEL 2>/dev/null)
-PARTS=$(lsblk -n -P -o NAME,TYPE,FSTYPE,MOUNTPOINT,PKNAME 2>/dev/null)
-[ -z "$DISKS" ] && fail "lsblk 가 아무것도 내지 않았습니다"
-
-# 후보 : TRAN=usb · TYPE=disk · 그 파티션이 우리 마운트지점 밖에 마운트돼 있지 않은 것
-CAND=()
-declare -A ATMP     # 이미 우리 마운트지점에 붙은 USB 하드 : 장치 -> 마운트지점
-while IFS= read -r line; do
-	[ -z "$line" ] && continue
-	[ "$(kv TRAN "$line")" = usb ] || continue
-	[ "$(kv TYPE "$line")" = disk ] || continue
-	nm=$(kv NAME "$line")
-	busy=""
-	while IFS= read -r pl; do
-		[ "$(kv PKNAME "$pl")" = "$nm" ] || continue
-		m=$(kv MOUNTPOINT "$pl")
-		[ -z "$m" ] && continue
-		if [ "$m" = "$MP_RAW" ] || [ "$m" = "$MP_PRD" ]; then ATMP[$nm]=$m; continue; fi
-		busy=$m
-	done <<<"$PARTS"
-	if [ -n "$busy" ]; then echo "    ($nm 는 $busy 에 마운트된 시스템/다른 디스크라 뺍니다)"; continue; fi
-	CAND+=("$nm")
-done <<<"$DISKS"
-
-[ ${#CAND[@]} -eq 0 ] && fail "USB 하드를 찾지 못했습니다" "독 전원·케이블을 보고 'lsblk' 에 TRAN=usb 디스크가 보이는지 확인하세요."
-
-declare -A SER MOD LINK DEV FST SIZ
+show_table
 echo
-printf '  %-6s %-6s %-20s %-10s %-6s %-14s %s\n' "장치" "크기" "모델" "시리얼" "fs" "지금 마운트" "by-id"
-for nm in "${CAND[@]}"; do
-	props=$(udevadm info --query=property --name="/dev/$nm" 2>/dev/null)
-	s=$(sed -n 's/^ID_SERIAL_SHORT=//p' <<<"$props" | head -1)
-	md=$(sed -n 's/^ID_MODEL=//p' <<<"$props" | head -1)
-	[ -z "$s" ] && fail "/dev/$nm 의 시리얼을 udevadm 이 주지 않습니다" "udevadm info --query=property --name=/dev/$nm"
-	lk=""
-	[ -n "$md" ] && [ -e "$BYID/ata-${md}_${s}-part1" ] && lk="$BYID/ata-${md}_${s}-part1"
-	if [ -z "$lk" ]; then
-		# 모델 글자가 다를 때 : 시리얼로만 찾는다
-		lk=$(ls -1 "$BYID" 2>/dev/null | grep -E "^ata-.*_${s}-part1\$" | head -1)
-		[ -n "$lk" ] && lk="$BYID/$lk"
+[ ${#ARGS[@]} -gt 2 ] && fail "인자가 ${#ARGS[@]} 개입니다. by-id 이름은 두 개까지 (RAW, PRD 순)"
+
+resolve() {   # $1 = 인자  ->  장치 이름(sdX) 을 찍는다
+	local a=${1#/dev/disk/by-id/} n
+	for n in "${CAND[@]}"; do [ -n "${LNAME[$n]}" ] && [ "${LNAME[$n]}" = "$a" ] && { echo "$n"; return 0; }; done
+	for n in "${CAND[@]}"; do [ "${SER[$n]}" = "$a" ] && { echo "$n"; return 0; }; done
+	if [ -e "$BYID/$a" ]; then echo "notusb"; return 1; fi
+	return 1
+}
+ROLE_MP=("$MP_RAW" "$MP_PRD"); ROLE=(RAW PRD)
+PAIRS=(); USED=" "
+for i in "${!ARGS[@]}"; do
+	a=${ARGS[$i]}; mp=${ROLE_MP[$i]}
+	if ! n=$(resolve "$a"); then
+		if [ "$n" = notusb ]; then
+			fail "$a 는 by-id 에 있지만 USB 외장하드가 아닙니다" "위 표의 by-id 이름을 쓰세요."
+		fi
+		fail "$a 에 해당하는 USB 하드가 없습니다 (by-id 이름도 시리얼도 아님)" \
+			"ls -l /dev/disk/by-id | grep ata-   로 하드가 보이는지 보고, 위 표의 이름을 쓰세요."
 	fi
-	[ -z "$lk" ] && fail "/dev/$nm ($s) 의 by-id 첫 파티션 링크가 없습니다" \
-		"ls -l $BYID | grep $s" "파티션이 없는 하드라면 파티션·포맷(ext4)은 사람이 정합니다 — 이 스크립트는 포맷하지 않습니다."
-	dv=$(readlink -f "$lk")
-	fs=""
-	while IFS= read -r pl; do
-		[ "$(kv NAME "$pl")" = "$(basename "$dv")" ] && fs=$(kv FSTYPE "$pl")
-	done <<<"$PARTS"
-	sz=$(kv SIZE "$(grep "NAME=\"$nm\"" <<<"$DISKS")")
-	SER[$nm]=$s; MOD[$nm]=$md; LINK[$nm]=$lk; DEV[$nm]=$dv; FST[$nm]=$fs; SIZ[$nm]=$sz
-	printf '  %-6s %-6s %-20s %-10s %-6s %-14s %s\n' "$nm" "$sz" "${md:-?}" "$s" "${fs:-없음}" "${ATMP[$nm]:--}" "$lk"
-done
-echo
-
-find_by_serial() { local n; for n in "${CAND[@]}"; do [ "${SER[$n]}" = "$1" ] && { echo "$n"; return 0; }; done; return 1; }
-
-RAWD=""; PRDD=""
-if [ -n "$WANT_RAW" ]; then RAWD=$(find_by_serial "$WANT_RAW") || fail "--raw $WANT_RAW 시리얼의 하드가 없습니다" "위 표의 시리얼을 쓰세요."; fi
-if [ -n "$WANT_PRD" ]; then PRDD=$(find_by_serial "$WANT_PRD") || fail "--prd $WANT_PRD 시리얼의 하드가 없습니다" "위 표의 시리얼을 쓰세요."; fi
-[ -n "$RAWD" ] && [ "$RAWD" = "$PRDD" ] && fail "--raw 와 --prd 가 같은 하드입니다"
-
-if [ -z "$WANT_RAW" ] && [ -z "$WANT_PRD" ]; then
-	if [ ${#CAND[@]} -gt 2 ]; then
-		fail "USB 하드가 ${#CAND[@]} 장입니다. 어느 것을 쓸지 정해 주세요" "--raw <시리얼> --prd <시리얼>"
-	fi
-	RAWD=${CAND[0]}
-	[ ${#CAND[@]} -eq 2 ] && PRDD=${CAND[1]}
-elif [ -z "$WANT_PRD" ]; then
-	rest=(); for n in "${CAND[@]}"; do [ "$n" != "$RAWD" ] && rest+=("$n"); done
-	[ ${#rest[@]} -gt 1 ] && fail "남은 하드가 ${#rest[@]} 장이라 PRD 하드를 정할 수 없습니다" "--prd <시리얼> 도 주세요."
-	[ ${#rest[@]} -eq 1 ] && PRDD=${rest[0]}
-elif [ -z "$WANT_RAW" ]; then
-	rest=(); for n in "${CAND[@]}"; do [ "$n" != "$PRDD" ] && rest+=("$n"); done
-	[ ${#rest[@]} -ne 1 ] && fail "RAW 하드를 정할 수 없습니다 (남은 하드 ${#rest[@]} 장)" "--raw <시리얼> 도 주세요."
-	RAWD=${rest[0]}
-fi
-
-# 이미 우리 마운트지점에 붙은 하드가 있으면 배정과 맞아야 한다 (지난 회차 하드가 붙은 채일 수 있다)
-for n in "${!ATMP[@]}"; do
-	m=${ATMP[$n]}; want=""
-	[ "$n" = "$RAWD" ] && want=$MP_RAW
-	[ -n "$PRDD" ] && [ "$n" = "$PRDD" ] && want=$MP_PRD
-	if [ "$want" != "$m" ]; then
-		fail "$m 에 /dev/$n ${SER[$n]} (지난 회차 하드?) 가 붙어 있는데, 배정은 ${want:-'(쓰지 않음)'} 입니다" \
-			"fstab·마운트는 아직 손대지 않았습니다." \
-			"그 하드를 뺄 것이면 : umount $m  (뽑을 때는 umount 부터)" \
-			"그대로 쓸 것이면  : --raw <시리얼> --prd <시리얼> 로 지금 마운트와 맞게 지정"
-	fi
-	echo "  (/dev/$n ${SER[$n]} 는 이미 $m 에 붙어 있고 배정과 같습니다)"
-done
-
-for n in $RAWD $PRDD; do
+	[ -z "${LNAME[$n]}" ] && fail "/dev/$n (${SER[$n]}) 의 by-id 첫 파티션 링크가 없습니다" \
+		"파티션·포맷(ext4)은 사람이 정합니다 — 이 스크립트는 포맷하지 않습니다."
+	case "$USED" in *" $n "*) fail "같은 하드(/dev/$n ${SER[$n]})를 두 번 주었습니다" ;; esac
+	USED="$USED$n "
 	[ "${FST[$n]}" = ext4 ] || fail "/dev/$n (${SER[$n]}) 의 첫 파티션이 ext4 가 아닙니다 (fs=${FST[$n]:-없음})" \
 		"포맷은 하지 않습니다. 포맷할지(자료가 지워진다)는 사람이 정합니다 :" \
 		"  mkfs.ext4 ${DEV[$n]}   (★ 하드의 자료가 전부 지워진다)"
-done
-
-echo "  배정 : RAW -> $MP_RAW = /dev/$RAWD  ${SER[$RAWD]}  (${MOD[$RAWD]})"
-if [ -n "$PRDD" ]; then
-	echo "         PRD -> $MP_PRD = /dev/$PRDD  ${SER[$PRDD]}  (${MOD[$PRDD]})"
-else
-	warn "하드가 1 장입니다. RAW 만 하고 PRD 세션은 건너뜁니다."
-fi
-ok "탐지 ${#CAND[@]} 장"
-
-PAIRS=("$MP_RAW:$RAWD")
-[ -n "$PRDD" ] && PAIRS+=("$MP_PRD:$PRDD")
-
-# =====================================================================
-step 3 "/etc/fstab 에 by-id 줄 넣기 (백업 · 옛 줄 주석 · 이미 있으면 그대로)"
-# =====================================================================
-OPTS="defaults,nofail,x-systemd.device-timeout=10"
-TAG="#(storage-backup-mount $STAMP) "
-[ -f "$FSTAB" ] || fail "$FSTAB 가 없습니다"
-[ -s "$FSTAB" ] || fail "$FSTAB 가 비어 있습니다 — 손대지 않습니다"
-NEW=$(mktemp 2>/dev/null) && [ -n "$NEW" ] || fail "임시 파일을 만들 수 없습니다 (TMPDIR=${TMPDIR:-/tmp} 가 찼거나 없음)" "$FSTAB 는 손대지 않았습니다."
-TMPW=$(mktemp 2>/dev/null) && [ -n "$TMPW" ] || { rm -f "$NEW"; fail "임시 파일을 만들 수 없습니다 (TMPDIR=${TMPDIR:-/tmp})" "$FSTAB 는 손대지 않았습니다."; }
-trap 'rm -f "$NEW" "$TMPW"' EXIT
-cat "$FSTAB" > "$NEW" || fail "임시 파일에 쓸 수 없습니다" "$FSTAB 는 손대지 않았습니다."
-ADDED=0
-for pr in "${PAIRS[@]}"; do
-	mp=${pr%%:*}; n=${pr#*:}; lk=${LINK[$n]}; dv=${DEV[$n]}
-	# 같은 장치(by-id 또는 /dev/sdX1)·같은 마운트지점의 다른 줄은 주석으로.
-	# 우리 형식(장치+마운트지점+ext4+nofail)의 줄이 이미 있으면 그 하나만 둔다
-	awk -v mp="$mp" -v lk="$lk" -v dv="$dv" -v tag="$TAG" '
-		BEGIN { have = 0 }
-		/^[[:space:]]*#/ || NF < 2 { print; next }
-		$1 == lk && $2 == mp && $3 == "ext4" && $4 ~ /(^|,)nofail(,|$)/ && have == 0 { have = 1; print; next }
-		$2 == mp || $1 == lk || $1 == dv { print tag $0; next }
-		{ print }
-		END { if (have == 0) exit 3 }' "$NEW" > "$TMPW"
-	rc=$?
-	case $rc in
-		0) ;;
-		3) printf '%s  %s  ext4  %s  0 2\n' "$lk" "$mp" "$OPTS" >> "$TMPW" || fail "임시 파일 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
-		   ADDED=$((ADDED+1)) ;;
-		*) fail "fstab 처리(awk) 가 실패했습니다 (rc=$rc)" "$FSTAB 는 손대지 않았습니다." ;;
-	esac
-	cat "$TMPW" > "$NEW" || fail "임시 파일 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
-done
-
-# 쓰기 전 검증 : 비지 않음 · 줄 수 = 원본 + 추가 · 원본의 주석 아닌 줄이 전부 그대로이거나 태그 주석으로 남음
-verify_new() {
-	[ -s "$NEW" ] || { echo "새 내용이 비어 있다"; return 1; }
-	local no nn line
-	no=$(awk 'END{print NR}' "$FSTAB"); nn=$(awk 'END{print NR}' "$NEW")
-	[ "$nn" = $((no + ADDED)) ] || { echo "줄 수가 맞지 않다 (원본 $no + 추가 $ADDED != $nn)"; return 1; }
-	while IFS= read -r line || [ -n "$line" ]; do
-		case $line in ''|'#'*|[[:space:]]*'#'*) continue ;; esac
-		[ -z "${line//[[:space:]]/}" ] && continue
-		grep -Fxq -- "$line" "$NEW" || grep -Fxq -- "$TAG$line" "$NEW" || { echo "원본 줄이 사라졌다 : $line"; return 1; }
-	done < "$FSTAB"
-	return 0
-}
-
-if cmp -s "$FSTAB" "$NEW"; then
-	echo "  (바꿀 것 없음 : 줄이 이미 있습니다)"
-else
-	echo "  \$ diff -u $FSTAB (새 내용)"
-	diff -u "$FSTAB" "$NEW" | sed 's/^/    /'
-	why=$(verify_new) || fail "새 fstab 검증 실패 : $why" "$FSTAB 는 손대지 않았습니다."
-	echo "    (검증 : 원본 줄 보존 · 줄 수 원본+$ADDED)"
-	act cp -p "$FSTAB" "$FSTAB.bak-$TS" || fail "fstab 백업 실패" "$FSTAB 는 손대지 않았습니다."
-	if [ "$DRYRUN" = 1 ]; then
-		echo "  (dry-run) \$ (위 내용을 $FSTAB.new-$TS 에 쓰고 mv -f $FSTAB.new-$TS $FSTAB)"
-	else
-		STAGE=$FSTAB.new-$TS
-		echo "  \$ (위 내용을 $STAGE 에 쓰고 mv -f $STAGE $FSTAB)"
-		if ! { cp -p "$FSTAB" "$STAGE" && cat "$NEW" > "$STAGE" && sync && cmp -s "$NEW" "$STAGE"; }; then
-			rm -f "$STAGE"; fail "$STAGE 쓰기 실패" "$FSTAB 는 손대지 않았습니다."
-		fi
-		mv -f "$STAGE" "$FSTAB" || { rm -f "$STAGE"; fail "mv 실패" "$FSTAB 는 그대로입니다 (백업 $FSTAB.bak-$TS)."; }
-		if ! cmp -s "$NEW" "$FSTAB"; then
-			cp -p "$FSTAB.bak-$TS" "$FSTAB"
-			fail "쓴 뒤 대조가 어긋나 백업으로 되돌렸습니다" "cmp $FSTAB $FSTAB.bak-$TS"
-		fi
+	m=${MNT[$n]}
+	if [ -n "$m" ] && [ "$m" != "$mp" ]; then
+		fail "/dev/$n ${SER[$n]} 는 이미 $m 에 마운트돼 있습니다 (${ROLE[$i]} 자리는 $mp)" \
+			"인자 순서를 바꾸거나(첫 번째 = RAW = $MP_RAW), 그 하드를 umount $m 한 뒤 다시"
 	fi
-	act systemctl daemon-reload || fail "systemctl daemon-reload 실패"
-fi
-rm -f "$NEW" "$TMPW"; trap - EXIT
-ok "fstab"
+	echo "  ${ROLE[$i]} -> $mp = /dev/$n  ${SER[$n]}  (${MOD[$n]})  $BYID/${LNAME[$n]}"
+	PAIRS+=("$mp:$n")
+done
+# 인자로 안 준 하드가 우리 마운트지점에 붙어 있으면 (지난 회차 하드) 멈춘다
+for n in "${CAND[@]}"; do
+	case "$USED" in *" $n "*) continue ;; esac
+	m=${MNT[$n]}
+	if [ "$m" = "$MP_RAW" ] || { [ ${#ARGS[@]} -ge 2 ] && [ "$m" = "$MP_PRD" ]; }; then
+		fail "$m 에 /dev/$n ${SER[$n]} (지난 회차 하드?) 가 붙어 있습니다" \
+			"아무것도 바꾸지 않았습니다. 그 하드를 뺄 것이면 : umount $m  (안 되면 umount -l $m)" \
+			"그 하드를 그대로 쓸 것이면 인자로 주세요."
+	fi
+done
+[ ${#ARGS[@]} -eq 1 ] && warn "인자가 하나입니다. RAW 만 하고 PRD 세션은 건너뜁니다."
+PRDD=""; [ ${#ARGS[@]} -eq 2 ] && PRDD=${PAIRS[1]#*:}
+ok "하드 ${#ARGS[@]} 장"
 
 # =====================================================================
-step 4 "마운트 (fstab 경유) 와 장치 대조"
+step 3 "마운트 (mount -t ext4 <by-id> <마운트지점>) 와 장치 대조"
 # =====================================================================
 for pr in "${PAIRS[@]}"; do
-	mp=${pr%%:*}; n=${pr#*:}; dv=${DEV[$n]}
+	mp=${pr%%:*}; n=${pr#*:}; dv=${DEV[$n]}; lk=$BYID/${LNAME[$n]}
 	[ -d "$mp" ] || act mkdir -p "$mp" || fail "$mp 를 만들 수 없습니다"
 	if mountpoint -q "$mp" 2>/dev/null; then
 		src=$(findmnt -n -o SOURCE "$mp" 2>/dev/null)
-		echo "  \$ findmnt -n -o SOURCE $mp   ->  $src  (이미 마운트됨)"
+		echo "  \$ findmnt -n -o SOURCE $mp   ->  $src"
 		if [ "$src" != "$dv" ]; then
 			fail "$mp 에 다른 장치($src)가 마운트돼 있습니다. 기대 : $dv (${SER[$n]})" \
-				"떨어졌다 다시 붙은 유령 마운트일 수 있습니다 (§11.124)." \
-				"umount -l $mp  ->  e2fsck -f $dv  ->  이 스크립트 다시"
+				"지난 회차 하드이거나, 떨어졌다 다시 붙은 유령 마운트일 수 있습니다 (§11.124)." \
+				"umount $mp  (안 되면 umount -l $mp)  ->  같은 인자로 이 스크립트 다시"
 		fi
-		[ -e "$src" ] || fail "$mp 의 장치 $src 가 /dev 에 없습니다 (유령 마운트)" "umount -l $mp 뒤 다시"
+		[ -e "$src" ] || fail "$mp 의 장치 $src 가 /dev 에 없습니다 (유령 마운트)" "umount -l $mp 뒤 같은 인자로 다시"
+		echo "    (이미 마운트됨 : 건너뜁니다)"
 	else
-		act mount "$mp" || fail "mount $mp 실패" "dmesg | tail -20 으로 사유를 보세요."
+		act mount -t ext4 "$lk" "$mp" || fail "mount $lk $mp 실패" "dmesg | tail -20 으로 사유를 보세요."
 		if [ "$DRYRUN" = 0 ]; then
 			src=$(findmnt -n -o SOURCE "$mp" 2>/dev/null)
 			echo "  \$ findmnt -n -o SOURCE $mp   ->  $src"
@@ -366,7 +300,7 @@ done
 ok "마운트"
 
 # =====================================================================
-step 5 "권한 : RENE_data_backup 을 만들고 $BUSER 소유로"
+step 4 "권한 : RENE_data_backup 을 만들고 $BUSER 소유로"
 # =====================================================================
 for pr in "${PAIRS[@]}"; do
 	mp=${pr%%:*}; d=$mp/RENE_data_backup
@@ -381,7 +315,7 @@ done
 ok "권한"
 
 # =====================================================================
-step 6 "하드 내용 확인 (빈 하드인가)"
+step 5 "하드 내용 확인 (빈 하드인가)"
 # =====================================================================
 if [ "$DRYRUN" = 1 ]; then
 	echo "  (dry-run) 마운트 전이라 볼 수 없습니다 — 실제 실행에서 ls -A 로 봅니다."
@@ -405,7 +339,7 @@ fi
 ok "내용 확인"
 
 # =====================================================================
-step 7 "$BUSER 로 백업 계획 미리 보기 (code9 --dry-run)"
+step 6 "$BUSER 로 백업 계획 미리 보기 (code9 --dry-run)"
 # =====================================================================
 [ -x "$CODE9" ] || fail "$CODE9 가 없거나 실행할 수 없습니다"
 dry9() {   # $1 = 마운트, $2 = raw|prd
@@ -424,12 +358,12 @@ if [ -n "$PRDD" ]; then dry9 "$MP_PRD" prd || fail "PRD dry-run 이 실패했습
 ok "dry-run"
 
 # =====================================================================
-step 8 "백업 기동 (RAW 세션 -> 끝나면 30 초 뒤 PRD 세션)"
+step 7 "백업 기동 (RAW 세션 -> 끝나면 30 초 뒤 PRD 세션)"
 # =====================================================================
 if [ "$NOSTART" = 1 ]; then
 	echo "  (--no-start : 띄우지 않습니다)"
 	ok "건너뜀"
-	echo; echo "띄우려면 : sudo bash $0   (같은 명령, --no-start 없이)"
+	echo; echo "띄우려면 : sudo bash $SELF ${ARGS[*]}   (같은 인자, --no-start 없이)"
 	exit 0
 fi
 
@@ -503,7 +437,11 @@ cat <<EOF
            cat $LOGDIR/chain.log
   - DAQ PC 에서 : scripts/mailq-send.sh --status   (메일 큐)
   - 하드가 떨어지면 (메일 '전송 도중 떨어졌습니다') :
-       umount -l $MP_RAW ${PRDD:+$MP_PRD}  ->  e2fsck -f <장치>  ->  sudo bash $0
+       1) umount $MP_RAW ${PRDD:+$MP_PRD}      (안 되면 umount -l <마운트>)
+       2) ls -l /dev/disk/by-id | grep ata-    (하드가 다시 보이는지)
+       3) sudo bash $SELF ${ARGS[*]}
+          (code9 는 이미 옮긴 파일을 건너뛰고 이어간다)
+  - 재부팅하면 마운트가 풀린다 (fstab 에 안 적었다) -> 3) 과 같은 명령
   - 뽑을 때는 umount 부터 (독은 한 USB 장치라 둘이 같이 떨어진다)
 ==========================================================
 EOF

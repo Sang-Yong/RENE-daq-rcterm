@@ -2,7 +2,7 @@
 # tests/storage-backup-mount.test.sh -- scripts/storage-backup-mount.sh 의 시험
 # root · 실하드 · 실 fstab · 실서버 · 메일을 건드리지 않는다.
 # lsblk/udevadm/mount/mountpoint/findmnt/df/chown/systemctl/sudo/fuser/ps 를 PATH 앞의 가짜로,
-# fstab·by-id·로그·code9·사슬 경로는 BACKUP_MOUNT_* 로 갈아끼운다.
+# 마운트지점·by-id·로그·code9·사슬 경로는 BACKUP_MOUNT_* 로 갈아끼운다.
 # 픽스처는 저장소 서버 실물 출력(2026-10-17, lsblk -P · udevadm) 을 복사한 것이다.
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SUT=$HERE/scripts/storage-backup-mount.sh
@@ -39,7 +39,6 @@ setup() {   # $1 = 디스크 수 (1|2|3), $2 = sdc fstype (기본 ext4)
 	ln -s "$T/dev/sdb1" "$T/byid/ata-ST2000DM008-2FR102_ZK206HAY-part1"
 	ln -s "$T/dev/sdc1" "$T/byid/ata-ST2000DM006-2DM164_Z4ZBZE0A-part1"
 	ln -s "$T/dev/sdd1" "$T/byid/ata-ST2000DM008-2FR102_ZK206XXX-part1"
-	printf 'UUID=fe85 /  xfs defaults 0 0\nLABEL=data\t/data\text4\tdefaults\t0\t0\n' > "$T/fstab"
 	: > "$F/mounts"; : > "$F/ps.txt"; : > "$F/calls"
 
 	cat > "$T/bin/lsblk" <<'X'
@@ -60,10 +59,10 @@ mp=${@: -1}; awk -v m="$mp" '$1==m{print $2}' "$FAKE/mounts"
 X
 	cat > "$T/bin/mount" <<'X'
 #!/bin/bash
-echo "mount $*" >> "$FAKE/calls"; mp=$1
-dev=$(awk -v m="$mp" '$1 !~ /^#/ && $2==m {print $1}' "$BACKUP_MOUNT_FSTAB" | tail -1)
-[ -z "$dev" ] && { echo "mount: $mp: can't find in fstab"; exit 1; }
-echo "$mp $(readlink -f "$dev")" >> "$FAKE/mounts"
+echo "mount $*" >> "$FAKE/calls"
+[ "$1" = -t ] && [ "$2" = ext4 ] || { echo "fake mount: -t ext4 expected"; exit 1; }
+[ -e "$3" ] || { echo "mount: $3: no such device"; exit 32; }
+echo "$4 $(readlink -f "$3")" >> "$FAKE/mounts"
 X
 	cat > "$T/bin/df" <<'X'
 #!/bin/bash
@@ -100,119 +99,135 @@ esac
 X
 	chmod +x "$T/bin/"* "$T/code9"
 	export FAKE=$F PATH="$T/bin:$PATH"
-	export BACKUP_MOUNT_FSTAB=$T/fstab BACKUP_MOUNT_BYID=$T/byid BACKUP_MOUNT_HOME=$T/home \
+	export BACKUP_MOUNT_MP_RAW=$T/mp1 BACKUP_MOUNT_MP_PRD=$T/mp2 BACKUP_MOUNT_BYID=$T/byid BACKUP_MOUNT_HOME=$T/home \
 	       BACKUP_MOUNT_LOGDIR=$T/home/sykim/backup_log BACKUP_MOUNT_CODE9=$T/code9 \
 	       BACKUP_MOUNT_CHAIN=$T/home/backup_raw_then_prd.sh BACKUP_MOUNT_WAIT=1 \
 	       BACKUP_MOUNT_EUID=0 BACKUP_MOUNT_USER=$(id -un)
 	unset FAKE_FUSER FAKE_CODE9_RC
-	MPS=(--mountpoints "$T/mp1" "$T/mp2")
 }
 runsut() { OUT=$(bash "$SUT" "$@" 2>&1); RC=$?; sleep 0.3; }
 done_() { rm -rf "$T"; }
+B1=ata-ST2000DM008-2FR102_ZK206HAY-part1
+B2=ata-ST2000DM006-2DM164_Z4ZBZE0A-part1
+nocalls() { [ -z "$(grep -v mount-and-backup- $F/calls)" ]; }
 
-echo "[1] 2 장 탐지 · 배정 · 전 단계 (--no-start)"
-setup 2; runsut "${MPS[@]}" --no-start
+echo "[1] 인자 없음 : 후보 표 + 복사해 쓸 명령, rc 0, 아무것도 안 함"
+setup 2; export BACKUP_MOUNT_EUID=1001; runsut
 chk "rc 0" '[ $RC = 0 ]'
-chk "RAW=sdb ZK206HAY" 'grep -q "RAW -> $T/mp1 = /dev/sdb  ZK206HAY" <<<"$OUT"'
-chk "PRD=sdc Z4ZBZE0A" 'grep -q "PRD -> $T/mp2 = /dev/sdc  Z4ZBZE0A" <<<"$OUT"'
-chk "by-id 줄 2 개" '[ $(grep -c "^$T/byid/ata-.*-part1  $T/mp[12]  ext4  defaults,nofail,x-systemd.device-timeout=10  0 2" $T/fstab) = 2 ]'
-chk "fstab 백업" 'ls $T/fstab.bak-* >/dev/null 2>&1'
-chk "daemon-reload" 'grep -q "systemctl daemon-reload" $F/calls'
-chk "마운트 2 회" '[ $(grep -c "^mount " $F/calls) = 2 ]'
-chk "RENE_data_backup 생성" '[ -d $T/mp1/RENE_data_backup ] && [ -d $T/mp2/RENE_data_backup ]'
-chk "chown 호출" 'grep -q "chown .* $T/mp1 $T/mp1/RENE_data_backup" $F/calls'
+chk "표에 두 하드" 'grep -q "sdb .*ext4 .*ZK206HAY .*$B1" <<<"$OUT" && grep -q "sdc .*Z4ZBZE0A .*$B2" <<<"$OUT"'
+chk "예시 명령이 실제 탐지값" 'grep -q "sudo bash .*storage-backup-mount.sh $B1 $B2$" <<<"$OUT"'
+chk "RAW, PRD 순 안내" 'grep -q "RAW, PRD 순으로" <<<"$OUT"'
+chk "단계를 안 탐" '! grep -q "^\[1/7\]" <<<"$OUT"'
+chk "호출 없음" 'nocalls && [ ! -e $F/code9.calls ]'
+done_
+setup 3; runsut
+chk "3 장이면 앞 두 장 예시 + 경고" '[ $RC = 0 ] && grep -q "후보가 3 장" <<<"$OUT"'
+done_
+
+echo "[2] 인자 2 개 : 전 단계 (--no-start)"
+setup 2; runsut $B1 $B2 --no-start
+chk "rc 0" '[ $RC = 0 ]'
+chk "RAW=sdb PRD=sdc" 'grep -q "RAW -> $T/mp1 = /dev/sdb  ZK206HAY" <<<"$OUT" && grep -q "PRD -> $T/mp2 = /dev/sdc  Z4ZBZE0A" <<<"$OUT"'
+chk "mount -t ext4 by-id 직접" 'grep -q "^mount -t ext4 $T/byid/$B1 $T/mp1$" $F/calls && grep -q "^mount -t ext4 $T/byid/$B2 $T/mp2$" $F/calls'
+chk "systemctl 호출 없음" '! grep -q "^systemctl" $F/calls'
+chk "RENE_data_backup 생성 + chown" '[ -d $T/mp1/RENE_data_backup ] && [ -d $T/mp2/RENE_data_backup ] && grep -q "chown .* $T/mp1 $T/mp1/RENE_data_backup" $F/calls'
 chk "dry-run raw/prd" 'grep -q -- "--disks $T/mp1 --only raw --dry-run" $F/code9.calls && grep -q -- "--disks $T/mp2 --only prd --dry-run" $F/code9.calls'
-chk "⑧ --no-start 는 기동 안 함" '[ $(grep -vc -- --dry-run $F/code9.calls) = 0 ]'
-chk "⑨ [n/8] 단계 8 개" '[ $(grep -cE "^\[[1-8]/8\]" <<<"$OUT") = 8 ]'
-chk "⑨ OK 가 찍힌다" 'grep -q "  OK" <<<"$OUT"'
-chk "로그 파일 (tee)" 'ls $T/home/sykim/backup_log/mount-and-backup-*.log >/dev/null && grep -q "\[7/8\]" $T/home/sykim/backup_log/mount-and-backup-*.log'
-chk "요약 줄을 보인다" 'grep -q "합계   : 런 1 개" <<<"$OUT"'
+chk "--no-start 는 기동 안 함" '[ $(grep -vc -- --dry-run $F/code9.calls) = 0 ]'
+chk "[n/7] 단계 7 개" '[ $(grep -cE "^\[[1-7]/7\]" <<<"$OUT") = 7 ]'
+chk "OK 가 찍힌다" 'grep -q "  OK" <<<"$OUT"'
+chk "로그 파일 (tee)" 'grep -q "\[6/7\]" $T/home/sykim/backup_log/mount-and-backup-*.log'
+chk "요약 줄" 'grep -q "합계   : 런 1 개" <<<"$OUT"'
+echo "  -- 같은 인자로 다시 : 이미 같은 장치면 건너뜀"
+: > $F/calls; runsut $B1 $B2 --no-start
+chk "rc 0 + 이미 마운트됨" '[ $RC = 0 ] && [ $(grep -c "이미 마운트됨" <<<"$OUT") = 2 ]'
+chk "mount 다시 안 함" '! grep -q "^mount " $F/calls'
+done_
 
-echo "[3] fstab idempotent (두 번째 실행)"
-cp $T/fstab $T/fstab.first; : > $F/mounts
-runsut "${MPS[@]}" --no-start
+echo "[3] 접두어 · 시리얼만 · 1 개"
+setup 2; runsut /dev/disk/by-id/$B1 Z4ZBZE0A --no-start
+chk "접두어+시리얼 받아들임" '[ $RC = 0 ] && grep -q "PRD -> $T/mp2 = /dev/sdc  Z4ZBZE0A" <<<"$OUT"'
+done_
+setup 2; runsut Z4ZBZE0A ZK206HAY --no-start
+chk "순서대로 배정 (뒤바꿈)" '[ $RC = 0 ] && grep -q "RAW -> $T/mp1 = /dev/sdc" <<<"$OUT" && grep -q "PRD -> $T/mp2 = /dev/sdb" <<<"$OUT"'
+done_
+setup 2; runsut ZK206HAY --no-start
+chk "1 개 : RAW 만" '[ $RC = 0 ] && grep -q "PRD 세션은 건너뜁니다" <<<"$OUT" && ! grep -q -- "--only prd" $F/code9.calls && [ ! -e $T/mp2/RENE_data_backup ]'
+done_
+
+echo "[4] 잘못된 인자"
+setup 2; runsut ata-NOPE_XXXX-part1 --no-start
+chk "없는 이름 FAIL" '[ $RC = 1 ] && grep -q "FAIL: ata-NOPE_XXXX-part1 에 해당하는 USB 하드가 없습니다" <<<"$OUT" && ! grep -q "^mount" $F/calls'
+done_
+setup 2; ln -s $T/dev/sdb1 $T/byid/ata-SYSTEMDISK_123-part1; runsut ata-SYSTEMDISK_123-part1 --no-start
+chk "USB 아닌 by-id FAIL" '[ $RC = 1 ] && grep -q "USB 외장하드가 아닙니다" <<<"$OUT"'
+done_
+setup 2; runsut ZK206HAY ZK206HAY --no-start
+chk "같은 하드 두 번 FAIL" '[ $RC = 1 ] && grep -q "두 번 주었습니다" <<<"$OUT"'
+done_
+setup 2; runsut a b c --no-start
+chk "인자 3 개 FAIL" '[ $RC = 1 ] && grep -q "인자가 3 개" <<<"$OUT"'
+done_
+setup 2 ntfs; runsut $B1 $B2 --no-start
+chk "ext4 아니면 FAIL" '[ $RC = 1 ] && grep -q "FAIL: /dev/sdc (Z4ZBZE0A) 의 첫 파티션이 ext4 가 아닙니다 (fs=ntfs)" <<<"$OUT" && ! grep -q "^mount" $F/calls'
+done_
+
+echo "[5] 다른 장치가 마운트지점에 붙어 있으면 FAIL + umount 안내"
+setup 2; echo "$T/mp1 /dev/sdz1" > $F/mounts; runsut $B1 $B2 --no-start
+chk "rc 1 + 안내" '[ $RC = 1 ] && grep -q "다른 장치(/dev/sdz1)" <<<"$OUT" && grep -q "umount $T/mp1  (안 되면 umount -l" <<<"$OUT"'
+done_
+
+echo "[6] 지난 회차 하드가 붙은 채"
+setup 2
+sed -i "s#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"\"#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"$T/mp2\"#" $F/parts
+echo "$T/mp2 $T/dev/sdb1" > $F/mounts; cp $F/mounts $F/mounts.orig
+runsut $B1 $B2 --no-start
+chk "RAW 자리에 /backup_hdd_2 의 하드 → FAIL" '[ $RC = 1 ] && grep -q "이미 $T/mp2 에 마운트돼 있습니다" <<<"$OUT" && cmp -s $F/mounts $F/mounts.orig && ! grep -q "^mount" $F/calls'
+runsut $B2 --no-start
+chk "인자에 없는 하드가 RAW 자리… 아니면 통과" '[ $RC = 0 ]'
+done_
+setup 2
+sed -i "s#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"\"#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"$T/mp1\"#" $F/parts
+echo "$T/mp1 $T/dev/sdb1" > $F/mounts
+runsut $B2 --no-start
+chk "RAW 자리에 지난 회차 하드 FAIL" '[ $RC = 1 ] && grep -q "(지난 회차 하드?) 가 붙어 있습니다" <<<"$OUT" && ! grep -q "^mount" $F/calls'
+runsut $B2 $B1 --no-start
+chk "그 하드를 PRD 로 주면 바로 그 자리 아님 FAIL" '[ $RC = 1 ]'
+runsut $B1 $B2 --no-start
+chk "제자리 하드 + 새 하드 통과" '[ $RC = 0 ] && grep -q "이미 마운트됨" <<<"$OUT"'
+done_
+
+echo "[7] --dry-run 은 아무것도 안 바꾼다"
+setup 2; runsut $B1 $B2 --dry-run
 chk "rc 0" '[ $RC = 0 ]'
-chk "줄이 그대로 (diff 없음)" 'cmp -s $T/fstab $T/fstab.first'
-chk "바꿀 것 없음 안내" 'grep -q "바꿀 것 없음" <<<"$OUT"'
-done_
-
-echo "[3b] 같은 마운트지점의 옛 줄은 주석으로"
-setup 2; printf '/dev/sdx1 %s ext4 defaults 0 0\n' "$T/mp1" >> $T/fstab
-runsut "${MPS[@]}" --no-start
-chk "옛 줄 주석" 'grep -q "^#(storage-backup-mount .*) /dev/sdx1 $T/mp1" $T/fstab'
-chk "주석 안 된 mp1 줄은 by-id 하나" '[ $(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | wc -l) = 1 ]'
-runsut "${MPS[@]}" --no-start
-chk "다시 돌려도 mp1 줄 1 개" '[ $(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | wc -l) = 1 ] && [ $(grep -c "^#(storage-backup-mount" $T/fstab) = 1 ]'
-done_
-
-echo "[2] --raw / --prd 지정 (뒤바꾸기)"
-setup 2; runsut "${MPS[@]}" --no-start --raw Z4ZBZE0A --prd ZK206HAY
-chk "RAW=sdc" 'grep -q "RAW -> $T/mp1 = /dev/sdc  Z4ZBZE0A" <<<"$OUT"'
-chk "PRD=sdb" 'grep -q "PRD -> $T/mp2 = /dev/sdb  ZK206HAY" <<<"$OUT"'
-chk "fstab mp1 = Z4ZBZE0A" 'grep -q "Z4ZBZE0A-part1  $T/mp1 " $T/fstab'
-done_
-setup 2; runsut "${MPS[@]}" --no-start --raw NOPE
-chk "없는 시리얼이면 FAIL" '[ $RC = 1 ] && grep -q "FAIL: --raw NOPE" <<<"$OUT"'
-done_
-
-echo "[4] --dry-run 은 fstab·mount·chown 을 안 건드린다"
-setup 2; cp $T/fstab $T/fstab.orig; runsut "${MPS[@]}" --dry-run
-chk "rc 0" '[ $RC = 0 ]'
-chk "fstab 그대로" 'cmp -s $T/fstab $T/fstab.orig && ! ls $T/fstab.bak-* >/dev/null 2>&1'
-chk "mount·chown·systemctl·code9 호출 없음" '! grep -v mount-and-backup- $F/calls | grep -qE "^(mount|chown|systemctl)" && [ ! -e $F/code9.calls ]'
+chk "mount·chown·code9 호출 없음" '! grep -v mount-and-backup- $F/calls | grep -qE "^(mount|chown|systemctl)" && [ ! -e $F/code9.calls ]'
 chk "RENE_data_backup 안 만듦" '[ ! -e $T/mp1/RENE_data_backup ]'
-chk "할 명령을 보인다" 'grep -q "(dry-run) \$ mount $T/mp1" <<<"$OUT"'
-chk "탐지는 실제로" 'grep -q "ZK206HAY" <<<"$OUT"'
+chk "할 명령을 보인다" 'grep -q "(dry-run) \$ mount -t ext4 $T/byid/$B1 $T/mp1" <<<"$OUT"'
 done_
 
-echo "[5] ext4 아니면 FAIL"
-setup 2 ntfs; cp $T/fstab $T/fstab.orig; runsut "${MPS[@]}" --no-start
-chk "rc 1 + 사유" '[ $RC = 1 ] && grep -q "FAIL: /dev/sdc (Z4ZBZE0A) 의 첫 파티션이 ext4 가 아닙니다 (fs=ntfs)" <<<"$OUT"'
-chk "fstab 그대로" 'cmp -s $T/fstab $T/fstab.orig'
-done_
-
-echo "[6] 3 장이면 FAIL"
-setup 3; runsut "${MPS[@]}" --no-start
-chk "rc 1" '[ $RC = 1 ] && grep -q "USB 하드가 3 장" <<<"$OUT"'
-runsut "${MPS[@]}" --no-start --raw ZK206HAY --prd Z4ZBZE0A
-chk "지정하면 된다" '[ $RC = 0 ]'
-done_
-
-echo "[7] 도는 세션이 있으면 FAIL"
-setup 2; : > $T/home/sykim/backup_log/.backup.lock; export FAKE_FUSER=1; runsut "${MPS[@]}" --no-start
-chk "잠금 보유자 FAIL" '[ $RC = 1 ] && grep -q "잠금을 쥐고" <<<"$OUT" && [ -z "$(grep -v mount-and-backup- $F/calls)" ]'
+echo "[8] 도는 세션이 있으면 FAIL"
+setup 2; : > $T/home/sykim/backup_log/.backup.lock; export FAKE_FUSER=1; runsut $B1 $B2 --no-start
+chk "잠금 보유자 FAIL" '[ $RC = 1 ] && grep -q "잠금을 쥐고" <<<"$OUT" && nocalls'
 unset FAKE_FUSER
 echo "21588 /bin/bash ./data_backup_simple_code9.sh --only raw" > $F/ps.txt
-runsut "${MPS[@]}" --no-start
+runsut $B1 $B2 --no-start
 chk "ps 의 code9 FAIL" '[ $RC = 1 ] && grep -q "백업이 이미 돌고" <<<"$OUT"'
 echo "777 grep data_backup_simple_code[0-9]*\.sh" > $F/ps.txt
-runsut "${MPS[@]}" --no-start
+runsut $B1 $B2 --no-start
 chk "검사 문자열 자체는 안 잡는다" '[ $RC = 0 ]'
 done_
 
-echo "[10] root 가 아니면 안내"
-setup 2; export BACKUP_MOUNT_EUID=1001; runsut "${MPS[@]}"
-chk "rc 1 + sudo 안내" '[ $RC = 1 ] && grep -q "root 로 실행해야" <<<"$OUT" && grep -q "sudo bash" <<<"$OUT"'
-chk "아무것도 안 함" '[ -z "$(grep -v mount-and-backup- $F/calls)" ]'
+echo "[9] root 가 아니면 안내"
+setup 2; export BACKUP_MOUNT_EUID=1001; runsut $B1 $B2
+chk "rc 1 + sudo 안내 (같은 인자)" '[ $RC = 1 ] && grep -q "root 로 실행해야" <<<"$OUT" && grep -q "sudo bash .* $B1 $B2" <<<"$OUT"'
+chk "아무것도 안 함" 'nocalls'
 done_
 
-echo "[11] 1 장 : RAW 만, PRD 건너뜀"
-setup 1; runsut "${MPS[@]}" --no-start
-chk "rc 0 + 경고" '[ $RC = 0 ] && grep -q "PRD 세션은 건너뜁니다" <<<"$OUT"'
-chk "prd dry-run 없음" '! grep -q -- "--only prd" $F/code9.calls'
-done_
-
-echo "[12] 다른 장치가 마운트돼 있으면(유령) FAIL"
-setup 2; echo "$T/mp1 /dev/sdz1" > $F/mounts; runsut "${MPS[@]}" --no-start
-chk "rc 1 + umount 안내" '[ $RC = 1 ] && grep -q "다른 장치(/dev/sdz1)" <<<"$OUT" && grep -q "umount -l" <<<"$OUT"'
-done_
-
-echo "[13] code9 dry-run 실패면 멈춘다"
-setup 2; export FAKE_CODE9_RC=1; runsut "${MPS[@]}"
+echo "[10] code9 dry-run 실패면 멈춘다"
+setup 2; export FAKE_CODE9_RC=1; runsut $B1 $B2
 chk "rc 1, 기동 없음" '[ $RC = 1 ] && grep -q "RAW dry-run 이 실패" <<<"$OUT" && [ $(grep -vc -- --dry-run $F/code9.calls) = 0 ]'
 done_
 
-echo "[14] 기동 : 서버 사슬이 맞으면 그것을"
+echo "[11] 기동 : 서버 사슬이 맞으면 그것을"
 setup 2
 cat > $T/home/backup_raw_then_prd.sh <<X
 #!/bin/bash
@@ -223,73 +238,29 @@ sleep 0
 $T/code9 --disks $T/mp2 --only prd > "\$L/code9-prd.log" 2>&1
 X
 echo old > $T/home/sykim/backup_log/code9.log
-runsut "${MPS[@]}"
-chk "rc 0" '[ $RC = 0 ]'
-chk "사슬 그대로" 'grep -q "사슬 스크립트 그대로" <<<"$OUT"'
+runsut $B1 $B2
+chk "rc 0 + 사슬 그대로" '[ $RC = 0 ] && grep -q "사슬 스크립트 그대로" <<<"$OUT"'
 chk "code9 실행 (raw, prd)" 'grep -q -- "--only raw$" $F/code9.calls && grep -q -- "--only prd$" $F/code9.calls'
 chk "지난 code9.log 보관" 'ls $T/home/sykim/backup_log/code9.log.prev-* >/dev/null 2>&1'
-chk "세션 pid 와 다음에 볼 것" 'grep -q "4343 " <<<"$OUT" && grep -q "다음에 볼 것" <<<"$OUT"'
+chk "세션 pid · 다음에 볼 것 · 떨어졌을 때 절차" 'grep -q "4343 " <<<"$OUT" && grep -q "다음에 볼 것" <<<"$OUT" && grep -q "ls -l /dev/disk/by-id | grep ata-" <<<"$OUT" && grep -q "sudo bash .* $B1 $B2$" <<<"$OUT"'
 done_
 
-echo "[15] 기동 : 사슬이 없으면 같은 동작을 직접"
-setup 2; runsut "${MPS[@]}"
+echo "[12] 기동 : 사슬이 없으면 같은 동작을 직접 (1 개 인자)"
+setup 2; runsut $B1
 chk "rc 0" '[ $RC = 0 ]'
-chk "inline 사슬 파일" 'ls $T/home/sykim/backup_log/chain-inline-*.sh >/dev/null && grep -q "sleep 30" $T/home/sykim/backup_log/chain-inline-*.sh'
-chk "inline 문법" 'bash -n $T/home/sykim/backup_log/chain-inline-*.sh'
+chk "inline 사슬 (PRD 없음) + 문법" 'f=$(ls $T/home/sykim/backup_log/chain-inline-*.sh) && bash -n $f && ! grep -q -- "--only prd" $f'
 chk "RAW 세션 실행" 'grep -q -- "--disks $T/mp1 --only raw$" $F/code9.calls'
-chk "chain.log 시작 줄" 'grep -q "chain start (storage-backup-mount)" $T/home/sykim/backup_log/chain.log'
 done_
 
-echo "[18] 임시 파일을 못 만들면 fstab 은 바이트 그대로 (리뷰 1-1)"
-setup 2; cp -p $T/fstab $T/fstab.orig
-OUT=$(TMPDIR=/nonexistent-dir bash "$SUT" "${MPS[@]}" --no-start 2>&1); RC=$?
-chk "rc 1 + 손대지 않았다" '[ $RC = 1 ] && grep -q "임시 파일을 만들 수 없습니다" <<<"$OUT"'
-chk "fstab 바이트 동일" 'cmp -s $T/fstab $T/fstab.orig'
-chk "mount 안 함" '! grep -q "^mount " $F/calls'
-done_
-
-echo "[19] 정상 실행 뒤 '/' · '/data' 줄이 바이트 그대로 (리뷰 1-2)"
-setup 2; grep -v '^#' $T/fstab > $T/sys.lines
-runsut "${MPS[@]}" --no-start
-chk "rc 0" '[ $RC = 0 ]'
-chk "시스템 줄 보존" 'while IFS= read -r l; do grep -Fxq -- "$l" $T/fstab || exit 1; done < $T/sys.lines'
-chk "LABEL=data 탭 줄 그대로" 'grep -qP "^LABEL=data\t/data\text4\tdefaults\t0\t0$" $T/fstab'
-chk "스테이징 파일 안 남음" '! ls $T/fstab.new-* >/dev/null 2>&1'
-done_
-
-echo "[20] 같은 장치·마운트지점 줄이라도 nofail 이 없으면 바꾼다 (리뷰 2)"
-setup 1; printf '%s %s ext4 defaults 0 0\n' "$T/byid/ata-ST2000DM008-2FR102_ZK206HAY-part1" "$T/mp1" >> $T/fstab
-runsut "${MPS[@]}" --no-start
-chk "rc 0" '[ $RC = 0 ]'
-chk "옛 줄 주석" 'grep -q "^#(storage-backup-mount .*) $T/byid/ata-ST2000DM008-2FR102_ZK206HAY-part1 $T/mp1 ext4 defaults 0 0" $T/fstab'
-chk "살아 있는 mp1 줄은 nofail 하나" '[ "$(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | grep -c nofail)" = 1 ] && [ "$(grep -v "^#" $T/fstab | awk -v m=$T/mp1 "\$2==m" | wc -l)" = 1 ]'
-done_
-
-echo "[21] 지난 회차 하드가 우리 마운트지점에 붙은 채면 fstab 전에 멈춘다 (리뷰 3)"
-setup 2
-sed -i "s#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"\"#NAME=\"sdb1\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINT=\"$T/mp2\"#" $F/parts
-echo "$T/mp2 $T/dev/sdb1" > $F/mounts
-cp -p $T/fstab $T/fstab.orig; cp $F/mounts $F/mounts.orig
-runsut "${MPS[@]}" --no-start
-chk "rc 1 + 지난 회차 안내" '[ $RC = 1 ] && grep -q "에 /dev/sdb ZK206HAY (지난 회차 하드?) 가 붙어 있는데" <<<"$OUT" && grep -q "umount $T/mp2" <<<"$OUT"'
-chk "fstab 바이트 동일" 'cmp -s $T/fstab $T/fstab.orig'
-chk "마운트 그대로 (두 번 붙이지 않음)" 'cmp -s $F/mounts $F/mounts.orig && ! grep -q "^mount " $F/calls'
-chk "[3/8] 에 안 감" '! grep -q "^\[3/8\]" <<<"$OUT"'
-chk "표에 지금 마운트 표시" 'grep -q "sdb .*ZK206HAY .*$T/mp2" <<<"$OUT"'
-runsut "${MPS[@]}" --no-start --raw Z4ZBZE0A --prd ZK206HAY
-chk "지금 마운트와 맞게 지정하면 된다" '[ $RC = 0 ] && grep -q "이미 $T/mp2 에 붙어 있고 배정과 같습니다" <<<"$OUT"'
-done_
-
-echo "[22] 로그 폴더가 없으면 만든다"
-setup 2; rm -rf $T/home/sykim/backup_log; runsut "${MPS[@]}" --dry-run
+echo "[13] 로그 폴더가 없으면 만든다"
+setup 2; rm -rf $T/home/sykim/backup_log; runsut $B1 $B2 --dry-run
 chk "rc 0 + 로그 생김" '[ $RC = 0 ] && ls $T/home/sykim/backup_log/mount-and-backup-*.log >/dev/null'
 done_
 
-echo "[16] -h"
-OUT=$(bash "$SUT" -h); chk "사용법" 'grep -q -- "--dry-run" <<<"$OUT"'
-
-echo "[17] bash -n"
+echo "[14] -h · bash -n"
+OUT=$(bash "$SUT" -h); chk "사용법 (새 방식)" 'grep -q -- "--dry-run" <<<"$OUT" && grep -q "by-id 이름 두 개" <<<"$OUT" && ! grep -q -- "--mountpoints" <<<"$OUT"'
 chk "문법" 'bash -n "$SUT"'
+chk "fstab 을 건드리는 코드 없음" '! grep -vE "^\s*#|echo" "$SUT" | grep -qE "/etc/fstab|daemon-reload"'
 
 echo
 echo "통과 $PASS / 실패 $FAILN"
