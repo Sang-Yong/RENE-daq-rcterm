@@ -72,6 +72,11 @@ nohup /home/frontend/data_backup_simple_code9.sh --disks /backup_hdd_2 --only pr
 - `df` 가 멀쩡해도 `ls /dev/sd*` 에 장치가 없으면 유령 마운트. rsync 가 `Input/output error (5)` 를 쏟으면 장치가 사라진 것(§11.123). 새 판은 전송 중 30 초마다 `disk_alive` 로 잡아 그 자리에서 메일 + exit 1.
 - 저널이 끊긴 ext4 는 `e2fsck -f -y /dev/sdX1` 뒤에 마운트.
 
+**마운트+기동 한 번에 (2026-10-18~).** 저장소 서버에서 root 로 `sudo bash /home/frontend/storage-backup-mount.sh <by-id 하드1> [<by-id 하드2>]`
+(저장소의 `scripts/storage-backup-mount.sh`). 인자 없이 부르면 후보 표와 복사용 명령만 보인다. by-id 인자를 받아 `/backup_hdd`(RAW) · `/backup_hdd_2`(PRD) 에
+직접 `mount` 하고 권한·내용·`--dry-run` 확인 뒤 `backup_raw_then_prd.sh` 를 띄운다. **fstab 에는 쓰지 않는다**(의도 — 재부팅 뒤에도 같은 명령). 옵션 `--dry-run` · `--no-start`.
+떨어지면 umount → `e2fsck -f` → by-id 재확인 → 같은 인자로 재실행. 상세 §11.221.
+
 ## 새 배포 (스크립트를 고쳤을 때)
 
 ```bash

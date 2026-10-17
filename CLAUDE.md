@@ -194,6 +194,8 @@ scripts/storage-backup.sh 스토리지 서버의 외장하드 아카이브. 하�
                          ★ 이 PC 가 아니라 저장소 서버에서 돈다. 거기 배포 이름은
                            /home/frontend/data_backup_simple_code9.sh (§11.143)
                          ★ 기본이 --dry-run 이 아니다. 원본을 지운다. 먼저 --dry-run
+scripts/storage-backup-mount.sh  새 외장하드를 by-id 인자로 마운트(fstab 무기록)하고 백업을 기동
+                         ★ 저장소 서버에서 root 로. 배포 이름 /home/frontend/storage-backup-mount.sh (§11.221)
 scripts/mailq-send.sh    위 스크립트가 /data/MAILQ 에 떨군 메일을 내보낸다
                          ★ 이 PC 의 cron 이 5분마다. --status 는 읽기 전용 (§11.144)
 tests/storage-backup.test.sh   위 둘의 시험. 하드·자료·메일을 건드리지 않는다
@@ -804,6 +806,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-10 | 첫 실전 코드 갈래(구현→검토 2 라운드→배포) | skills/rene-daq-orchestrator (절차 변경 없음) | websummary 드라이브 실패 비치명화 |
 | 2026-10-10 | 코드 갈래 중 오케스트레이터는 work-web 에 미커밋 변경을 두지 않는다 | skills/rene-daq-orchestrator | 구현자가 남의 미커밋 변경을 보고 멈춤(첫 실전) |
 | 2026-10-10 | 금지 3 확장: probe·시험도 알림 경로를 가짜로 갈아끼운 뒤에만 | skills/rene-code-change | 검토자 probe 가 운영 daq-notify.log 에 가짜 사건을 남김(메일은 안 나감) |
+| 2026-10-18 | 코드 갈래 3 회째(백업 마운트 스크립트) — 리뷰 3 라운드 + 설계 변경 1 회(사용자 지시로 fstab 판 → by-id 인자 판) | skills/rene-daq-orchestrator (절차 변경 없음) | root 로 /etc 를 고치는 코드는 실패 경로 재현이 필수라는 것을 리뷰가 확인 (§11.221) |
 | 2026-10-17 | 코드 갈래 2 회째(시트 그리드 확장) -- 리뷰 1 라운드 승인 | skills/rene-daq-orchestrator (절차 변경 없음) | 시트 행 부족으로 20 시간 매시 실패 -> 18d9529 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
@@ -925,6 +928,50 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.221 ★★ 백업 9 회차 준비 — 하드 2 장 꽂힘, 마운트+기동을 한 번에 하는 root 스크립트 `scripts/storage-backup-mount.sh` (사용자 지시, 10-17 23:0x ~ 10-18 01:2x)
+
+정본: `/Data_ssd/LOG/harness/20261017_backup-operator_round9.md` · `20261018_code-engineer_backup-mount.md` (1~4 라운드) · `20261018_code-reviewer_backup-mount.md` (1~3 라운드). 수치·판정은 거기서.
+
+**상황.** 사용자 : "서버에 백업하드 2 개 연결했어, 자주 끊기니 끊겨도 마운트 에러 안 나게 마운트해서 백업 돌려줘."
+backup-operator 의 서버 읽기 전용 점검 : sdb ST2000DM008 ZK206HAY · sdc ST2000DM006 Z4ZBZE0A, 둘 다 ext4 이고 미마운트, 도는 세션 없음,
+code9 배포본 md5 가 저장소와 일치, dmesg 에 `xhci bad transfer trb length` 2 회. root 가 없어 수동 명령 블록을 넘겼고, 사용자가 "그 명령을 자동으로 하는 root 스크립트를 만들어 달라, 단계마다 출력" 으로 이어졌다.
+이번 라벨 예상 RAW-009 · PRD-007 (cron 이 자동 부여, §11.204).
+
+**설계 변천 (code-engineer 구현 → code-reviewer 검토 3 라운드 + 설계 변경 1 회).**
+
+| 판 | 커밋 | 내용 | 시험 |
+|---|---|---|---|
+| 1 | ed69c7b | fstab 에 by-id + `nofail` 로 적고 마운트 | 56 |
+| 리뷰 1 | — | "고치면 승인" : ★ `mktemp` 가 실패하면 `cat > /etc/fstab` 이 fstab 을 **비우는** 경로를 재현. 그 밖에 `nofail` 없는 옛 줄, 지난 회차 하드 순서 | — |
+| 2 | 6f14e4a | 스테이징 파일 + 검증 + `mv` 로 fstab 갱신, 우리 마운트 지점에 이미 마운트된 하드가 있으면 멈춤 | 73 |
+| 리뷰 2 | — | 승인 | — |
+| 설계 변경 | — | **사용자 지시 : "fstab 에 적고 재부팅하는 절차 필요 없다, by-id 를 인자로 받아 바로 mount 해라"** | — |
+| 3 | 332761c | fstab 기록 전부 제거. 인자 없으면 후보 표 + 복사용 명령, 인자 1~2 개면 `mount -t ext4 /dev/disk/by-id/<이름> /backup_hdd[_2]` 를 직접 | 55 |
+| 리뷰 3 | — | "고치면 승인" : 떨어졌을 때 안내에 `e2fsck -f` 가 빠짐 | — |
+| 4 | ee1c10c | e2fsck 복원 + 파티션 이름 힌트 | 58 |
+
+오케스트레이터가 diff 를 확인한 뒤 10-18 01:2x 에 push (45fbedc..ee1c10c) · 운영 디렉터리 pull · 저장소 서버에 `.new` + `mv` 로 배포(md5 38fd6a2f 일치, §8). 서버에서 인자 없이 실행해 후보 표와 명령 출력을 확인했다.
+
+**★ 교훈 둘.**
+1. root 로 /etc 파일을 고치는 스크립트는 "새 내용을 만들다 실패하면 원본을 비우는" 경로가 가장 위험하다 — 스테이징 파일에 완성한 뒤 검증하고 `mv` 로만 바꾼다. 이번엔 그 설계 자체를 사용자 지시로 없앴으므로(fstab 무기록) 그 위험도 사라졌다.
+2. fstab 무기록은 의도다. 하드가 자주 떨어지는 독에서는 부팅 시 자동 마운트가 오히려 유령 마운트(§11.124)의 원인이 되므로, 매번 사람이 by-id 인자로 마운트한다. 재부팅 뒤에도 같은 명령이다.
+
+**사용법 (저장소 서버에서 root 로).**
+```
+sudo bash /home/frontend/storage-backup-mount.sh                                   # 인자 없음 : 후보 표 + 복사용 명령만 보인다
+sudo bash /home/frontend/storage-backup-mount.sh ata-ST2000DM008-2FR102_ZK206HAY-part1 ata-ST2000DM006-2DM164_Z4ZBZE0A-part1
+옵션  --dry-run (아무것도 안 바꿈) · --no-start (마운트까지만)
+```
+단계 [1/7]~[7/7] : 전제(세션 중복 검사, `pgrep -f` 안 씀) · 하드 확인 · 마운트(findmnt 대조) · 권한(chown frontend) · 내용(`ls -A`) · code9 `--only raw/prd --dry-run` · `backup_raw_then_prd.sh` 기동.
+마운트 지점은 인자 첫째가 `/backup_hdd`(RAW), 둘째가 `/backup_hdd_2`(PRD). 떨어지면 umount → `e2fsck -f` → by-id 재확인 → 같은 인자로 재실행.
+시험 `tests/storage-backup-mount.test.sh` 58 (하드·fstab·자료 무접촉).
+
+**남은 것.**
+- **실제 root 실행과 백업 기동은 아직 사용자 몫**이다 (위 명령). 이 기록 시점에 실행 여부는 확인 못 함.
+- 기동 뒤 확인 : `ssh store 'tail -c 400 ~/sykim/backup_log/code9.log'` · 메일(세션 시작 알림은 cron 이 낸다, build=NEW) · 시트 `back_up_hdd_log` 새 행과 Disk Label 자동 부여.
+- xhci 오류 징후(`bad transfer trb length`)가 보이므로 독이 계속 떨어지면 USB 허브를 거치지 않고 서버 뒷면 포트에 독을 직결할 것을 권고 (§11.123 A, §11.180).
+- 메일은 보내지 않았다 (세션 기동 뒤 cron 이 낸다).
 
 #### 11.220 ★★ GECO(HV 제어) 접속 불가 점검 · typeB 설정 점검 · run 4388 = `_mid3_pidfix_typeB` 24 h 로테이션 (10-16 15:0x ~ 15:3x)
 
@@ -4537,11 +4584,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3  (★ 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 10-17 22:4x 부터 정식 마운트(10.0.0.10, nofail), postrun 22:48 재기동, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       ★ 3회차 진행 중 (09-13 01:50~) : RAW 세션(베이 1, Z4ZBXG5B) → 끝나면 PRD 세션(베이 2, Z4ZBZE6T) 자동 연결 (§11.189).
-           옛 하드 26 장 전수 스캔·라벨 확정 (§11.187~188, docs/BACKUP-DISKS.md). 2회차 끝 09-12 17:07 (§11.186).
-           002455~002457 완료 · 002458 1171 개 조각. 런 1,681 개 남음. 새 하드 2장 + 같은 명령이면 새 판으로 이어진다 (cron 이 build=NEW 알림)
-           code9 는 이탈 감지 + 시리얼 + 시트 링크 + full 색인판 — 다음 세션부터. 시트 자동 등재 cron 37분 (§11.184).
-           독 교체 검토 (§11.180)
+백업       ★ 9 회차 준비 (10-18): 하드 2 장 꽂힘·미마운트(ZK206HAY · Z4ZBZE0A), 사용자가 서버에서 root 로 `storage-backup-mount.sh <by-id 2 개>` 실행 대기 (§11.221).
+           옛 하드 26 장 라벨·시트 (§11.187~188, docs/BACKUP-DISKS.md). 시트 자동 등재 cron 37분 (§11.184). 독 이탈 이력 (§11.180)
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 (시트 그리드 자동 확장) · mailq-send 5분
            · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
@@ -4569,6 +4613,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.221         ★★ 백업 9 회차 준비 : 하드 2 장 꽂힘, 마운트+기동 root 스크립트 scripts/storage-backup-mount.sh (by-id 인자, fstab 무기록 — 사용자 지시로 fstab 판 폐기). 리뷰가 fstab 비움 경로를 잡음. 사용자 실행 대기
 §11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h → 16:05 run 4389 `_typeB_2`(ch24~29) 는 6.5 분 0 사건(DAQ 정상, B2 신호 분석은 판정 불가) → 16:12 사용자 지시로 정지·대기, rcterm.params 가 `_typeB_2` 임에 주의
 §11.219         ★★ 10-16 07:17 ch8 THR 80 예약 전환 실패(cron 에 ROOT 환경 없음) → 09:04 run 4387 = `_mid3_pidfix` 2 h 런(11:04 뒤 대기). 시트 Description 에 설정 파일명 + 채널별 THR 전→후 기록(소급은 `--update-desc ours`)
 §11.218         ★★ ch8(PMT 18) 문턱 80 10 분 런(run 4385, 77.4 Hz) : ε_ch8 0.9938 → 0.9961 (+4.3σ), ∏ε 0.9746 → 0.9764, 부작용 없음(새 켜짐 111 건 전부 MIP 뮤온), 80 고정 권고. 4386 으로 원복. 07:17 에 80 고정 전환 예약(02:2x). chain_down 메일 12 h 휴지(13:50 자동 복귀)
@@ -4706,6 +4751,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
 | **하드 E·F 를 다시 꽂으면 `e2fsck -f` 먼저** | 09-07 21:15 에 마운트된 채 독에서 떨어져 두 하드의 저널이 끊겼다 | §11.170 |
 | G·H 를 뽑기 전에 `sudo umount` | 독은 한 USB 장치라 한쪽을 뽑으면 둘 다 떨어진다 | §11.170 |
+| **서버에서 `sudo bash /home/frontend/storage-backup-mount.sh ata-ST2000DM008-2FR102_ZK206HAY-part1 ata-ST2000DM006-2DM164_Z4ZBZE0A-part1`** | 9 회차 하드 마운트 + 백업 기동 (fstab 무기록). 기동 뒤 code9.log · 메일 · 시트 확인 | §11.221 |
 | **하드를 두 장씩 꽂고 `scripts/backup-sheet-rebuild.sh --scan --commit`** | 시리얼 `?` 인 하드 여섯 장을 채우고 라벨을 확정한다. 라벨은 `docs/BACKUP-DISKS.md` 대로 스티커 (`RENE-ALL-001` …) | §11.187 · §11.188 |
 | 새 하드부터는 `--only raw` / `--only prd` 로 베이별로 | RAW 하드·PRD 하드 분리 (사용자 지시). 라벨 RENE-RAW-002 · RENE-PRD-001 부터 | §11.188 |
 | 새 그림 40 장(zip, 01~40)을 드라이브 `RENE_DAQ` 밑 새 폴더에 올리기 → `--init` | 그림 이름이 바뀌어 드라이브의 옛 20 장과 안 맞는다. 서비스 계정은 못 올린다 | §11.191 |
