@@ -377,7 +377,7 @@ static bool LinearExtrap(const std::vector<double> &promptMev, double lo, double
 static void Impl(const std::vector<int> &runs, const TString &out,
                  double muShowerNpe, double liheFitLoS, double liheFitHiS,
                  int liheMinCand, double fnELoMev, double fnEHiMev,
-                 double liheLiFrac, double psdNsig, bool force, const TString &ibdOvr, const char *dstSub) {
+                 double liheLiFrac, double psdNsig, bool force, const TString &ibdOvr, const char *dstSub, int liheEnable) {
    TString tsvPath = out + "metrics_summary.tsv";
 
    bool schemaOld = false;
@@ -565,7 +565,9 @@ static void Impl(const std::vector<int> &runs, const TString &out,
             LiHeWalk(promptT, showers, false, &h);
             LiHeWalk(promptT, showers, true,  &hr);
             double nInRange = h.Integral(1, h.GetNbinsX());
-            if (showers.empty() || rMu <= 0) {
+            if (!liheEnable) {
+               r.liheStat = "off";             // lihe_enable = 0 (2026-10-18) : 적합하지 않는다. n_lihe/e_lihe 는 -1 그대로
+            } else if (showers.empty() || rMu <= 0) {
                r.liheStat = "noshower";
             } else if (nInRange < liheMinCand) {
                r.liheStat = "lowstat";
@@ -683,7 +685,7 @@ static void Impl(const std::vector<int> &runs, const TString &out,
 void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
                   double liheFitLoS, double liheFitHiS, int liheMinCand,
                   double fnELoMev, double fnEHiMev, double liheLiFrac, double psdNsig,
-                  bool force = false, const char *ibdOverrides = "", const char *dstSub = "dst") {
+                  bool force = false, const char *ibdOverrides = "", const char *dstSub = "dst", int liheEnable = 1) {
    TString out(outDir);
    if (!out.EndsWith("/")) out += "/";
    if (gSystem->mkdir(out, kTRUE) != 0 && gSystem->AccessPathName(out, kWritePermission)) {
@@ -702,5 +704,5 @@ void BuildMetrics(const char *runList, const char *outDir, double muShowerNpe,
    TString ovr = ibdOverrides ? ibdOverrides : "";
    ovr = ovr.Strip(TString::kBoth);
    Impl(runs, out, muShowerNpe, liheFitLoS, liheFitHiS, liheMinCand,
-        fnELoMev, fnEHiMev, liheLiFrac, psdNsig, force, ovr, dstSub);
+        fnELoMev, fnEHiMev, liheLiFrac, psdNsig, force, ovr, dstSub, liheEnable);
 }

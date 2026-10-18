@@ -209,13 +209,24 @@ else
    echo "CHK verify_discriminates=0 (같음 rc=$R1 / 틀림 rc=$R2)" >> "$T/chk"
 fi
 
+# ------------------------------------------ Li/He 끔 (lihe_enable = 0, 2026-10-18) ----
+mkdir -p "$T/out3/dst"; ln -s "$T/out/dst/DST_$RUN.root" "$T/out3/dst/DST_$RUN.root"
+cp "$T/cuts_a.params" "$T/cuts_c.params"; echo 'lihe_enable = 0' >> "$T/cuts_c.params"
+MONITORCUTS="$T/cuts_c.params" RUNSUM_OUT="$T/out3" "$DIR/tools/monitor/metrics.sh" --list "$RUN" > "$T/log3" 2>&1
+M3="$T/out3/metrics_summary.tsv"
+if [ "$(col 16 "$M3")" = "off" ] && [ "$(col 14 "$M3")" = "-1.000" ] && [ "$(col 21 "$M3")" = "-1.000" ] && [ "$(col 7 "$M3")" = "$N_IBD" ]; then
+   echo "CHK lihe_off=1" >> "$T/chk"
+else
+   echo "CHK lihe_off=0 (stat $(col 16 "$M3") n $(col 14 "$M3") rev $(col 21 "$M3") ibd $(col 7 "$M3")/$N_IBD)" >> "$T/chk"
+fi
+
 # ------------------------------------------------------------------ 판정 ----
 cat "$T/chk"
 FAIL=0
-for k in lihe_stat=ok lihe_range=1 lihe_rev_zero=1 rmu=1 fn_side_sat=1 fn_sat_frac=1 \
+for k in lihe_off=1 lihe_stat=ok lihe_range=1 lihe_rev_zero=1 rmu=1 fn_side_sat=1 fn_sat_frac=1 \
          fn_scaled_pos=1 acci_rp_pos=1 psd_nlike=1 override_moves=1 verify_refused=1 \
          verify_discriminates=1; do
    grep -qx "CHK $k" "$T/chk" || { echo "FAIL $k"; FAIL=1; }
 done
 [ "$FAIL" -eq 0 ] || { echo "---- 빌드 로그 끝 ----"; tail -12 "$T/log1"; exit 1; }
-echo "PASS monitor-bg (12/12)"
+echo "PASS monitor-bg (13/13)"

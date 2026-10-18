@@ -86,6 +86,8 @@ def build_rows(p):
         if src == "dst" and gd and len(gd) > 18:
             if gd[15] == "ok":
                 lihe = f"{float(gd[13]):.1f}(예비)"
+            elif gd[15] == "off":
+                lihe = "(끔)"   # monitorcuts lihe_enable = 0 (2026-10-18)
             if float(gd[17]) >= 0:
                 fn = f"{float(gd[17]):.1f}(예비)"
         #  gen-summary-html.sh 의 awk strftime() 은 utc 인자를 안 주면 로컬

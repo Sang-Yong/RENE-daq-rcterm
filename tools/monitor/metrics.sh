@@ -65,6 +65,7 @@ LIHE_MIN_CAND=$(getp lihe_min_cand 50)
 FN_E_LO_MEV=$(getp fn_e_lo_mev 12.0)
 FN_E_HI_MEV=$(getp fn_e_hi_mev 50.0)
 LIHE_LI_FRAC=$(getp lihe_li_frac 1.0)
+LIHE_ENABLE=$(getp lihe_enable 1)   # 0 = Li/He 적합 끔 (2026-10-18). lihe_stat=off, n_lihe/e_lihe -1
 PSD_NSIG=$(getp psd_nsig 3.0)
 METRICS_DSTSUB=$(getp metrics_dst_subdir dst)   # 런별 지표가 읽을 DST 폴더. dst = 패널 AND veto(legacy 와 같다) · dst_m2 = 강한 veto (2026-09-15)
 [ -n "$(getp fn_tag_s "")" ] && echo "[WARN] fn_tag_s 는 v2 에서 쓰지 않는다. 무시한다 ($CUTS)"
@@ -125,7 +126,7 @@ if [ -n "$LIST" ]; then
    echo "지표  : $OUT/metrics_summary.tsv   런 : $LIST   DST : $OUT/$METRICS_DSTSUB/"
    if [ -r "$CUTS" ]; then echo "컷    : $CUTS"; else echo "컷    : 기본값 ($CUTS 없음)"; fi
    [ -n "$IBD_OVR" ] && echo "★ IBD 오버라이드 : $IBD_OVR  (--verify 는 거부된다)"
-   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $LIHE_LI_FRAC, $PSD_NSIG, $FORCE, \"$IBD_OVR\", \"$METRICS_DSTSUB\""
+   ARGS="\"$LIST\", \"$OUT/\", $MU_SHOWER_NPE, $LIHE_FIT_LO_S, $LIHE_FIT_HI_S, $LIHE_MIN_CAND, $FN_E_LO_MEV, $FN_E_HI_MEV, $LIHE_LI_FRAC, $PSD_NSIG, $FORCE, \"$IBD_OVR\", \"$METRICS_DSTSUB\", $LIHE_ENABLE"
    if [ "$DRY" = 1 ]; then
       echo "(dry-run) root -l -b -q '$DIR/BuildMetrics.C+($ARGS)'"
    else

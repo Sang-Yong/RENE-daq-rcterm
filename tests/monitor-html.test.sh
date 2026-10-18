@@ -218,8 +218,17 @@ printf '%s\n' "$c4310" | sed -n 12p | grep -q '>6/15<' || ok9=0
 CHK rate_delta_panels=1" || { R="$R
 CHK rate_delta_panels=0"; echo "rate_delta_panels 진단 :"; printf '%s\n' "$c4312" | sed -n 9,12p; printf '%s\n' "$c4310" | sed -n 11,12p; }
 
+# ⑩ Li/He 끔 (lihe_enable = 0, 2026-10-18) : lihe_stat=off 인 n-Gd 행은 Li/He 칸이 '(끔)' 이고, fast-n '(예비)' 는 그대로 하나
+T2="$T/off"; mkdir -p "$T2"; cp "$T"/*.tsv "$T2/" 2>/dev/null
+awk -F'\t' 'BEGIN{OFS="\t"} !/^#/ && $1==4312 && $2=="_nGd" {$14="-1"; $15="-1"; $16="off"} {print}' "$T/metrics_summary.tsv" > "$T2/metrics_summary.tsv"
+bash "$SUT" "$T2" "$T2/dst.html" dst 333 > /dev/null 2>&1
+r4312o=$(row_of "$T2/dst.html" 4312)
+if printf '%s' "$r4312o" | grep -q '(끔)' && [ "$(printf '%s' "$r4312o" | grep -o '(예비)' | wc -l)" -eq 1 ]; then R="$R
+CHK lihe_off=1"; else R="$R
+CHK lihe_off=0"; echo "lihe_off 진단 : $r4312o"; fi
+
 FAILED=0
-for k in rate_delta_panels rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics type_position; do
+for k in lihe_off rate_delta_panels rows_and_dash order_desc legacy_dash_no_pre dst_preliminary src_flag refresh_meta legacy_no_metrics type_position; do
    if echo "$R" | grep -q "CHK $k=1"; then
       :
    else
@@ -232,4 +241,4 @@ if [ "$FAILED" -ne 0 ]; then
    echo "-- dst.html --"; cat "$DST"
    exit 1
 fi
-echo "PASS monitor-html (9/9)"
+echo "PASS monitor-html (10/10)"

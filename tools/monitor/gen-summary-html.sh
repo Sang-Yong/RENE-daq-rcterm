@@ -192,6 +192,8 @@ awk -F'\t' -v RSF="$RS" -v PSF="$PS" -v MSF="$MS" -v RCF="$RC" -v VSF="$VS" -v S
                fnv = sprintf("%.1f <span class=\"pre\">(예비)</span>", fns[r])
             if ((r in lihestat) && lihestat[r] == "ok")
                lhv = sprintf("%.1f <span class=\"pre\">(예비)</span>", lihe[r])
+            else if ((r in lihestat) && lihestat[r] == "off")
+               lhv = "(끔)"     #  monitorcuts lihe_enable = 0 (2026-10-18)
          }
 
          #  선원이 '?'(모름) 나 'none'(선원 없음 -- 보통의 물리 런. 뜻은

@@ -24,6 +24,9 @@
 //   * fast-n : 사이드밴드(prompt [fn_e_lo, fn_e_hi] MeV, single ∪ 포화) 쌍 수 × 신호창 폭/사이드밴드 폭 (0차 외삽)
 //              prompt 스펙트럼 모양은 신호창 안에서 평평, delayed 모양은 사이드밴드 쌍의 delayed 그대로
 //   * ⁹Li/⁸He : 날짜마다 직전 샤워링 뮤온까지의 dt 를 Daya Bay Eq.2 로 적합 (표본 lihe_min_cand 미만이면 lowstat=0)
+//              liheEnable = 0 (monitorcuts lihe_enable = 0, 2026-10-18 사용자 : "이 검출기에서는 검출이 힘들다") 이면 적합도 빼기도 하지 않는다 —
+//              신호 = 전체 − 우발 − fast-n. 표의 n_lihe/e_lihe 는 0, lihe_stat = off. 그림 37~48·60·62/63 범례에서 Li/He 가 빠지고
+//              51/52 는 dt 분포만 그린다(적합 없음)
 //              스펙트럼 모양은 '직전 샤워링 뮤온 뒤 3τ 안의 쌍' 에서 '직후(역방향) 3τ 안의 쌍' 을 뺀 초과분
 //   ---- 추가 컷 · 대안 규격화 (2026-09-14, 사용자 : "배경 컷이 더 있어야 한다. 신호 스펙트럼이 이상하다") ----
 //   * psdCutNsig > 0 : prompt 의 p_psd = (꼬리비율 − m_γ(E)) / σ_γ(E) 가 이 값을 넘는 쌍을 버린다 (NEOS §4.3.2.2 의 기각.
@@ -52,6 +55,7 @@
 #include <TGraphErrors.h>
 #include <TObjString.h>
 #include <TLegend.h>
+#include <TLegendEntry.h>
 #include <TLine.h>
 #include <TPad.h>
 #include <THStack.h>
@@ -150,6 +154,13 @@ struct DayAcc {
 };
 
 // ---------------------------------------------------------------------------
+//  범례 문구를 한 줄로 로그에 남긴다 (시험이 'Li/He 가 범례에 있나' 를 PNG 를 읽지 않고 본다. 2026-10-18)
+static void LegLog(const char *file, TLegend *lg) {
+   TString t; TIter it(lg->GetListOfPrimitives());
+   while (TObject *o = it()) { TLegendEntry *e = dynamic_cast<TLegendEntry *>(o); if (e) { t += " | "; t += e->GetLabel(); } }
+   printf("  [LEG ] %s%s\n", file, t.Data());
+}
+
 //  스펙트럼 그림 : 배경 빼기 전(검정) 과 전부 뺀 뒤(빨강). 선형축 + 로그 inset (우상단), 범례는 우측 중간.
 static void DrawSpectrum(const TString &dir, const char *file, const char *title, TH1D *hAll, TH1D *hSub,
                          const std::vector<std::pair<std::string, double>> &parts) {
@@ -167,7 +178,7 @@ static void DrawSpectrum(const TString &dir, const char *file, const char *title
    leg->AddEntry(hAll, Form("all pairs (on-window)  N = %.0f", hAll->Integral()), "l");
    leg->AddEntry(hSub, Form("after background subtraction  N = %.0f", hSub->Integral()), "lf");
    for (const auto &p : parts) leg->AddEntry((TObject *)nullptr, Form("  #minus %s : %.1f", p.first.c_str(), p.second), "");
-   leg->Draw();
+   leg->Draw(); LegLog(file, leg);
    //  로그 inset (우상단) : 낮은 빈이 보이도록
    if (hAll->GetMaximum() > 0) {
       TPad *pd = new TPad(Form("ins_%s", file), "", 0.57, 0.52, 0.95, 0.88);
@@ -200,7 +211,7 @@ static void DrawBgComponents(const TString &dir, const char *file, const char *t
    TLegend *leg = new TLegend(0.30, 0.56, 0.95, 0.88); leg->SetBorderSize(0); leg->SetFillStyle(1001); leg->SetFillColor(kWhite); leg->SetTextSize(0.021);
    for (auto &cp : comps) { cp.h->SetStats(0); cp.h->SetLineColor(cp.color); cp.h->SetLineWidth(2); cp.h->Draw("HIST SAME"); leg->AddEntry(cp.h, Form("%s : N = %.1f", cp.label.c_str(), cp.h->Integral()), "l"); }
    if (side) { side->SetStats(0); side->SetLineColor(kGray + 2); side->SetLineWidth(2); side->SetLineStyle(2); side->Draw("HIST SAME"); leg->AddEntry(side, Form("%s : N = %.0f", sideLabel, side->Integral()), "l"); }
-   leg->Draw();
+   leg->Draw(); LegLog(file, leg);
    TPad *pd = new TPad(Form("ins_%s", file), "", 0.57, 0.15, 0.95, 0.55);
    pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
    double ymaxAll = ymax; for (auto &cp : comps) ymaxAll = std::max(ymaxAll, cp.h->GetMaximum());
@@ -238,7 +249,7 @@ static void DrawDecomposition(const TString &dir, const char *file, const char *
    for (size_t i = 0; i < comps.size(); ++i) leg->AddEntry(st->GetHists()->At((int)i + 1), Form("%s  N = %.1f", comps[i].label.c_str(), comps[i].h->Integral()), "f");
    if (logy) { int nNeg = 0; for (int b = 1; b <= hSig->GetNbinsX(); ++b) if (hSig->GetBinContent(b) < 0) nNeg++;
                if (nNeg > 0) leg->AddEntry((TObject *)nullptr, Form("signal < 0 in %d bins (drawn as 0)", nNeg), ""); }
-   leg->Draw();
+   leg->Draw(); LegLog(tag.Data(), leg);
    c->Print(dir + tag + ".png");
 }
 
@@ -248,7 +259,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                 double liheLiFrac = 1.0, double psdCutNsig = -1, int fnNormMode = 0, double fnNormLoMev = 8.5,
                 double muVetoUs = 0, double showerVetoMs = 0, const char *dstSub = "dst",
                 double isoPreUs = -1, double isoPostUs = -1, double winLoMev = -1, double winHiMev = -1, double expIbdPerDay = 1.0,
-                const char *fnFitRanges = "4.2,7.0,9.6,12.0") {
+                const char *fnFitRanges = "4.2,7.0,9.6,12.0", int liheEnable = 1) {
    gStyle->SetOptStat(0);
    TString out(outDir); if (!out.EndsWith("/")) out += "/";
    auto meta  = LoadRunSummary(out + "run_summary.tsv");
@@ -463,8 +474,9 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       std::ofstream o((out + "daily_summary.tsv").Data());
       o << "# RENE daily summary (machine readable). BuildDaily.C 가 만든다. 런별 표(metrics_summary)와 별개다.\n"
            "# 날짜는 이 PC 의 지역시 자정 기준. live_s 는 서브런을 등분해 날짜에 나눠 붙인 값. rate 는 [/day] = 후보/live.\n"
-           "# ★예비 : fast-n(0차 외삽) · Li/He(Daya Bay Eq.2, 표본 " << liheMinCand << " 미만이면 lowstat) 는 분석팀 검증 전.\n"
-           "#date\ttag\tlive_s\tn_run\tn_subrun\tn_ibd\tn_ibd_acci\tacci_scaled\tn_cand\tcand_err\trate_per_day\trate_err"
+           << (liheEnable ? TString::Format("# ★예비 : fast-n(0차 외삽) · Li/He(Daya Bay Eq.2, 표본 %d 미만이면 lowstat) 는 분석팀 검증 전.\n", liheMinCand)
+                          : TString("# ★예비 : fast-n 은 분석팀 검증 전.  Li/He : 끔 (lihe_enable = 0) — 적합·빼기 없음, n_lihe/e_lihe = 0, lihe_stat = off\n")).Data()
+        << "#date\ttag\tlive_s\tn_run\tn_subrun\tn_ibd\tn_ibd_acci\tacci_scaled\tn_cand\tcand_err\trate_per_day\trate_err"
            "\tn_fn_side\tfn_flat\tn_shower\tn_lihe\te_lihe\tlihe_stat\truns\tn_psd_rej\tfn_mode\tn_mu_rej"
            "\tn_on_win\tn_off_win\tn_cand_win\tcand_win_err\trate_win\trate_win_err\twin_lo_mev\twin_hi_mev\n";
       for (int k = 0; k < 2; ++k) {
@@ -476,7 +488,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             double err = std::sqrt((double)a.nOn + acciScale[k] * acciScale[k] * a.nOff);
             double day = a.live / 86400.0;
             double rMu = a.nShower / a.live;
-            if (a.nShower == 0 || rMu <= 0) a.liheStat = "noshower";
+            if (!liheEnable) { a.liheStat = "off"; a.nLihe = 0; a.eLihe = 0; }   // lihe_enable = 0 : 적합하지 않고 빼지 않는다 (2026-10-18)
+            else if (a.nShower == 0 || rMu <= 0) a.liheStat = "noshower";
             else if ((long long)a.dtPrev.size() < liheMinCand) a.liheStat = "lowstat";
             else {
                TH1D h(Form("hdt_%s_%s", fileTag[k], a.day.c_str()), "", 200, 0, liheFitHiS); h.SetDirectory(nullptr);
@@ -542,7 +555,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          for (auto &kv : acc[k]) { const DayAcc &a = kv.second; if (a.live <= 0) continue; double day = a.live / 86400.0; sw.add(a.dayStart + 43200, a.candW / day, a.errW / day); }
          std::vector<TrendSeries> vw{sw}; TrendPageOpt ow; ow.logInset = false; ow.xmin = dXmin;
          DrawTrendPage(nopdf, out, Form("%02d_daily_rate_window_%s", 62 + k, fileTag[k]),
-                       Form("Candidate rate per day in the reactor-referenced prompt window %.1f-%.1f MeV, %s (acc., fast-n, Li/He subtracted)", winL[k], winH[k], chanName[k]), "Rate [/day]", vw, "", ow);
+                       Form("Candidate rate per day in the reactor-referenced prompt window %.1f-%.1f MeV, %s (acc., fast-n%s subtracted)", winL[k], winH[k], chanName[k], liheEnable ? ", Li/He" : ""), "Rate [/day]", vw, "", ow);
       }
    }
 
@@ -573,8 +586,8 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
       if (nLi > 0 && dLi->Integral() > 0) { dLi->Scale(nLi / dLi->Integral()); dSub->Add(dLi, -1); }
       std::vector<std::pair<std::string, double>> parts = {
          {"accidental (off-window #times window ratio)", acciScale[k] * hP[k][1]->Integral()},
-         {fnNormMode == 2 ? "fast-n (exponential, two-region fit)  [prelim]" : fnNormMode == 1 ? "fast-n (flat, tail-normalized)  [prelim]" : "fast-n (sideband, flat)  [prelim]", nFn},
-         {"^{9}Li/^{8}He (daily fits)  [prelim]", nLi}};
+         {fnNormMode == 2 ? "fast-n (exponential, two-region fit)  [prelim]" : fnNormMode == 1 ? "fast-n (flat, tail-normalized)  [prelim]" : "fast-n (sideband, flat)  [prelim]", nFn}};
+      if (liheEnable) parts.push_back({"^{9}Li/^{8}He (daily fits)  [prelim]", nLi});
       DrawSpectrum(out, Form("%02d_spectrum_prompt_%s", 37 + 2 * k, fileTag[k]),
                    Form("Prompt energy spectrum of all IBD pairs, %s (all days)", chanName[k]), pAll, pSub, parts);
       DrawSpectrum(out, Form("%02d_spectrum_delayed_%s", 38 + 2 * k, fileTag[k]),
@@ -610,13 +623,18 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          TBox *box = new TBox(winL[k], ymin * 1.1 - 1, std::min(winH[k], eHi), ymax * 1.45 + 1); box->SetFillColorAlpha(kGray + 1, 0.18); box->SetLineColor(kGray + 2); box->Draw("SAME");
          r->Draw("HIST SAME"); tA->Draw("HIST SAME"); tB->Draw("HIST SAME");
          TLegend *lg = new TLegend(0.40, 0.54, 0.97, 0.89); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.023);
-         lg->AddEntry(r, Form("prompt after acc. / fast-n / Li-He subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
-         lg->AddEntry(box, Form("window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
+         if (liheEnable) {
+            lg->AddEntry(r, Form("prompt after acc. / fast-n / Li-He subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
+            lg->AddEntry(box, Form("window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f, Li/He %.1f", winL[k], winH[k], onW, accW, fnW, liWw), "f");
+         } else {
+            lg->AddEntry(r, Form("prompt after acc. / fast-n subtraction (S1 window %.1f-%.0f MeV)", s1lo, s1hi), "l");
+            lg->AddEntry(box, Form("window %.1f-%.1f MeV : on %lld, acc %.1f, fast-n %.1f", winL[k], winH[k], onW, accW, fnW), "f");
+         }
          lg->AddEntry((TObject *)nullptr, Form("candidates in window = %.1f #pm %.1f  =  %.2f #pm %.2f /day  (%.1f live days)", candW, errW, days > 0 ? candW / days : 0, days > 0 ? errW / days : 0, days), "");
          lg->AddEntry(tA, "reactor IBD prompt shape (Mueller 2011 #times #sigma_{IBD}, #sigma_{E}=0.12#sqrt{E}), scaled to window", "l");
          lg->AddEntry(tB, Form("same shape at %.2f IBD/day (expected at this baseline) : window eff. %.2f #rightarrow %.1f expected  (S1 eff. %.2f)", expPerDay, effW, expW, effS1), "l");
          lg->AddEntry((TObject *)nullptr, Form("window / expectation = %.1f   (#gg 1 : correlated background survives, add cuts)", expW > 0 ? candW / expW : 0), "");
-         lg->Draw();
+         lg->Draw(); LegLog(Form("%02d_signal_window_%s", 60 + k, fileTag[k]), lg);
          //  inset : 창 안 쌍의 Δt
          TPad *pin = new TPad(Form("pin_win_%s", fileTag[k]), "", 0.12, 0.50, 0.40, 0.88); pin->SetFillColor(kWhite); pin->SetBorderSize(1); pin->Draw(); pin->cd();
          pin->SetLeftMargin(0.16); pin->SetBottomMargin(0.18); pin->SetRightMargin(0.03); pin->SetTopMargin(0.10);
@@ -655,10 +673,12 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
                                 {pFn,  TString::Format("fast-n (%s)  [prelim]", fnHow[k].c_str()).Data(), (int)kGreen + 2},
                                 {pLi,  "^{9}Li/^{8}He template (after-shower excess), scaled to fits  [prelim]", (int)kMagenta + 1},
                                 {pRej, "multiplicity-rejected excess (multi-n indicator; not subtracted, may clip)", (int)kOrange + 7}};
+      if (!liheEnable) pc.erase(pc.begin() + 2);   // Li/He 끔 : 성분에서 뺀다
       std::vector<BgComp> dc = {{dAcc, "accidental (off-window #times ratio)", (int)kBlue + 1},
                                 {dFn,  "fast-n (sideband pairs' delayed shape, scaled)  [prelim]", (int)kGreen + 2},
                                 {dLi,  "^{9}Li/^{8}He template, scaled to fits  [prelim]", (int)kMagenta + 1},
                                 {dRej, "multiplicity-rejected excess (not subtracted, may clip)", (int)kOrange + 7}};
+      if (!liheEnable) dc.erase(dc.begin() + 2);
       if (psdCutNsig > 0) {
          pc.push_back({pPsdRej, TString::Format("PSD n-like prompt rejected (p_{psd} > %.1f), on #minus acc", psdCutNsig).Data(), (int)kCyan + 2});
          dc.push_back({dPsdRej, TString::Format("PSD n-like prompt rejected (p_{psd} > %.1f), on #minus acc", psdCutNsig).Data(), (int)kCyan + 2});
@@ -715,7 +735,7 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          hp->GetXaxis()->SetTitleSize(0.045); hp->GetYaxis()->SetTitleSize(0.045);
          hp->Draw("HIST"); hn->Draw("HIST SAME");
          double rMu = liveTot[k] > 0 ? showerTot[k] / liveTot[k] : 0; double nL = 0, eL = 0; bool fitOk = false;
-         if (rMu > 0 && hp->GetEntries() >= liheMinCand) fitOk = DailyFitLiHe(hp, Form("flihe_all_%s", fileTag[k]), liheFitLoUse, liheFitHiS, rMu, liheLiFrac, nL, eL);
+         if (liheEnable && rMu > 0 && hp->GetEntries() >= liheMinCand) fitOk = DailyFitLiHe(hp, Form("flihe_all_%s", fileTag[k]), liheFitLoUse, liheFitHiS, rMu, liheLiFrac, nL, eL);
          TLegend *lg = new TLegend(0.45, 0.60, 0.95, 0.88); lg->SetBorderSize(0); lg->SetFillStyle(1001); lg->SetFillColor(kWhite); lg->SetTextSize(0.030);
          lg->AddEntry(hp, Form("#Deltat to previous shower  N = %.0f", hp->Integral()), "l");
          lg->AddEntry(hn, Form("#Deltat to next shower (reverse control)  N = %.0f", hn->Integral()), "l");
@@ -728,9 +748,10 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
             fd->SetLineColor(kRed + 1); fd->SetLineWidth(2); fd->Draw("SAME");
             lg->AddEntry(fd, Form("Daya Bay Eq.2 fit on the sum : N_{LiHe} = %.1f #pm %.1f  (R_{#mu} = %.3f Hz, 1/R_{#mu} = %.2f s, #tau_{Li} = %.3f s)", nL, eL, rMu, rMu > 0 ? 1 / rMu : 0, kDailyTauLiS), "l");
             (void)f;
-         } else lg->AddEntry((TObject *)nullptr, "fit : not done (no showers or too few pairs)", "");
-         lg->AddEntry((TObject *)nullptr, Form("sum of daily fits used for subtraction : %.1f  [prelim]", nLiheTot[k]), "");
-         lg->Draw();
+         } else if (!liheEnable) lg->AddEntry((TObject *)nullptr, "Li/He fit and subtraction : disabled (lihe_enable = 0)", "");
+         else lg->AddEntry((TObject *)nullptr, "fit : not done (no showers or too few pairs)", "");
+         if (liheEnable) lg->AddEntry((TObject *)nullptr, Form("sum of daily fits used for subtraction : %.1f  [prelim]", nLiheTot[k]), "");
+         lg->Draw(); LegLog(Form("%02d_bgspec_lihe_dt_%s", 51 + k, fileTag[k]), lg);
          TPad *pd = new TPad(Form("ins_dt_%s", fileTag[k]), "", 0.57, 0.16, 0.95, 0.56);
          pd->SetFillStyle(4000); pd->SetFillColor(0); pd->SetLeftMargin(0.2); pd->SetBottomMargin(0.2); pd->SetLogy(); pd->SetGridy(); pd->Draw(); pd->cd();
          TH1D *hp2 = (TH1D *)hp->Clone(Form("%s_ins", hp->GetName())); TH1D *hn2 = (TH1D *)hn->Clone(Form("%s_ins", hn->GetName()));
@@ -740,12 +761,15 @@ void BuildDaily(const char *outDir = "/scratch/RunSummary/", double muShowerNpe 
          c->Print(out + Form("%02d_bgspec_lihe_dt_%s.png", 51 + k, fileTag[k]));
       }
       for (int lg = 0; lg < 2; ++lg) {                     //  선형 + 로그(_log) 두 판
+         std::vector<BgComp> pd3 = {{pAcc, "accidental", (int)kBlue + 1}, {pFn, "fast-n [prelim]", (int)kGreen + 2}};
+         std::vector<BgComp> dd3 = {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}};
+         if (liheEnable) { pd3.push_back({pLi, "Li/He [prelim]", (int)kMagenta + 1}); dd3.push_back({dLi, "Li/He [prelim]", (int)kMagenta + 1}); }
          DrawDecomposition(out, Form("%02d_decomp_prompt_%s", 45 + 2 * k, fileTag[k]),
                            Form("Prompt spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
-                           pAll, pSub, {{pAcc, "accidental", (int)kBlue + 1}, {pFn, "fast-n [prelim]", (int)kGreen + 2}, {pLi, "Li/He [prelim]", (int)kMagenta + 1}}, lg == 1);
+                           pAll, pSub, pd3, lg == 1);
          DrawDecomposition(out, Form("%02d_decomp_delayed_%s", 46 + 2 * k, fileTag[k]),
                            Form("Delayed spectrum decomposition, %s : all pairs = signal + backgrounds", chanName[k]),
-                           dAll, dSub, {{dAcc, "accidental", (int)kBlue + 1}, {dFn, "fast-n [prelim]", (int)kGreen + 2}, {dLi, "Li/He [prelim]", (int)kMagenta + 1}}, lg == 1);
+                           dAll, dSub, dd3, lg == 1);
       }
       //  53~54 다중도 분포와 포아송 외삽 : 창 안 다른 single 수 n 의 on−acc 초과분 N(n). 뮤온 파쇄 중성자 다발이 포아송이면
       //  N(0) 의 다중중성자 몫 ≈ N(1)²/(2·N(2)). 이것이 남는 '신호' 와 비슷하면 신호가 2-중성자 배경이라는 뜻이다

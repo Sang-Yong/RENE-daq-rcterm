@@ -8,6 +8,11 @@
 # ★ 분석팀 검증 전까지 웹에 '(예비)' 로 표시된다.
 #
 # ---- Li/He : 직전 샤워링 뮤온까지의 시간 분포를 Daya Bay Eq.2 로 적합 ----
+lihe_enable   = 1       # 0 = ⁹Li/⁸He 적합·빼기를 끈다 (2026-10-18 사용자 : "이 검출기에서는 검출이 힘들다 — 빼자").
+                        #   metrics(3단계) : lihe_stat = off, n_lihe/e_lihe/n_lihe_rev = -1 (열은 그대로). 웹 표·시트의 Li/He 칸 = '(끔)'
+                        #   daily(4d)      : 적합·빼기 없음 → 신호 = 전체 − 우발 − fast-n. 표 n_lihe/e_lihe = 0, lihe_stat = off.
+                        #                    그림 37~48·60·62/63 범례에서 Li/He 가 빠지고 51/52 는 dt 분포만(적합 없음)
+                        #   ★ metrics 는 표에 있는 런을 다시 계산하지 않는다 — 옛 행까지 바꾸려면 metrics.sh --list … --force
 mu_shower_npe = 20000   # 이 NPE 초과 target 뮤온을 '샤워링' 으로 본다.
                         #   뜻은 에너지가 아니라 **rate 손잡이** 다 -- 적분창 1 µs 라
                         #   NPE 가 5만을 못 넘는다. run 4305 실측 : 3000 -> 1.33 Hz(1/R

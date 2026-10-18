@@ -75,7 +75,7 @@ awk -v x="$INT" 'BEGIN{exit !(x > 1800 && x < 2200)}' && ok "prompt 배경 뺀 �
 #  ⑤ 추가 컷 · 대안 규격화 (2026-09-14) : monitorcuts 키 daily_psd_nsig · fn_norm_mode · fn_norm_lo_mev 가 그대로 넘어가고,
 #     PSD 컷을 걸면 on/off 쌍 수가 줄 수 있어도 표는 여전히 쓰이며 fn_mode 열이 1 이 된다. --dry-run 은 인자 11 개를 보인다
 DRY=$(RUNSUM_OUT="$T/out" MONITORCUTS=/nonexistent "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
-echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1, -1, -1, 1.0, "4.2,7.0,9.6,12.0")' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst · iso -1/-1 · window -1/-1 · 기대 1.0 · fn 적합 구간)" || bad "dry-run 인자" "$DRY"
+echo "$DRY" | grep -q ', 1.0, -1, 0, 8.5, 0, 0, "dst", -1, -1, -1, -1, 1.0, "4.2,7.0,9.6,12.0", 1)' && ok "--dry-run 기본 인자 (psd -1 · fn_norm 0 · 8.5 · mu_veto 0 · shower_veto 0 · dst · iso -1/-1 · window -1/-1 · 기대 1.0 · fn 적합 구간 · lihe 1)" || bad "dry-run 인자" "$DRY"
 cp "$TSV" "$T/daily_default.tsv"
 printf 'daily_psd_nsig = 3.0\nfn_norm_mode = 1\nfn_norm_lo_mev = 8.5\nmu_veto_us = 300\n' > "$T/cuts.params"
 OUT2=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC2=$?
@@ -111,4 +111,24 @@ OUT4=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts3.params" "$DIR/tools/monitor/dai
 echo "$OUT4" | grep -qE '^\[FN  \] n-Gd : expo fit lambda [0-9.]+ \+- [0-9.]+ MeV' && ok "[FN] 지수 적합 줄 (lambda)" || bad "[FN] 지수" "$(echo "$OUT4" | grep 'FN  ')"
 FM=$(awk -F'\t' '!/^#/ {print $21}' "$TSV" | sort -u | tr '\n' ' '); [ "$FM" = "2 " ] && ok "fn_mode 열 = 2" || bad "fn_mode 열 '$FM'"
 [ -s "$T/out/41_bgspec_prompt_nGd.png" ] && ok "그림 41 (지수 fast-n 성분)" || bad "그림 41"
+#  ⑧ Li/He 끔 (lihe_enable = 0, 2026-10-18 사용자 : "이 검출기에서는 Li/He 검출이 힘들다 — 빼자")
+#     기본(키 없음) 실행의 범례에는 Li/He 가 있고, 끄면 표의 lihe_stat = off · n_lihe 0, [SPEC] Li/He 0.0, 배경 뺀 prompt 적분이
+#     Li/He 몫(≈ 1000) 만큼 늘고(≈ 3000), 그림 37~48·60·51/52 범례에서 Li/He 가 빠진다
+echo "$OUT" | grep '\[LEG \]' | grep -qE '(37_spectrum_prompt_nGd|41_bgspec_prompt_nGd|45_decomp_prompt_nGd).*Li' && ok "기본 : 범례에 Li/He 가 있다" || bad "기본 범례에 Li/He 없음" "$(echo "$OUT" | grep 'LEG ' | head -3)"
+printf 'lihe_enable = 0\n' > "$T/cuts4.params"
+D0=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts4.params" "$DIR/tools/monitor/daily.sh" --dry-run 2>&1)
+echo "$D0" | grep -q '"4.2,7.0,9.6,12.0", 0)' && ok "--dry-run : lihe_enable 0 이 마지막 인자로 넘어간다" || bad "dry-run lihe 인자" "$D0"
+OUT5=$(RUNSUM_OUT="$T/out" MONITORCUTS="$T/cuts4.params" "$DIR/tools/monitor/daily.sh" 2>&1); RC5=$?
+[ "$RC5" -eq 0 ] && ok "lihe_enable 0 rc=0" || bad "rc=$RC5" "$(echo "$OUT5" | grep -E 'rror|FATAL' | head -3)"
+ST=$(awk -F'\t' '!/^#/ {print $18}' "$TSV" | sort -u | tr '\n' ' '); NL=$(awk -F'\t' '!/^#/ {print $16"/"$17}' "$TSV" | sort -u | tr '\n' ' ')
+[ "$ST" = "off " ] && [ "$NL" = "0.00/0.00 " ] && ok "표 : lihe_stat = off, n_lihe/e_lihe = 0 (열은 그대로)" || bad "표 Li/He 열" "stat '$ST' n/e '$NL'"
+grep -q 'Li/He : 끔 (lihe_enable = 0)' "$TSV" && ok "표 머리 주석에 '끔'" || bad "표 머리 주석" "$(head -3 "$TSV")"
+LI0=$(echo "$OUT5" | grep -E '\[SPEC\] n-Gd' | sed -n 's/.*Li\/He \([0-9.]*\).*/\1/p'); INT0=$(echo "$OUT5" | grep -E '\[SPEC\] n-Gd' | sed -n 's/.*prompt after \([0-9.]*\).*/\1/p')
+[ "$LI0" = "0.0" ] && ok "[SPEC] Li/He 0.0" || bad "[SPEC] Li/He '$LI0'"
+awk -v a="$INT0" -v b="$INT" 'BEGIN{exit !(a - b > 900 && a - b < 1100)}' && ok "★ 신호 = 전체 − 우발 − fast-n : prompt 적분이 Li/He 몫만큼 는다 ($INT -> $INT0)" || bad "prompt 적분 $INT0 (켰을 때 $INT)"
+NLEG=$(echo "$OUT5" | grep '\[LEG \]' | grep -E '(3[7-9]|4[0-8]|6[01])_' | grep -c 'Li')
+[ "$NLEG" -eq 0 ] && ok "그림 37~48·60/61 범례에 Li/He 없음" || bad "범례에 Li/He 가 남았다 ($NLEG 줄)" "$(echo "$OUT5" | grep 'LEG ' | grep Li | head -3)"
+echo "$OUT5" | grep '\[LEG \] 51_bgspec_lihe_dt_nGd' | grep -q 'disabled (lihe_enable = 0)' && ! echo "$OUT5" | grep '\[LEG \] 51_' | grep -q 'Eq.2 fit' && ok "51 : dt 분포만, 적합 없음 ('disabled')" || bad "51 범례" "$(echo "$OUT5" | grep 'LEG \] 5[12]')"
+N0=$(ls "$T/out"/3[2-9]_*.png "$T/out"/4[0-9]_*.png "$T/out"/5[0-8]_*.png "$T/out"/6[0-3]_*.png 2>/dev/null | grep -vc '_log\.png$')
+[ "$N0" -eq 31 ] && ok "끈 상태에서도 그림 31 장 (번호 체계 그대로)" || bad "그림 $N0 장"
 echo; echo "PASS $PASS  FAIL $FAIL"; [ "$FAIL" -eq 0 ]
