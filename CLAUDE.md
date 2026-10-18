@@ -582,6 +582,10 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   '기록함' 으로만 보고 python 종료코드가 `$( | grep )` 에 묻혀 새 exit 3(되대조 어긋남)이 [OK] 로 읽힌다 -> 출력에 '확인 필요' 가
   있으면 실패 처리. ② `rebuild_backup_sheet.py` 의 `batch_clear A{n+2}:Z{old_n+5}` 가 꽉 찬 탭에서 행이 줄면 그리드를 넘을 수 있다 ->
   끝 행을 `min(old_n+5, ws.row_count)` 로. ③ 추가 경로에 '쓰기 전 시트 전체 백업'(§11.5 규칙 4)이 원래부터 없다. ④ 되대조의 Run 비교를 숫자 비교로
+- **monitor-daily 시험의 `[FN] 줄` 문구가 낡았다** (8.5-12 → 8.5-10) — 실패 1 건, 기능 문제 아님 (§11.222)
+- **n-H 창 후보 −956 /day 검토** — fn_norm_mode 2 를 n-H 에도 쓴 결과로 추정, 별도 검토 필요 (§11.222)
+- **뮤온 뒤 τ≈2 ms 성분(111 /day, 3~6 MeV, 역방향 없음) 원인** — 포화/비포화 뮤온으로 가르면 판별 가능 (§11.222)
+- **4d 의 ¹²B 는 넣지 않기로** (사용자 결정 10-19). 3.1σ 징후·IBD 영향 없음 (§11.222)
 - **rcterm 에 `--no-quiet` 가 없다.** 감시자가 `--quiet` 를 무조건 붙이므로
   감시자 밑에서는 `PrintScreen()` 을 켤 수 없다. 지금은 `scripts/rcmon.sh` 로
   우회한다. 제대로 고치려면 감시자가 rcterm 출력을 **별도 pty/tmux pane 으로**
@@ -929,6 +933,32 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.222 ★★ 그림 45~48 로그판 · 그림 x 축 8-15 시작 · Li/He 끔 · NEOS 의 C-12(¹²B) 배경 조사 · run 4389 격리 (사용자 지시 3 건 + 결정 1 건, 10-18 ~ 10-19 03:2x)
+
+정본: `/Data_ssd/LOG/harness/20261018_monitor-analyst_decomp-log.md` · `20261018_monitor-analyst_xmin0815.md` · `20261018_monitor-analyst_lihe-off-b12.md`. 수치는 거기서.
+
+- **그림 45~48 에 `_log` 판 (y 축만 로그)** — `BuildDaily.C` `DrawDecomposition(logy)`, 선형 판은 바이트 동일. 커밋 7dcbc39. 로그로 보인 것 : 원자로 창 3~7 MeV 는 거의 fast-n(742/914), 배경 뺀 신호 −9 ;
+  신호가 음수인 빈 11 개가 3.4~6 MeV 에 몰림(fast-n 지수 모양이 그 구간에서 약간 큼) ; 남는 신호는 n-H 2.2 MeV 와 n-Gd 8 MeV 두 덩이(두 중성자 사건 모양).
+- **그림 1~36 의 x 축을 8-15 부터** — 키 `trend_xmin_date`(01~31·59) · `daily_xmin_date`(32~36·62/63, 없으면 trend 값). 자료는 버리지 않고 축만 바꾼다. inset·범례 자리 계산도 새 범위로.
+  키가 없으면 산출 바이트 동일(77 파일 cmp 0). 새 `tools/monitor/trend-xmin.sh`, 시험 `tests/monitor-trend-xmin.test.sh` 14. 커밋 58288f7.
+  주의 : run 4280(8-14 23:34)이 축 밖, 누적 12/13 은 8-15 에서 누적값부터, 30 번 범례 겹침은 원본부터. 키 설명은 `tools/monitor/README.md`.
+- **Li/He 끄기 (사용자 : "이 검출기에서는 검출이 힘들다")** — 스위치 `lihe_enable`(기본 1). 0 이면 daily·metrics 에서 적합·빼기 없음, 신호 = 전체 − 우발 − fast-n, 표 열 0/−1/off,
+  웹·시트 `(끔)`, 그림 37~48·51·52·60~63 범례에서 제외, bg-trend 22/23 점 없음. 커밋 b07c38a. 실자료(dst_m2 85 런, 61.2 라이브 일 n-Gd) : 창 3~7 MeV 후보 −0.18 ± 0.53 → **0.63 ± 0.53 /day** (기대 0.20, 0.8σ).
+- **NEOS 의 C-12 배경 = ¹²B** (고영주 2017 §5.1 : n+¹²C→p+¹²B, 반감기 20.2 ms, Q 13.37 MeV ; NEOS 는 β 에너지 응답 보정용, IBD 배경 목록 아님, 율 미보고).
+  우리 자료(66.3 라이브 일) : 타겟 관통 뮤온(pe>3k) 뒤 6~13 MeV single 의 Δt 에 τ 29.1 ms 고정 성분 **783 ± 253 (3.1σ)**, 역방향 102 ± 225, 전 에너지 환산 21 ± 7 /day, β 스펙트럼 모양 일치(χ²/ndf 25/13),
+  13.5~25 MeV 초과 없음 ; τ 를 풀면 7.8 ± 3.9 ms 라 **확정 아님**. IBD 영향 없음(중성자 없고 29 ms ≫ 100 µs, prompt 대 뮤온 29 ms 성분 −0.50 ± 0.43 /day).
+  곁들여 : 뮤온 뒤 τ≈2 ms 짧은 성분 111 /day(3~6 MeV, 역방향 없음, 원인 미상 — 포화 뮤온 뒤 회복 또는 지연 중성자 추정) ; n-H 창 후보 −956 /day(fn_norm_mode 2 를 n-H 에 쓴 결과로 추정, 별도 검토 필요) ;
+  직전 뮤온 Eq.2 적합은 이 사이트에서 역방향에도 같은 크기의 가짜 성분(모든 쌍 방법이 맞음). 그림 `/Data_ssd/LOG/plots-20261018/b12/`, 스크립트 B12Scan/Fit/Fit2.C.
+  **사용자 결정 (10-19 02:5x) : "둘 다 반영, ¹²B 는 아직 프로세스(4d)에 넣지 않는다."**
+- **반영 (10-19 02:56~03:19)** — 시험(daily 42/43 — 실패 1 은 기존 `[FN] 줄` 문구 낡음, xmin 14, html 10, publish 13, bgtrend 4, veto 14) → push 998c79b..b07c38a → 운영 pull →
+  `config/monitorcuts.params` 에 `trend_xmin_date = 2026-08-15` · `lihe_enable = 0` (백업 `.bak-20261019-xmin-lihe`) → 운영 tools/monitor 의 낡은 ACLiC 산출물(BuildDaily/Metrics/RateTrend/BgTrend `_C.so`·`.d`·`.pcm`, 9-15 임시 dict) 삭제 →
+  `/Data_ssd/LOG/apply-xmin-lihe-20261019.sh`(로그 `.log`) : `metrics.sh --list <88 런> --force` → `websummary.sh --force` 03:04~03:15:51 DONE rc 0, `[DRIVE] 63/63`, `[SHEET] 새 행 없음` ;
+  웹 폴더 png 65 장 갱신, `45/46_*_log.png` 생성, summary.html `(끔)` 84 칸, daily_summary lihe_stat 전부 off.
+  **밟은 것** : 작업 클론 daily.sh 를 운영 디렉터리 cwd 로 부르면 옛 `BuildDaily_C.so` 를 집어 "requires at most 20 arguments" 로 죽는다 — 그래서 운영 .so 를 지웠다. 헤더/코드를 바꾼 뒤엔 운영 쪽 ACLiC 산출물도 의심할 것.
+- **run 4389 격리 (websummary 정체 해소)** — 4389 는 HV 미인가로 0 사건(FADC 7 파일 8 kB·entries 0, PRD 영영 불가)이라 게이트가 막아 4390~4393 이 표에 못 오르고 있었다(last_run 4388).
+  14 파일을 `badrun/` 으로 격리(README), `badrun.sh --scan --run 4389 --update-list` → 목록 629 런, 범주 aborted. dry-run 게이트가 4389~4393 통과, 다음 막힘은 4394(수집 중). 03:27 cron 회차가 처리할 것.
+- **남은 것** : 드라이브 map 에 `_log` 4 장이 없어 구글 사이트에는 아직 안 실린다(자리표시 → `--init` 은 사용자 몫, §11.212) ; 03:27 회차 결과 확인.
 
 #### 11.221 ★★ 백업 9 회차 준비 — 하드 2 장 꽂힘, 마운트+기동을 한 번에 하는 root 스크립트 `scripts/storage-backup-mount.sh` (사용자 지시, 10-17 23:0x ~ 10-18 01:2x)
 
@@ -4615,7 +4645,8 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
            · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
                 시트 = GoodRuns 문서의 DAQ_runsummary 탭(gid 511745186, ★ 0 금지) · 그림 = 드라이브
-                RENE_DAQ/rene-runsummary-png-20 의 20 장(내용 교체). metrics_source=dst, last_run=4335.
+                RENE_DAQ/rene-runsummary-png-20 의 20 장(내용 교체). metrics_source=dst, last_run=4388(10-19 03:20, 4389 격리 뒤 03:27 회차가 전진).
+                monitorcuts : trend_xmin_date 2026-08-15 · lihe_enable 0 (10-19, §11.222)
                 상태 : tools/monitor/websummary.sh --status · 로그 /Data_ssd/LOG/websummary.log
 웹 표      ★ DST 출처 표는 만들어졌다 : /scratch/RunSummary/web/summary_dst.html (53 행)
                 + bg_trend_*.png 6장. metrics_summary.tsv 80 행 (40 런 × 2 채널).
@@ -4638,6 +4669,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.222         ★★ 그림 45~48 `_log` 판 · 그림 x 축 8-15 부터(trend_xmin_date) · Li/He 끔(lihe_enable 0, 창 후보 0.63 ± 0.53 /day) · NEOS C-12 = ¹²B 조사(3.1σ 징후, IBD 영향 없음, 4d 미적용 — 사용자 결정) · run 4389 격리
 §11.221         ★★ 백업 9 회차 준비 : 하드 2 장 꽂힘, 마운트+기동 root 스크립트 scripts/storage-backup-mount.sh (by-id 인자, fstab 무기록 — 사용자 지시로 fstab 판 폐기). 리뷰가 fstab 비움 경로를 잡음. 사용자 실행 대기
 §11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h → 16:05 run 4389 `_typeB_2`(ch24~29) 는 6.5 분 0 사건(DAQ 정상, B2 신호 분석은 판정 불가) → 16:12 사용자 지시로 정지·대기, rcterm.params 가 `_typeB_2` 임에 주의
 §11.219         ★★ 10-16 07:17 ch8 THR 80 예약 전환 실패(cron 에 ROOT 환경 없음) → 09:04 run 4387 = `_mid3_pidfix` 2 h 런(11:04 뒤 대기). 시트 Description 에 설정 파일명 + 채널별 THR 전→후 기록(소급은 `--update-desc ours`)
@@ -4771,6 +4803,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | ✅ GoodRuns 시트 Y2026B 행 부족 | 코드로 해결(18d9529, 그리드 자동 확장) · 10-17 12:24 13 런 등재 | §11.220 |
 | ✅ `config/rundesc.txt` 갱신 | 사용자가 10-15 23:54 에 개활지 문구로 바꿈 (run 4383 부터) | §11.215 |
 | 구글 사이트에 시트(DAQ_runsummary 탭)와 그림 20 장 주소 퍼가기 1회 | 발행은 09-10 부터 자동. 주소는 /Data_ssd/LOG/websummary-embed-urls.txt | §11.176 |
+| 드라이브에 `_log` 4 장(45/46_*_log.png 등) 자리표시 → `publish_google.py --init` | 새 그림 이름이 map 에 없어 사이트에 안 실린다. 서비스 계정은 파일을 못 만든다 | §11.212 · §11.222 |
 | ~~`metrics_source=dst` 승인~~ | ✅ 09-09 23:17 게이트 72 행 0 불일치로 전환 (사용자 지시) | §11.174 |
 | 배경 레시피 v2 의 분석팀 검증 | 웹의 '(예비)' 표기를 떼려면. fast-n 사건별 제거는 PSD 개선이 필요 | §11.161 |
 | 뽑은 하드 8장에 라벨 — **UUID 로** (G = ZK206APL · H = ZK2060CP 는 시리얼 병기 가능) | 메일의 '시리얼'은 USB 브리지가 지어낸 `RANDOM__…` 이다. 진짜는 `udevadm` 만 안다. 자료를 지우지 않는 한 UUID 는 안 바뀐다 | §11.170 |
