@@ -755,6 +755,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   계수만 나온다. 확인 런의 TCB 로그에서 `is aligned` 8줄을 셀 것 (§11.130 · §11.171, 두 번 재현).
 - **★ HV 크레이트(SY4527, 192.168.0.39)는 USB 랜 어댑터 `enp0s20f0u1u4` 의 DHCP 프로파일 "프로파일 1" 로 붙는다.** interface-name 이 없으면 NM 이 다른 포트(특히 저장소 10G enp3s0f1)에 올려 GECO 가 접속을 못 한다 (§11.220). `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`.
 - **★ 설정 파일을 복사해 고칠 때 원본의 THR 줄이 주석으로 바뀌지 않았는지 run 사본(`/Data_ssd/CONFIG/<런>.config`)과 diff 할 것.** SADCT THR 줄이 없으면 CUPDAQ 가 전 채널 50 을 기본값으로 쓴다 (§11.220).
+- **★ tmux pane 에 명령을 칠 때 `send-keys -t daq:1.2 "<명령>" Enter` 는 'not in a mode' 만 내고 아무것도 안 칠 수 있다.** `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` 로 칠 것 (10-17 · 10-20 두 번 겪음, §11.222).
 - **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
   포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
   치울 것 — **인자 없이 부르면 `bin directory not found` 로 실패한다** (§11.119).
@@ -978,6 +979,18 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
   - **저장소 서버 백업 9 회차 종료**: 10-18 11:57 RAW 세션 rc 0 → PRD 세션 → 10-18 22:05 종료 code=3 "하드를 다 썼습니다 (런 1,236 개 남음)". 하드 ZK206HAY(/backup_hdd, RENE-RAW-009) · Z4ZBZE0A(/backup_hdd_2, RENE-PRD-007) 모두 100 %(여유 2.0/2.1 G), 실패 0, 이탈 없음(dmesg 마지막 disconnect 10-17 23:32 는 꽂기 전).
     라벨·시트는 cron 이 부여(`docs/BACKUP-DISKS.md` 39 장, RAW-009 19,271 파일 / PRD-007 23,191 파일, 각 1865.6~1865.7 GB). 새 하드 2 장 + `scripts/storage-backup-mount.sh` 로 이어간다.
   - **남은 것**: 다음 런은 사용자 결정(재기동 시 rcterm.params 가 `_pidfix_all100` 임을 확인) · 새 하드 2 장 교체 · 4396 시트 등재/발행 확인.
+
+- **이어서 (10-20 13:4x) — run 4397 = `_all100_noveto5` (Type A 8 패널 AND).** 사용자 지시 10-20 13:4x "VETO_test_9layers_v2_mid3_pidfix_all100_noveto5.config 로 변경해서 run 시작". 정본 `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md` 끝 절.
+  - 새 파일(사용자 작성 13:41)과 `_all100` 의 비주석 차이는 두 줄 : MTHRSM 18→16, SADCT THR 의 CID 9·10 (ch8·9, PMT 2·18, 패널 4) 100→500000. 즉 패널 4 를 뺀 Type A 8 패널 16 채널 AND. 설정 파일 무수정, `config/rcterm.params` 백업 `.bak-20261020a`(=_all100).
+  - 13:43:14 감시자 기동(tmux %2, 24 h 로테이션). 검증 전부 합격 : THR 30 값·PID 설정과 일치, MTHRSM 16/16 · MTHRF 4 · TSWF/TSWSM 0 1 0 0 · CW 400, FADCT 3 · SADCT 65 found, is aligned 8/Fail 0, USB 오류 0 (181 s), CONFIG/004397.config 설정과 diff 없음, DB config `…_all100_noveto5.config`.
+
+| run | 시각 | 설정 | 계수율 |
+|---|---|---|---|
+| 4397 | 10-20 13:43:14 ~ (24 h, 다음 교체 10-21 13:43) | `_all100_noveto5` (MTHRSM 16) | 첫 181 s FADC 57.9 · SADC 57.9 Hz (4396 평균 56.1 보다 3 % 높음; 끝 패널이 그대로라 기하 수용이 거의 같은 것으로 본다 — 추정, 이상 아님) |
+
+  - 감시 : `/Data_ssd/LOG/veto-check-4397.sh` (pid 510999, 비교 대상 4396). daqerr-watch 는 걸지 않았다(사용자 결정 대기). threshold-changes.log 행 있음.
+  - 되돌리려면 `cp -p config/rcterm.params.bak-20261020a config/rcterm.params` 뒤 감시자 TERM·재기동.
+  - ★ tmux `send-keys -t daq:1.2 "<명령>" Enter` 가 'not in a mode' 만 내고 아무것도 안 쳤다 → `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` (§10).
 
 #### 11.221 ★★ 백업 9 회차 준비 — 하드 2 장 꽂힘, 마운트+기동을 한 번에 하는 root 스크립트 `scripts/storage-backup-mount.sh` (사용자 지시, 10-17 23:0x ~ 10-18 01:2x)
 
@@ -4646,7 +4659,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★ **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
+수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
 수집       run 4382 (10-15 23:53 부터, 개활지 우주선 시험, 설정 = VETO_test_9layers_v2_mid3.config (원본과 FADCT 1→3 한 줄 차이), SADC THR 100×18 + 500000×12, TCB MTHRF 4·MTHRSM 18·SWF/SWSM 0 1 0 0, ~57 Hz 가 정상, chain_min_rate 1, §11.215). ★ /scratch 미마운트라 postrun 정지. 아래 4344 줄은 옛 기록
