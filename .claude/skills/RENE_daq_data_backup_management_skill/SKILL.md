@@ -77,6 +77,10 @@ nohup /home/frontend/data_backup_simple_code9.sh --disks /backup_hdd_2 --only pr
 직접 `mount` 하고 권한·내용·`--dry-run` 확인 뒤 `backup_raw_then_prd.sh` 를 띄운다. **fstab 에는 쓰지 않는다**(의도 — 재부팅 뒤에도 같은 명령). 옵션 `--dry-run` · `--no-start`.
 떨어지면 umount → `e2fsck -f` → by-id 재확인 → 같은 인자로 재실행. 상세 §11.221.
 
+**새 하드가 ext4 가 아닐 때 (2026-10-20, 10 회차).** 스크립트는 ext4 가 아니면 "쓸 수 있는 하드가 없습니다" 로 멈춘다 (설계대로). 먼저 읽기 전용으로 마운트해 내용이 비었는지 확인한 뒤(파일이 있으면 지우지 말고 사용자에게 묻는다),
+사용자가 포맷을 정하면 `mkfs.ext4 -L RENE-<RAW|PRD>-NNN /dev/disk/by-id/<…>-part1` (저장소 서버 root, 사용자 결정). **포맷 명령은 저장소 서버에서 쳐야 한다 — 이 PC 에는 그 장치가 없어 "does not exist" 로 무해하게 실패한다.**
+파티션이 어긋났다는 mkfs 경고가 나면 다음 포맷 때 파티션부터 다시 만든다. 그 뒤 위 `storage-backup-mount.sh` 를 같은 by-id 인자로.
+
 ## 새 배포 (스크립트를 고쳤을 때)
 
 ```bash

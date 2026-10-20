@@ -1036,6 +1036,14 @@ sudo bash /home/frontend/storage-backup-mount.sh ata-ST2000DM008-2FR102_ZK206HAY
 - xhci 오류 징후(`bad transfer trb length`)가 보이므로 독이 계속 떨어지면 USB 허브를 거치지 않고 서버 뒷면 포트에 독을 직결할 것을 권고 (§11.123 A, §11.180).
 - 메일은 보내지 않았다 (세션 기동 뒤 cron 이 낸다).
 
+**이어서 (10-20) — 9 회차 하드 umount·라벨, 10 회차 시작 (포맷 포함).**
+- 14:38 사용자 지시로 9 회차 하드 2 장(RAW-009 ZK206HAY · PRD-007 Z4ZBZE0A, 둘 다 100 %)을 서버 root 셸(tmux 1.4 work space 의 `[root@nfs-server]`)에서 `sync; umount` (rc 0). 담긴 것 : RAW-009 = 002740(서브런 389~)~002787(FADC 0~840 일부) 46 런 19,271 파일, PRD-007 = 002736(PRD 151~)~002790(일부) 50 런 23,191 파일 (상세는 서버 parts_index · .part_manifest).
+- 14:42 새 하드 2 장 장착 : sdb ZK206K3B (ST2000DM008) **exFAT**, sdc Z4ZCA14T (ST2000DM006) **ext3**. 읽기 전용 마운트로 확인하니 둘 다 파일 0 (빈 폴더만, 2022~2026 흔적). `storage-backup-mount.sh` 는 ext4 가 아니라서 "쓸 수 있는 하드가 없습니다" 로 정지했다 (설계대로).
+- 사용자가 포맷 명령을 이 PC(rocky9) root 에서 쳐서 "does not exist" 로 무해하게 실패 (이 PC 에는 그 장치가 없다). 오케스트레이터가 서버 root 셸에서 `mkfs.ext4 -F -L RENE-RAW-010 …ZK206K3B-part1` · `-L RENE-PRD-008 …Z4ZCA14T-part1` 실행 (사용자가 포맷 의사를 명령 실행으로 표명). mkfs 경고 : Z4ZCA14T 파티션이 512 B 어긋난 정렬 ("very poor performance, (re)-partitioning suggested") — 50 MB/s 상한이라 당장 영향은 작을 것으로 본다(추정), 다음 포맷 때 파티션부터 다시 만들 것.
+- 14:49:16 사용자가 서버에서 `bash /home/frontend/storage-backup-mount.sh ata-ST2000DM008-2FR102_ZK206K3B-part1 ata-ST2000DM006-2DM164_Z4ZCA14T-part1` 실행 → 7 단계 전부 OK, `/backup_hdd`=sdb1(RAW-010) · `/backup_hdd_2`=sdc1(PRD-008) 마운트. 14:49:49 RAW 세션(code9 `--only raw`, bwlimit 50M) 시작, 첫 런 002787(full, 서버에 남아 있던 나머지) 전송 중, 사슬이 끝나면 PRD 세션. 로그 `~/sykim/backup_log/mount-and-backup-20261020-144916.log`. **10 회차.** 라벨 RENE-RAW-010 · RENE-PRD-008 은 cron(:37)이 parts_index 로 자동 부여할 예정 (mkfs 라벨과 같게 지었다).
+- 꽂을 때 dmesg 에 `xhci bad transfer trb length 112` 1 회 (9 회차와 같은 징후, 그때는 이탈 없이 완주).
+- GitHub push 는 자격증명 만료로 막혀 있는지 이 기록 커밋에서 시도 (결과는 보고).
+
 #### 11.220 ★★ GECO(HV 제어) 접속 불가 점검 · typeB 설정 점검 · run 4388 = `_mid3_pidfix_typeB` 24 h 로테이션 (10-16 15:0x ~ 15:3x)
 
 정본: `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md`.
@@ -4671,7 +4679,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 후처리     postrun --follow --jobs 3 --lag 3  (★ 4396 완결(00598 격리, 10-20 13:4x), 4394·4395 완결. 이하 — 4393 완결(10-18 03:3x, FADC 910 = PRD 910). 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 10-17 22:4x 부터 정식 마운트(10.0.0.10, nofail), postrun 22:48 재기동, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
-백업       ★ 9 회차 종료 10-18 22:05 (code=3), 하드 2 장 가득(RAW-009 ZK206HAY · PRD-007 Z4ZBZE0A), 런 1,236 개 남음 — 새 하드 2 장 + `storage-backup-mount.sh` (§11.221 · §11.222).
+백업       ★ 10 회차 진행 중 (10-20 14:49~, RAW-010 ZK206K3B → PRD-008 Z4ZCA14T, 002787 부터; 새 하드가 exFAT/ext3 이라 서버 root 에서 mkfs.ext4 뒤 마운트, §11.221). 9 회차는 10-18 22:05 종료 (code=3).
            옛 하드 26 장 라벨·시트 (§11.187~188, docs/BACKUP-DISKS.md). 시트 자동 등재 cron 37분 (§11.184). 독 이탈 이력 (§11.180)
 감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 (시트 그리드 자동 확장) · mailq-send 5분
            · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
@@ -4825,7 +4833,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **새 외장하드 2 장 교체 (RAW 용 · PRD 용)** | 9 회차가 10-18 22:05 에 끝나 하드 둘 다 가득, 런 1,236 개 남음. 뽑기 전 `sudo umount`, 새 하드는 `scripts/storage-backup-mount.sh` | §11.221 · §11.222 |
+| ✅ 새 외장하드 2 장 교체 (RAW 용 · PRD 용) | 10-20 14:49 완료 (10 회차 진행 중). 다음 교체 때도 뽑기 전 `sudo umount`, 새 하드는 `scripts/storage-backup-mount.sh` | §11.221 |
 | **수집 재개 결정** | 10-20 13:36 부터 대기. rcterm.params 는 `_pidfix_all100`(Type A ch0~17 THR 100, MTHRSM 18) — 재기동 전 설정 확인 | §11.222 |
 | **daqerr-watch-4380 종료됨(10-17 23:08) -- 다시 걸지 결정** | 48 h 상한 스크립트라 종료. run 4394 도 감시 없이 돈다. 새 48 h 감시를 걸지 사용자 결정 | §11.220 |
 | **run 4390 을 시트에서 뺄지 결정 (onlbit 0 으로)** | ch18~29 HV 전부 켜진 잘못 받은 런인데 onlbit=1 이라 sheetlog 자동 등재 대상 | §11.220 |
