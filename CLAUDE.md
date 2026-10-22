@@ -787,6 +787,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   어느 런이 어느 하드에 있는지는 §11.170 의 표(1회차 하드 8장 A~H)를 볼 것. 1회차는 09-09 에 끝났고
   런 1,681 개가 남았다 — 새 하드 두 장을 꽂고 같은 명령이면 002452 부터 이어진다.
 - **★ cron 에서 rcterm 을 부르는 예약 스크립트는 ROOT 환경을 source 할 것** (`thisroot.sh` · `cupdaq_env.sh`). cron 환경에는 없어 rcterm dry-run 이 `libTree.so` 로드 실패(rc=127)로 빈 출력을 낸다 (§11.219, 10-16 07:17 예약 전환이 이렇게 실패했다).
+- **절대 시각 예약 정지는 cron 대신 setsid 대기 스크립트로** (`stop-run-YYYYMMDD-HHMM.sh` 꼴, ROOT 환경을 직접 source). 10-22 15:00 예약이 이 방식으로 성공했다 (§11.222).
 - **postrun 의 `[CORRUPTION DETECTED] ZOMBIE FILE` 도 진단명이 아니다.** merge
   매크로가 rc≠0 이면 무조건 붙는 이름이라 사유는 merge 로그를 봐야 한다
   (`/scratch/LOG/log_merge_FADC_SADC_v3_5v_run<런>_subrun<N>.txt` 의 끝 몇 줄).
@@ -990,6 +991,24 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
   - 감시 : `/Data_ssd/LOG/veto-check-4397.sh` (pid 510999, 비교 대상 4396). daqerr-watch 는 걸지 않았다(사용자 결정 대기). threshold-changes.log 행 있음.
   - 되돌리려면 `cp -p config/rcterm.params.bak-20261020a config/rcterm.params` 뒤 감시자 TERM·재기동.
+
+- **이어서 (10-21 ~ 10-22) — 로테이션·15:00 예약 정지·run 4400 (`_noveto5_m12`).** 정본 `/Data_ssd/LOG/harness/20261016_threshold-change-operator_typeB.md` 끝 "이어서 (10-22 17:0x~)" · `/Data_ssd/LOG/stop-run-20261022-1500.log`.
+  - run 4397 → 4398(10-21 13:43:45 ~ 10-22 13:43:34, 24 h, nfadc 4,765,172, 55.2 Hz, PRD 1440/1440 완결) → 4399(13:44:05 ~) 로테이션 정상, restart·USB 오류 0.
+  - **15:00 예약 정지 (사용자 10-22 08:4x "오후 3시에 run 정지").** 대기 스크립트 `/Data_ssd/LOG/stop-run-20261022-1500.sh`(setsid, cron 아님 — §11.219 의 ROOT 환경 함정 회피) : 15:00 감시자 TERM → 마감 확인 → 꼬리 서브런 postrun → 재기동 없음 → 책임자 메일.
+    15:00:08 TERM → 15:00:47 exit 0, 고아 0, 포트 0. DB 4399 : 13:44:05 ~ 15:00:08, 1 h 16 m, nfadc 214,252, 47.0 Hz(4398 보다 15 % 낮음 — 짧은 런·시간 요동으로 추정, 단정 안 함), USB 오류 0. 메일 rc 0(15:01, 스크립트 자동).
+  - **4399 꼬리 00076 격리** (FADC 184 · SADC 0 entries). carry 가 존재하지 않는 `SADC_004399.root.00703??` 를 가리켜(로그 "SADC_004399.root.00703 does not exist") merge 불가 — 4396 과 같은 모양. §5.9 대로 짝 격리 → FADC 76 = PRD 76 완결, badrun 목록 631 런.
+  - **run 4400 = `_noveto5_m12`.** 사용자 17:03 새 파일 `VETO_test_9layers_v2_mid3_pidfix_all100_noveto5_m12.config` = `_noveto5` 에서 MTHRSM 16 → 12 한 줄(켜진 16 채널 중 12 이상 = Type A 8 패널 중 6 패널 관통). SADC THR 은 noveto5 그대로, 설정 파일 무수정. `config/rcterm.params` 백업 `.bak-20261022a`(=_noveto5).
+    17:06:56 기동(24 h, 다음 교체 10-23 17:06). 검증 전부 합격 : THR 30 값·PID 설정과 일치, MTHRSM 12/12 · MTHRF 4 · TSWF/TSWSM 0 1 0 0 · CW 400, FADCT 3 · SADCT 65 found, aligned 8/Fail 0, USB 오류 0 (182 s), CONFIG/004400.config 동일, DB config `…_m12.config`.
+
+| run | 시각 | 설정 | 계수율 |
+|---|---|---|---|
+| 4398 | 10-21 13:43:45 ~ 10-22 13:43:34 (24 h) | `_noveto5` (MTHRSM 16) | 55.2 Hz (nfadc 4,765,172), 완결 |
+| 4399 | 10-22 13:44:05 ~ 15:00:08 (1 h 16 m, 예약 정지) | `_noveto5` | 47.0 Hz (nfadc 214,252), 꼬리 00076 격리 |
+| 4400 | 10-22 17:06:56 ~ (24 h, 다음 교체 10-23 17:06) | `_noveto5_m12` (MTHRSM 12) | 첫 182 s FADC 101.8 · SADC 101.9 Hz (4397·4398 의 약 1.8 배 — 끝 패널 한두 장 빠진 궤적이 더해진 것으로 추정, §11.217 과 같은 방향; 기대 범위 안, 이상 아님) |
+
+  - 감시 : `/Data_ssd/LOG/veto-check-4400.sh`(pid 4127350, 비교 대상 4398). daqerr-watch 는 걸지 않았다(사용자 결정 대기). threshold-changes.log 17:11 행. chain_min_rate 는 1 그대로라 rate_low 알림 없음.
+  - 되돌리려면 `cp -p config/rcterm.params.bak-20261022a config/rcterm.params` 뒤 감시자 TERM·재기동.
+  - 설정 변천 : `_all100` (4394~4396) → `_all100_noveto5` (4397~4399, MTHRSM 16) → `_all100_noveto5_m12` (4400~, MTHRSM 12).
   - ★ tmux `send-keys -t daq:1.2 "<명령>" Enter` 가 'not in a mode' 만 내고 아무것도 안 쳤다 → `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` (§10).
 
 #### 11.221 ★★ 백업 9 회차 준비 — 하드 2 장 꽂힘, 마운트+기동을 한 번에 하는 root 스크립트 `scripts/storage-backup-mount.sh` (사용자 지시, 10-17 23:0x ~ 10-18 01:2x)
@@ -4667,6 +4686,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
+수집       ★ run 4400 (10-22 17:07 부터, `_noveto5_m12` = Type A 8 패널 중 6 패널 AND(MTHRSM 12), ~102 Hz, 24 h 로테이션, 다음 교체 10-23 17:07, §11.222). 이하 직전 기록 — run 4399 는 15:00 예약 정지.
 수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
 수집       ★ run 4384 (10-16 01:09 부터, 24 h 로테이션, 4383 은 MTHRSM 16 10 분 런, §11.217). 설정 = _mid3 (MTHRSM 18), 계수율 ~57 Hz. 이하 4382 줄은 직전 기록
@@ -4676,7 +4696,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
              다음 로테이션(09-12 15:56)을 지켜볼 것. 케이블·허브 점검 대상. veto-check-4344.log 가 패널 반응을 남긴다
            ★ 다음 로테이션(09-11 15:47)에서 chainwatch 가 'rotate' 를 책임자에게만 보내는지 볼 것 (§11.177 사고의 재검증)
            tmux attach -t daq
-후처리     postrun --follow --jobs 3 --lag 3  (★ 4396 완결(00598 격리, 10-20 13:4x), 4394·4395 완결. 이하 — 4393 완결(10-18 03:3x, FADC 910 = PRD 910). 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 10-17 22:4x 부터 정식 마운트(10.0.0.10, nofail), postrun 22:48 재기동, 4380~4391 전부 PRD 완결, §11.220)
+후처리     postrun --follow --jobs 3 --lag 3  (★ 4398·4399 완결(4399 00076 격리, 10-22 17:0x), 4396 완결(00598 격리, 10-20 13:4x), 4394·4395 완결. 이하 — 4393 완결(10-18 03:3x, FADC 910 = PRD 910). 4392 완결(00962 격리, 10-17 12:2x). 10-16 17:07 재기동. /scratch 는 10-17 22:4x 부터 정식 마운트(10.0.0.10, nofail), postrun 22:48 재기동, 4380~4391 전부 PRD 완결, §11.220)
 이동       dataflow --follow  (M단계 = Merged 청소 포함, keep_merged=5)
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 10 회차 진행 중 (10-20 14:49~, RAW-010 ZK206K3B → PRD-008 Z4ZCA14T, 002787 부터; 새 하드가 exFAT/ext3 이라 서버 root 에서 mkfs.ext4 뒤 마운트, §11.221). 9 회차는 10-18 22:05 종료 (code=3).
