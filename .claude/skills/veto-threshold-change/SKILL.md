@@ -21,6 +21,8 @@ description: "RENE DAQ 의 SADC(veto) 또는 FADC 문턱값을 바꾸고 수집�
 
 ## 2. 설정 파일
 
+**★ 첫 점검(사용자가 직접 만든 파일일 때 특히): `SADCT` 블록의 비주석 THR 줄이 정확히 1 개이고 토큰이 30 개인지 먼저 센다.** 사용자가 파일을 복사·편집하다 THR 줄을 주석으로 바꾸는 일이 반복됐다(10-16 pidfix, 10-29 typeB_3 — 두 번 다 점검이 잡았다). 활성 줄이 0 개면 CUPDAQ 기본값(전 채널 THR 50)으로 돌아 잡음 런이 된다. 0 개이면 기동하지 말고 사용자에게 알린다(파일을 대신 고치지 않는다). 기동 뒤에는 `/Data_ssd/CONFIG/<런>.config` 와 원본의 diff 로 한 번 더 확인한다.
+
 ```bash
 OLD=/home/frontend/ConfigFiles/<지금 rcterm.params 가 가리키는 파일>
 NEW=/home/frontend/ConfigFiles/DataTaking_IBD_sykim_2026_<꼬리표>.config      # 예: _thr4067x80
