@@ -820,6 +820,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-10-18 | 코드 갈래 3 회째(백업 마운트 스크립트) — 리뷰 3 라운드 + 설계 변경 1 회(사용자 지시로 fstab 판 → by-id 인자 판) | skills/rene-daq-orchestrator (절차 변경 없음) | root 로 /etc 를 고치는 코드는 실패 경로 재현이 필수라는 것을 리뷰가 확인 (§11.221) |
 | 2026-10-17 | 코드 갈래 2 회째(시트 그리드 확장) -- 리뷰 1 라운드 승인 | skills/rene-daq-orchestrator (절차 변경 없음) | 시트 행 부족으로 20 시간 매시 실패 -> 18d9529 |
 | 2026-10-18 | threshold-change-operator 가 pgrep -fa 를 1 회 사용(읽기 전용, 결과 무해) -- 프롬프트 금지 문구를 스킬에도 명시 | skills/veto-threshold-change | 에이전트 프롬프트에만 있던 `pgrep -f` 금지를 스킬 본문에 한 줄 추가 |
+| 2026-11-01 | 코드 갈래 4 회째(pdu-power.sh) 리뷰 2 라운드 승인 | skills/rene-daq-orchestrator (절차 변경 없음) | 리뷰가 NETIO 오류 형식 미인식·비밀번호 추적 노출을 잡음 -> a9213f4 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -943,7 +944,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 #### 11.224 ★★ PDU 원격 전원 재투입으로 4409 사건 복구 · 빛샘 조명 런 4410~4414 (반응 PMT 없음) · 뮤온 데이터 런 4415 (`_all30_thr200_m6`, 24 h 로테이션) (사용자 지시, 11-01 00:3x ~ 01:2x)
 
-정본: `/Data_ssd/LOG/harness/20261101_daq-incident-responder_pdu-powercycle.md` · `20261101_monitor-analyst_lightleak-4410-4411.md`. 수치는 거기서. PDU 도구 `/Data_ssd/LOG/pdu-20261101/pdu.sh` (+ `pdu.params` 0600, `pdu.log`) -- 아직 저장소에 없다 (넣을 때 `scripts/pdu-power.sh` + `config/pdu.params.example`, 별도 코드 갈래, 사용자 결정). 메모리 `pdu-board-power.md`.
+정본: `/Data_ssd/LOG/harness/20261101_daq-incident-responder_pdu-powercycle.md` · `20261101_monitor-analyst_lightleak-4410-4411.md`. 수치는 거기서. PDU 도구 `/Data_ssd/LOG/pdu-20261101/pdu.sh` (+ `pdu.params` 0600, `pdu.log`) -- 저장소 반영은 아래 "pdu.sh 저장소 반영" 단락 (`scripts/pdu-power.sh`, a9213f4). 메모리 `pdu-board-power.md`.
 
 **① PDU 로 보드 전원 재투입 (00:38 ~ 00:47).** 4409 사건(§11.223, FADC OVERFLOW)의 처방. 보드 전원이 NETIO PDU 192.168.0.3 (HV 망, USB 랜 어댑터 enp0s20f0u1u4) 에 있다. 채널 1 = FADC, 2 = TCB, 3 = SADC. 웹 API 계정은 `pdu.params` (0600) 에 있다 (사용자가 처음 적어 준 철자는 거부됐고 다른 값이 통했다). 자격증명은 문서에 적지 않는다.
 ```
@@ -985,7 +986,17 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 3. 재초기화 뒤 빈 트리거(n_bit 0)가 0 % 로 사라졌다 -- 4406~4408 의 빈 트리거 버스트는 초기화 상태 문제였던 것으로 본다(추정).
 4. 약한 빛으로는 빛샘 PMT 를 판별할 수 없다 -- 사용자 결정으로 해 뜬 뒤 태양빛 재점검.
 
-**남은 것.** ① 해 뜬 뒤 태양빛 빛샘 재점검 (사용자 결정; 전에 재초기화 뒤 어둠 런 3 분) ② `pdu.sh` 저장소 반영 (`scripts/pdu-power.sh`) ③ rcterm.params 는 `_all30_thr200_m6` 이므로 이 런 뒤 다른 설정은 새 파일 + 전환.
+**남은 것.** ① 해 뜬 뒤 태양빛 빛샘 재점검 (사용자 결정; 전에 재초기화 뒤 어둠 런 3 분) ② ~~`pdu.sh` 저장소 반영~~ 완료 (a9213f4, 아래) ③ rcterm.params 는 지금 `_all30_thr100_m6` (4416) 이므로 다른 설정은 새 파일 + 전환.
+
+**이어서 (01:2x~01:29) — THR 100 으로 run 4416.** 사용자 : "레이트가 생각보다 높지 않은데? 죽은 채널이 없는지 확인해주고 죽은 채널이 없고 모든 채널의 신호가 정상적이라면 thr 값을 100 으로 낮춰서 데이터를 받자".
+- 채널 점검 (읽기 전용, `/Data_ssd/LOG/lightleak-20261031/chanrate.sh --subruns 3 4415`, 표 `out4415/chanrate_4415.tsv`) : run 4415 첫 3 서브런 179.9 s, 73,786 사건 (410.1 Hz). 30 채널 전부 살아 있음 -- Type A ch0~17 비트율 165.6~220.8 Hz (끝 패널 0·8 이 166~172, 가운데 패널 2~5 가 213~221, 짝 PMT 차이 1 % 안), B1 ch18~23 47.7~55.0 Hz, B2 ch24~29 33.9~39.9 Hz. 0 Hz 채널 없음. 총 410 Hz 가 낮은 것은 MTHRSM 6 이 Type A 3 패널 이상 관통 궤적만 남기기 때문(추정).
+- 새 파일 `/home/frontend/ConfigFiles/VETO_test_9layers_v2_mid3_pidfix_all30_thr100_m6.config` = `_all30_thr200_m6` 사본에서 SADCT THR 30 채널 200→100 (비주석 diff 한 줄, MTHRSM 6 그대로). rcterm.params 백업 `.bak-20261101b`. dry-run 확인.
+- 01:28:30 감시자 TERM -> run 4415 exit 0 (DB 01:22:46~01:28:30, 344.2 s, nfadc 141,516 · nsadc 141,184, onlbit 1), 고아 0, 포트 비어 있음. veto-check-4415 대기자(pid 1561742)는 4415 가 6 서브런뿐이라 세움.
+- 01:29:02 감시자 재기동(tmux %2, 24 h 로테이션) -> run 4416. 검증 : TCB THR 100×30 · MTHRSM(6) · FADC THR 100×4 · is aligned 8 / Fail 0 · LIBUSB·TIMEOUT·OVERFLOW 0 · CONFIG/004416.config 비주석 diff 없음 · DB config 새 파일. 계수율 첫 88 s FADC 447.2 · SADC 446.9 Hz (THR 200 의 408 보다 +10 %). 감시 `veto-check-4416.sh` (비교 4415·4405·4407). threshold-changes.log 01:29 행. 다음 로테이션 11-02 01:29.
+- 설정 변천 : `_all30_thr200_m6` (4415, 6 분) -> `_all30_thr100_m6` (4416~, 뮤온 데이터 런). 되돌리려면 `cp -p config/rcterm.params.bak-20261101b config/rcterm.params` 뒤 감시자 TERM·재기동.
+
+**pdu.sh 저장소 반영 (사용자 지시 "pdu.sh 저장소에 넣어줘", 01:3x~01:44) -- 코드 갈래 2 라운드.** code-engineer 6076b41 (`scripts/pdu-power.sh` · `config/pdu.params.example` · `tests/pdu-power.test.sh` 64 · 픽스처 `tests/fixtures/pdu_status_20261101.json` · CLAUDE.md §2/§10 · docs/MANUAL.md §8.1) -> code-reviewer "고치면 승인" (① apierr 가 NETIO 실물 오류 형식 `{"errors":[{code,message,severity}]}` 를 못 봄 -- 거부돼도 로그에 ok · ② bash -x 추적에 비밀번호 노출) -> a9213f4 (errors[] 파싱, code 0·626 성공, fatal 실패, set +x, --noproxy '*', pgrep 없으면 거부, 시험 71/71; 옛 스크립트에 돌리면 7 건 실패) -> 2 라운드 **승인**. 보고서 `/Data_ssd/LOG/harness/20261101_code-engineer_pdu-power.md` · `20261101_code-reviewer_pdu-power.md`.
+배포 : 운영 디렉터리 01:43 a9213f4 로 fast-forward, `config/pdu.params` 를 `/Data_ssd/LOG/pdu-20261101/pdu.params` 에서 0600 으로 복사(gitignore 확인). 실물 확인 : `scripts/pdu-power.sh status` -> ch1 FADC ON 53 W 277 mA · ch2 TCB ON 18 W 140 mA · ch3 SADC ON 35 W 250 mA · ch8 ON 3 W (용도 미상) · 4~7 off. `--dry-run cycle` 은 HTTP 0 회로 순서(1 2 3 끔 -> 10 s -> 2 켬 -> 30 s -> 1 3 켬)만 찍음. 수집 중 `off 1` 은 거부(rc 1, 로그 `REFUSED off 1 busy: rcsupervisor rcterm daq tcb`). 사용법 : `scripts/pdu-power.sh status | on N.. | off N.. | cycle [--wait 30] [--dry-run] [--force]`. 옛 `/Data_ssd/LOG/pdu-20261101/pdu.sh` 는 남겨 둠(더 쓰지 않음).
 
 #### 11.223 ★★ VETO 빛샘 점검 세션 — 4405 마감, 4406~4409 (HV 켠 채 어둠·조명 시험), 4409 FADC OVERFLOW 로 대기 (사용자 지시, 10-31 21:49 ~ 11-01 00:31)
 
@@ -4807,7 +4818,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★ run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
+수집       ★★★ run 4416 (11-01 01:29 부터, `_all30_thr100_m6` = 30 채널 THR 100 · MTHRSM 6, 뮤온 데이터, ~447 Hz, 24 h 로테이션, 다음 교체 11-02 01:29, rcterm.params 백업 .bak-20261101b, §11.224). 이하 직전 기록 — run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
 수집       ★ **10-31 21:49 부터 대기 상태** (run 4405 사용자 지시로 마감, exit 0, 284.1 Hz, 14 h 14 m; rcterm.params = `_typeB_3`; VETO 현장 점검 중 — 전원 재투입 시 §11.119 절차, 재기동은 사용자 결정, §11.222). 이하 직전 기록 — run 4403 (10-29 07:35 부터, `_typeB_3` = B1+B2 ch18~29 THR 100 · MTHRSM 4, ~284 Hz, 24 h 로테이션, 다음 교체 10-30 07:35, §11.222). 이하 직전 기록 — **10-25 16:10 부터 대기 상태** (run 4402 사용자 지시로 마감, exit 0, 102.1 Hz; rcterm.params = `_all100_noveto5_m12`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — run 4400 (10-22 17:07 부터, `_noveto5_m12` = Type A 8 패널 중 6 패널 AND(MTHRSM 12), ~102 Hz, 24 h 로테이션, 다음 교체 10-23 17:07, §11.222). 이하 직전 기록 — run 4399 는 15:00 예약 정지.
 수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
