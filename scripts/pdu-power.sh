@@ -50,6 +50,7 @@ case "$CMD" in
 esac
 
 # ---- 자격증명 (내용은 화면·로그에 찍지 않는다) ----
+{ set +x; } 2>/dev/null      # bash -x 로 불려도 비밀번호가 추적에 안 나오게 (여기부터 끝까지 끈다)
 [ -r "$PARAMS" ] || { echo "자격증명 파일이 없다 : $PARAMS" >&2
    echo "  cp $DIR/config/pdu.params.example $DIR/config/pdu.params && chmod 600 $DIR/config/pdu.params  (그 뒤 pass 를 채운다)" >&2; exit 1; }
 getp() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$PARAMS" | head -1 | sed 's/[[:space:]]*$//'; }
@@ -75,8 +76,20 @@ import json,sys
 try: d=json.loads(sys.stdin.read() or "null")
 except Exception: print("JSON 이 아닌 응답"); sys.exit(1)
 if not isinstance(d,dict): print("예상과 다른 응답"); sys.exit(1)
-for k in ("errorCode","error","errorMessage"):
-    if k in d: print("%s=%s" % (k, str(d[k])[:120])); sys.exit(1)'; }
+# NETIO 실물 형식 (netio-all.js CoreJsonParser.getErrors) : {"errors":[{"code":"1004","message":..,"severity":"fatal"}]}
+#   성공 코드 0 SUCCESS · 626 SOME_ERRORS_OCCURED.  1000 INVALID_SESSION_ID · 1002 FORBIDDEN · 1004 INVALID_CREDENTIALS
+E=d.get("errors")
+if E is None: sys.exit(0)
+if not isinstance(E,list): print("errors 가 리스트가 아니다"); sys.exit(1)
+names={1000:"INVALID_SESSION_ID",1002:"FORBIDDEN",1004:"INVALID_CREDENTIALS",1021:"ALREADY_LOGGED_IN"}
+bad=[]
+for e in E:
+    if not isinstance(e,dict): bad.append("?"); continue
+    try: c=int(str(e.get("code","")).strip())
+    except ValueError: c=None
+    if c not in (0,626) or e.get("severity")=="fatal":
+        bad.append("code %s%s%s" % (e.get("code"), (" "+names[c]) if c in names else "", (": "+str(e.get("message"))[:120]) if e.get("message") else ""))
+if bad: print("; ".join(bad)); sys.exit(1)'; }
 
 SID=""
 api() {   # $1 action ... -> 응답을 stdout. dry-run 이면 보내지 않는다
@@ -84,7 +97,7 @@ api() {   # $1 action ... -> 응답을 stdout. dry-run 이면 보내지 않는�
       case "$1" in login) echo '{"data":{"sessionId":"DRYRUN"}}';; *) echo '{}';; esac; return 0; fi
    local body out rc
    body=$(jbody "$@") || return 2
-   out=$(printf '%s' "$body" | "$CURL" -sS -f -m 10 -H 'Content-Type: application/json' --data-binary @- "$API" 2>/dev/null); rc=$?
+   out=$(printf '%s' "$body" | "$CURL" -sS -f -m 10 --noproxy '*' -H 'Content-Type: application/json' --data-binary @- "$API" 2>/dev/null); rc=$?
    [ $rc -eq 0 ] || { echo "HTTP 실패 : $1 (curl rc=$rc, $API)" >&2; return 2; }
    printf '%s' "$out"
 }
@@ -139,6 +152,7 @@ remind() { echo "★ 전원을 올렸으면 : src/NOTICE_CODE_RUN.sh -> src/usbr
 
 # ---- 수집 중 가드 (status 는 무관) ----
 if [ "$CMD" != status ]; then
+   command -v "$PGREP" >/dev/null 2>&1 || { echo "pgrep($PGREP) 를 찾을 수 없어 수집 여부를 모른다 -- 거부한다" >&2; exit 1; }
    busy=""; for p in rcsupervisor rcterm daq tcb merger; do "$PGREP" -x "$p" >/dev/null 2>&1 && busy="$busy $p"; done
    if [ -n "$busy" ]; then
       msg="수집이 돌고 있다 (살아 있는 것 :$busy). 전원을 내리면 런이 깨진다 -- 감시자를 먼저 세우거나 --force"
