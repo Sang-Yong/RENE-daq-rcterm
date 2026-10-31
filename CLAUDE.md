@@ -756,6 +756,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **★ HV 크레이트(SY4527, 192.168.0.39)는 USB 랜 어댑터 `enp0s20f0u1u4` 의 DHCP 프로파일 "프로파일 1" 로 붙는다.** interface-name 이 없으면 NM 이 다른 포트(특히 저장소 10G enp3s0f1)에 올려 GECO 가 접속을 못 한다 (§11.220). `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4`.
 - **★ 설정 파일을 복사해 고칠 때 원본의 THR 줄이 주석으로 바뀌지 않았는지 run 사본(`/Data_ssd/CONFIG/<런>.config`)과 diff 할 것.** SADCT THR 줄이 없으면 CUPDAQ 가 전 채널 50 을 기본값으로 쓴다 (§11.220) (10-29 재발, §11.222).
 - **★ tmux pane 에 명령을 칠 때 `send-keys -t daq:1.2 "<명령>" Enter` 는 'not in a mode' 만 내고 아무것도 안 칠 수 있다.** `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` 로 칠 것 (10-17 · 10-20 두 번 겪음, §11.222).
+- **★ 빈 트리거 폭주·FADC ~42 kHz 상한·마감 TIMEOUT → 다음 부팅 OVERFLOW.** 느슨한 MTHRSM(2) + 빛은 전하 없는 빈 트리거를 수십~수백 kHz 로 만들고 FADC 가 42 kHz 에서 포화한다. 마감 읽기의 FADC TIMEOUT 뒤 곧바로 부팅하면 STARTRUN 직후 OVERFLOW 로 실패한다 (§11.179 와 같은 모양). 마감 뒤 usbreset 을 먼저 걸고 확인 런에서 `is aligned` 8 줄과 TIMEOUT 0 을 볼 것 (§11.223).
 - **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
   포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
   치울 것 — **인자 없이 부르면 `bin directory not found` 로 실패한다** (§11.119).
@@ -936,6 +937,38 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.223 ★★ VETO 빛샘 점검 세션 — 4405 마감, 4406~4409 (HV 켠 채 어둠·조명 시험), 4409 FADC OVERFLOW 로 대기 (사용자 지시, 10-31 21:49 ~ 11-01 00:31)
+
+정본: `/Data_ssd/LOG/harness/20261031_threshold-change-operator_lightleak.md` (4406~4409 절) · `20261101_monitor-analyst_lightleak-4406.md` · `20261101_monitor-analyst_lightleak-4408.md` · `20261101_daq-incident-responder_fadc-overflow-4409.md` · 도구 `20261031_monitor-analyst_lightleak-tool.md`. 수치는 거기서. 산출물·도구 `/Data_ssd/LOG/lightleak-20261031/`.
+
+**목적.** 사용자: "VETO 이상 점검" — HV 를 켠 채 빛샘을 보려고 MTHRSM 2 로, 모든 비토 채널을 켜고 어둠 10 분을 기준으로 잡고 불을 켠 상태 5 분씩을 받아 튀는 PMT 를 골라낸다.
+
+| run | 시각 | 설정 / 조건 | 결과 |
+|---|---|---|---|
+| 4405 | ~ 10-31 21:49 | `_typeB_3` | 사용자 지시로 마감 (exit 0, 284.1 Hz, 14 h 14 m) |
+| 4406 | 23:49 ~ 23:55 (6 분, 조기 마감) | `_all30_m2` (SADC 30 채널 THR 100, MTHRSM 2), 어둠 | 계수율 44 kHz → 7.5 kHz. PRD 완결. 사용자 "레이트 너무 높다" |
+| 4407 | 23:57 ~ 00:02:41 | `_all30_thr500_m2` (THR 500 × 30, MTHRSM 2), 어둠 | 처음 3 분 ~1.1 kHz 안정 → 43.6 kHz 급등 → 30 kHz 가드로 감시자 TERM (exit 0, 345.6 s). PRD 6/6 |
+| 4408 | 00:11:36 ~ 00:12:46 (70 s) | 같음, 조명 1 (밝은 빛) | SADC 130~200 kHz, FADC 42 kHz 에서 포화 → TERM. PRD 2/2 (앞 10 s 만, TrgNum 29.8 % 빠짐). 마감 ENDRUN 에 FADC TIMEOUT 1 건 |
+| 4409 | 00:23 | 같음, 조명 2 (약한 빛) | STARTRUN 직후 FADC `LIBUSB_ERROR_OVERFLOW` → boot failed (onlbit 0), 자료 없음 |
+
+설정 파일 (모두 `/home/frontend/ConfigFiles/`, 오케스트레이터 작성, 옛 파일 무수정): `VETO_test_9layers_v2_mid3_pidfix_all30_m2.config` — `_all30_m2`(THR 100 × 30, MTHRSM 2) · `…_all30_thr500_m2.config` — THR 500 × 30. 현재 `config/rcterm.params` = `_all30_thr500_m2` (★ 시험용).
+
+**분석 결론 (4406·4407 채널 시계열 · 4408 채널별 비율)**
+- 올라갔다 죽은 채널은 없다. SADC 30 채널 모두 정상, 요동은 전부 빈 트리거(n_bit 0, 전 채널 전하 없음) 버스트다. 4406 은 27 kHz → 15 Hz, 4407 은 12 Hz → 24 kHz. 진짜 동시 사건(n ≥ 2) 은 내내 일정 (4406 ~7 kHz, 4407 ~0.9 kHz). 전하가 없으니 빛이 아니라 전자/트리거 경로 잡음으로 추정 (미확정).
+- 4405 때 ADC 0 이던 PMT 2·12·19 는 트리거에서 꺼져 있었을 뿐 정상이다. 단독 잡음이 큰 채널은 PMT 25 > 17 > 16.
+- 4408 (밝은 빛): 146 kHz 의 99 % 가 빈 트리거. 채널별 비트율 비율 0.82~1.30 (★ 없음). 약한 반응 패널은 11 (PMT 25·23)·13 (PMT 17·16)·PMT 29. 빈 트리거 안 최대 ADC 채널이 PMT 33 (ch13)·PMT 7 (ch14) = 패널 6·7 — 빛이 그쪽으로 들어가되 적분 문턱은 못 넘기고 TCB 카운터 문턱만 넘기는 것으로 추정. 권고: 패널 6·7 (ch12~15) 을 끈 1 분 런으로 출처를 가른다.
+
+**사건 4409 (복구 경과·불합격 사유).** 00:23:42 감시자 restart #1 (자동 메일 both 발송 완료, rc=0), 감시 스크립트가 TERM. 대응자: usbreset #1 → 확인 런 1 은 DRAM 0/8 정렬·포화 (SADC 77~158 kHz) → usbreset #2 → 확인 런 2 는 DRAM 8/8, FADC 50.7 · SADC 53.8 kHz (약한 빛인데도). 그러나 확인 런 ENDRUN 의 마지막 FADC 읽기에서 TIMEOUT 1 건이 나 USB 기준 불합격 → 재기동하지 않고 11-01 00:31 부터 대기. 판정(추정): 보드 고장이 아니라 포화 계수율 (FADC 40~50 kHz) 에서 마감 읽기 TIMEOUT → 다음 부팅 OVERFLOW 로 이어지는 §11.179 와 같은 모양이다. DRAM 은 usbreset 2 회로 풀렸다 (§11.130 · §11.171 에 이어 네 번째 재현).
+
+**새 도구** (`/Data_ssd/LOG/lightleak-20261031/`): `chanrate.sh` (런 간 채널별 비율 · ★ 표시), `TimeChan*.C` (서브런·10 s 빈 채널 시계열), `ChanRate.C` · `PlotTime.C` 등.
+
+**교훈**
+1. MTHRSM 2 같은 느슨한 트리거 + 빛은 빈 트리거 폭주를 만들고 FADC ~42 kHz 상한에서 포화해 USB TIMEOUT/OVERFLOW 로 이어진다. 빛샘 시험은 FADC 10 kHz 아래로 빛을 조절하거나 패널 AND 조건으로 할 것.
+2. 고계수 런을 마감한 뒤 다음 부팅 전에 usbreset 을 예방으로 걸 것.
+3. 10 분·5 분 런은 감시자 `--run-length N --max-cycles 1` 방법이 그대로 유효하다. 30 kHz 가드(§11.198)가 폭주 런을 70 s 만에 끊은 것도 실전 확인.
+
+**남은 것 (사용자 결정).** ① 빛을 FADC 수 kHz 로 줄여 재시도 ② 패널 6·7 을 끈 설정으로 출처 가르기 ③ 보드 전원 재투입 여부 (§11.119). ★ 어느 쪽이든 물리 런 전에 `rcterm.params` 를 시험 설정에서 교체할 것.
 
 #### 11.222 ★★ 그림 45~48 로그판 · 그림 x 축 8-15 시작 · Li/He 끔 · NEOS 의 C-12(¹²B) 배경 조사 · run 4389 격리 (사용자 지시 3 건 + 결정 1 건, 10-18 ~ 10-19 03:2x)
 
@@ -4725,6 +4758,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
+수집       ★★ **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
 수집       ★ **10-31 21:49 부터 대기 상태** (run 4405 사용자 지시로 마감, exit 0, 284.1 Hz, 14 h 14 m; rcterm.params = `_typeB_3`; VETO 현장 점검 중 — 전원 재투입 시 §11.119 절차, 재기동은 사용자 결정, §11.222). 이하 직전 기록 — run 4403 (10-29 07:35 부터, `_typeB_3` = B1+B2 ch18~29 THR 100 · MTHRSM 4, ~284 Hz, 24 h 로테이션, 다음 교체 10-30 07:35, §11.222). 이하 직전 기록 — **10-25 16:10 부터 대기 상태** (run 4402 사용자 지시로 마감, exit 0, 102.1 Hz; rcterm.params = `_all100_noveto5_m12`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — run 4400 (10-22 17:07 부터, `_noveto5_m12` = Type A 8 패널 중 6 패널 AND(MTHRSM 12), ~102 Hz, 24 h 로테이션, 다음 교체 10-23 17:07, §11.222). 이하 직전 기록 — run 4399 는 15:00 예약 정지.
 수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
@@ -4768,6 +4802,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
 
 ```
+§11.223         ★★ VETO 빛샘 점검 (10-31~11-01) : run 4406~4409, MTHRSM 2 · 30 채널 THR 100/500. 죽은 채널 없음, 요동은 빈 트리거 버스트. 4408 약한 반응 패널 11·13, 빈 트리거 최대 ADC 패널 6·7. 4409 FADC OVERFLOW boot failed → usbreset ×2 후 마감 TIMEOUT 로 불합격, 대기
 §11.222         ★★ 그림 45~48 `_log` 판 · 그림 x 축 8-15 부터(trend_xmin_date) · Li/He 끔(lihe_enable 0, 창 후보 0.63 ± 0.53 /day) · NEOS C-12 = ¹²B 조사(3.1σ 징후, IBD 영향 없음, 4d 미적용 — 사용자 결정) · run 4389 격리
 §11.221         ★★ 백업 9 회차 준비 : 하드 2 장 꽂힘, 마운트+기동 root 스크립트 scripts/storage-backup-mount.sh (by-id 인자, fstab 무기록 — 사용자 지시로 fstab 판 폐기). 리뷰가 fstab 비움 경로를 잡음. 사용자 실행 대기
 §11.220         ★★ GECO 접속 불가 원인 = HV 크레이트용 USB 랜 어댑터 프로파일 "프로파일 1" 이 떨어짐(interface-name 없어 10G 포트로 샘) · typeB 점검(원본 THR 줄 주석 사고 방지) · 10-16 15:32 run 4388 = `_mid3_pidfix_typeB` 24 h → 16:05 run 4389 `_typeB_2`(ch24~29) 는 6.5 분 0 사건(DAQ 정상, B2 신호 분석은 판정 불가) → 16:12 사용자 지시로 정지·대기, rcterm.params 가 `_typeB_2` 임에 주의
@@ -4892,6 +4927,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
+| **빛샘 시험 다음 결정 + 물리 런 전 설정 교체** | 11-01 00:31 대기. 빛 줄여 재시도 / 패널 6·7 끈 시험 / 전원 재투입 중 택일. rcterm.params 가 시험용 `_all30_thr500_m2` 이므로 물리 런 전에 교체. 보드는 다음 부팅 전 usbreset | §11.223 |
 | **새 외장하드 2 장 교체 (RAW 용 · PRD 용)** | 10 회차가 10-21 11:53 에 두 하드 가득으로 종료 (런 1,098 개 남음) — 다시 열림. 뽑기 전 `sudo umount`, 새 하드는 `scripts/storage-backup-mount.sh` | §11.221 |
 | **수집 재개 결정** | 10-29 07:35 run 4403 으로 재개(`_typeB_3`, ~284 Hz). 이후 런 교체·정지는 사용자 결정 — 재기동 전 rcterm.params 설정 확인 | §11.222 |
 | **daqerr-watch-4380 종료됨(10-17 23:08) -- 다시 걸지 결정** | 48 h 상한 스크립트라 종료. run 4394 도 감시 없이 돈다. 새 48 h 감시를 걸지 사용자 결정 | §11.220 |
