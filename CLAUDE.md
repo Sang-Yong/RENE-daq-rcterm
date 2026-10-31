@@ -184,6 +184,8 @@ scripts/{killdaq.sh, rcsupervisor.service.example}
 scripts/daq-alarm.sh     현장 알람 (사운드카드 + PC 스피커). 사람이 끌 때까지
 scripts/daq-notify.sh    사건 -> 알람 + 메일. 감시자가 --notify-cmd 로 부른다
 scripts/usb-recover.sh   USB 진단 + usbreset + 확인 런. --diagnose 는 읽기 전용
+scripts/pdu-power.sh     NETIO PDU(192.168.0.3) 로 보드 전원 채널 1 FADC · 2 TCB · 3 SADC 를 status/on/off/cycle (§11.224)
+                         ★ 수집 중이면 거부(--force). 자격증명 config/pdu.params (gitignore). --dry-run 은 HTTP 0 회
 scripts/netcheck.sh      바깥 링크가 실제로 얼마를 내는지 잰다. 읽기 전용
                          ★ 대역은 실제로 쓴다. --local-only 는 안 쓴다 (§11.121)
 scripts/sheetlog-auto.sh 구글시트 런 로그 자동 등재. cron 이 부른다 (§11.126)
@@ -757,7 +759,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **★ 설정 파일을 복사해 고칠 때 원본의 THR 줄이 주석으로 바뀌지 않았는지 run 사본(`/Data_ssd/CONFIG/<런>.config`)과 diff 할 것.** SADCT THR 줄이 없으면 CUPDAQ 가 전 채널 50 을 기본값으로 쓴다 (§11.220) (10-29 재발, §11.222).
 - **★ tmux pane 에 명령을 칠 때 `send-keys -t daq:1.2 "<명령>" Enter` 는 'not in a mode' 만 내고 아무것도 안 칠 수 있다.** `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` 로 칠 것 (10-17 · 10-20 두 번 겪음, §11.222).
 - **★ 빈 트리거 폭주·FADC ~42 kHz 상한·마감 TIMEOUT → 다음 부팅 OVERFLOW.** 느슨한 MTHRSM(2) + 빛은 전하 없는 빈 트리거를 수십~수백 kHz 로 만들고 FADC 가 42 kHz 에서 포화한다. 마감 읽기의 FADC TIMEOUT 뒤 곧바로 부팅하면 STARTRUN 직후 OVERFLOW 로 실패한다 (§11.179 와 같은 모양). 마감 뒤 usbreset 을 먼저 걸고 확인 런에서 `is aligned` 8 줄과 TIMEOUT 0 을 볼 것 (§11.223).
-- **★ 보드 전원 재투입은 PDU(192.168.0.3)로 원격 가능** -- 켤 때 TCB(ch2) 먼저 30 s 뒤 FADC(ch1)·SADC(ch3), NOTICE 1 회 → usbreset 2 회 연속 → 10 s 더미 런 → 확인 런 (§11.224). 도구 `/Data_ssd/LOG/pdu-20261101/pdu.sh`.
+- **★ 보드 전원 재투입은 PDU(192.168.0.3)로 원격 가능** -- 켤 때 TCB(ch2) 먼저 30 s 뒤 FADC(ch1)·SADC(ch3), NOTICE 1 회 → usbreset 2 회 연속 → 10 s 더미 런 → 확인 런 (§11.224). 도구 `scripts/pdu-power.sh` (`status` · `cycle` · `--dry-run`, 자격증명 `config/pdu.params`; 옛 `/Data_ssd/LOG/pdu-20261101/pdu.sh` 를 옮긴 것).
 - **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
   포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
   치울 것 — **인자 없이 부르면 `bin directory not found` 로 실패한다** (§11.119).

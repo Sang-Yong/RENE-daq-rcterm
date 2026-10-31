@@ -279,6 +279,23 @@ rcterm --params <file> --max-runs 1 --run-length 24.016667 --quiet --heartbeat <
 | 감시자가 계속 재시작함 | `--stall-grace` 가 짧지 않은지 확인. 지리드 런이면 `--no-stall-check` |
 | 감시자가 이상을 못 잡음 | `heartbeat` 경로가 rcterm/rcsupervisor 에서 동일한지 확인 |
 
+### 8.1 보드 크레이트 전원 재투입 — `scripts/pdu-power.sh`
+
+`usbreset` 으로 안 풀리는 보드 고장(TCB `LIBUSB_ERROR_TIMEOUT`, FADC OVERFLOW 등)은 보드 전원을 내렸다 올려야 한다
+(CLAUDE.md §11.119). 2026-11-01 부터 NETIO PDU(192.168.0.3, HV 망) 로 원격으로 한다 (§11.224).
+
+```bash
+cp config/pdu.params.example config/pdu.params && chmod 600 config/pdu.params   # 처음 한 번. pass 를 채운다
+scripts/pdu-power.sh status              # 채널 상태 (읽기 전용, 수집 중이어도 된다)
+scripts/pdu-power.sh --dry-run cycle     # 보낼 요청만 찍는다. HTTP 0 회
+scripts/pdu-power.sh cycle               # 1 2 3 끔 -> 10 s -> 2(TCB) 켬 -> 30 s -> 1(FADC)+3(SADC) 켬, 단계마다 되읽어 확인
+scripts/pdu-power.sh off 1 2 3 / on 2    # 낱개. 채널은 1~3 만
+```
+
+- 수집 중(rcsupervisor·rcterm·daq·tcb·merger 가 살아 있음)이면 on/off/cycle 을 거부한다. 감시자를 먼저 세우거나 `--force`.
+- 종료코드 0 정상 · 1 사용법/설정/거부 · 2 로그인·HTTP 실패 · 3 되읽은 상태가 기대와 다름. 로그 `/Data_ssd/LOG/pdu-power.log` (비밀번호는 안 남긴다).
+- ★ 전원을 올린 뒤에는 트리거 설정이 없다 : `src/NOTICE_CODE_RUN.sh` → `src/usbreset` 2 회 → 10 s 더미 런 → 확인 런 (TCB 로그 `is aligned` 8 줄, LIBUSB 0).
+
 ---
 
 ## 9. 상태 수동 점검 명령

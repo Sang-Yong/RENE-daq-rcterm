@@ -1,0 +1,8 @@
+# pdu.params -- NETIO PDU 웹 API 자격증명. scripts/pdu-power.sh 가 읽는다 (CLAUDE.md §11.224).
+#   cp config/pdu.params.example config/pdu.params && chmod 600 config/pdu.params
+#   ★ config/pdu.params 는 .gitignore 대상이다 (config/*.params). 비밀번호를 저장소·문서·메일에 적지 말 것
+#   PDU 는 HV 망(USB 랜 어댑터 enp0s20f0u1u4, 192.168.0.x) 에 있다
+#   채널 : 1 = FADC · 2 = TCB · 3 = SADC   (켤 때 TCB 먼저 -> 30 s -> FADC + SADC)
+host = 192.168.0.3
+user = admin
+pass = <채워 넣을 것>
