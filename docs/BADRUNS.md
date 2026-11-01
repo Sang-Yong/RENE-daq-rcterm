@@ -12,7 +12,7 @@
 #
 # 갱신 : scripts/badrun.sh --scan --update-list
 # 사본 : docs/BADRUNS.md  (scripts/badrun.sh --export)
-# 생성 : 2026-10-17 12:21:01
+# 생성 : 2026-11-02 00:14:53
 #
 # 범주
 #   boot_failed     부팅 실패. 런이 시작되지 못했고 데이터가 없다
@@ -28,14 +28,14 @@
 #
 # run  분류일시        범주                 서브런              메모
 # ── 요약 ─────────────────────────────────────────────────────────
-#  문제 런 628 개
+#  문제 런 632 개
 #    not_processed             288
-#    aborted                   254
+#    aborted                   255
 #    boot_failed                28
 #    no_data                    20
-#    truncated_tail             17
+#    truncated_tail             19
 #    prd_gap                    16
-#    truncated_tail+prd_gap      5
+#    truncated_tail+prd_gap      6
 #
 #  ★ 사람이 손볼 것 — 원본이 죽어 격리가 필요하거나 이미 격리한 런
 #    run 2466   격리됨      truncated_tail           00038
@@ -60,6 +60,9 @@
 #    run 4318   격리됨      truncated_tail           00147
 #    run 4372   격리됨      truncated_tail+prd_gap   00512,00513
 #    run 4392   격리됨      truncated_tail           00962
+#    run 4396   격리됨      truncated_tail           00598
+#    run 4399   격리됨      truncated_tail           00076
+#    run 4416   격리됨      truncated_tail+prd_gap   00797,00798,00799,00800
 # ─────────────────────────────────────────────────────────────────
 #
   27   2026-08-21 03:57:40 aborted                -                      DB onlbit=0
@@ -689,5 +692,9 @@
   4318 2026-09-01 03:49:20 truncated_tail         00147                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 147 = PRD 147). 사유는 badrun/README.txt
   4324 2026-09-07 13:56:33 boot_failed            -                      boot failed; run never started; 런 디렉터리는 있으나 비었다
   4372 2026-10-09 08:30:20 truncated_tail+prd_gap 00512,00513            aborted; FADC 513 / PRD 512. 원시 파일 2 개 격리됨(서브런 00513). 서브런 00512 은 원본이 멀쩡하다. 재처리하면 된다
+  4389 2026-10-19 03:19:16 aborted                -                      no trigger: typeB_2 (ch24-29 only, MTHRSM 6) gave 0 events in 6.5 min; stopped by user 16:11:54, not physics; 런 디렉터리는 있으나 비었다
   4392 2026-10-17 12:21:01 truncated_tail         00962                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 962 = PRD 962). 사유는 badrun/README.txt
+  4396 2026-10-20 13:38:56 truncated_tail         00598                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 598 = PRD 598). 사유는 badrun/README.txt
+  4399 2026-10-22 17:06:04 truncated_tail         00076                  원시 파일 2 개를 badrun/ 으로 격리했다. 나머지는 완결 (FADC 76 = PRD 76). 사유는 badrun/README.txt
+  4416 2026-11-02 00:14:53 truncated_tail+prd_gap 00797,00798,00799,00800 FADC 800 / PRD 797. 원시 파일 2 개 격리됨(서브런 00800). 서브런 00797 00798 00799 은 원본이 멀쩡하다. 재처리하면 된다
 ```
