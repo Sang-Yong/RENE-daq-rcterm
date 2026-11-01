@@ -761,6 +761,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **★ tmux pane 에 명령을 칠 때 `send-keys -t daq:1.2 "<명령>" Enter` 는 'not in a mode' 만 내고 아무것도 안 칠 수 있다.** `send-keys -t %2 -l "<명령>"` 뒤 `send-keys -t %2 Enter` 로 칠 것 (10-17 · 10-20 두 번 겪음, §11.222).
 - **★ 빈 트리거 폭주·FADC ~42 kHz 상한·마감 TIMEOUT → 다음 부팅 OVERFLOW.** 느슨한 MTHRSM(2) + 빛은 전하 없는 빈 트리거를 수십~수백 kHz 로 만들고 FADC 가 42 kHz 에서 포화한다. 마감 읽기의 FADC TIMEOUT 뒤 곧바로 부팅하면 STARTRUN 직후 OVERFLOW 로 실패한다 (§11.179 와 같은 모양). 마감 뒤 usbreset 을 먼저 걸고 확인 런에서 `is aligned` 8 줄과 TIMEOUT 0 을 볼 것 (§11.223).
 - **★ 정전 뒤에는 PC 만 켜졌다고 수집을 띄우지 말 것** — 저장소 IPv4·HV 망·크레이트(TCB TIMEOUT)·HV 가 각각 따로 복구 대상이다 (§11.225).
+- **★ 정전 뒤 SY4527 은 크레이트가 켜져 있어도 채널 출력이 OFF 다** — 확인 런 0 Hz 면 GECO 채널부터 (§11.225).
 - **★ 보드 전원 재투입은 PDU(192.168.0.3)로 원격 가능** -- 켤 때 TCB(ch2) 먼저 30 s 뒤 FADC(ch1)·SADC(ch3), NOTICE 1 회 → usbreset 2 회 연속 → 10 s 더미 런 → 확인 런 (§11.224). 도구 `scripts/pdu-power.sh` (`status` · `cycle` · `--dry-run`, 자격증명 `config/pdu.params`; 옛 `/Data_ssd/LOG/pdu-20261101/pdu.sh` 를 옮긴 것).
 - **★ 감시자 없이 `rcterm` 을 직접 돌리면 실패 시 `daq`·`tcb` 가 고아로 남는다.**
   포트 3개를 계속 잡아 다음 시도를 막는다. `scripts/killdaq.sh -b <bindir>` 로
@@ -1009,6 +1010,57 @@ scripts/runcheck.sh --run 4416          # FADC 800 = Merged 800 = PRD 800 확인
 6. postrun 재기동 (`/scratch` 마운트 뒤, tmux daq:1.3).
 7. 정전이 맞다면 UPS 도입 검토.
 8. 이 사건의 기록 페이지(아티팩트) 갱신은 복구가 끝난 뒤 한 번에.
+
+**이어서 (00:2x~00:56) -- 복구 경과 (run 4416 완결 · 보드 재초기화 · run 4417 수집 재개).** 정본 같은 보고서의 두 '이어서' 절. 수치는 거기서.
+
+| 시각 (11-02) | 단계 | 결과 |
+|---|---|---|
+| 00:25:44 | HV 망 USB 랜 `enp0s20f0u1u4` (usb 2-1.4 r8152) 재열거 | NM "프로파일 1" 자동 활성화, DHCP 192.168.0.149 (사용자가 어댑터를 다시 꽂은 것으로 추정). PDU · SY4527 ping 회복 |
+| (root 작업) | `nmcli connection modify "프로파일 1" connection.interface-name enp0s20f0u1u4` | 재발 방지 적용 (§11.220 처방) |
+| 00:29 | `/scratch` IPv6 임시 마운트 (10.0.0.10 IPv4 는 여전히 무응답) | `mount -t nfs -o vers=4.2 '[fe80::6d1:5790:50e6:201c%enp3s0f1]:/data' /scratch` -> 140T, 44T 사용, 89T 여유. ★ 임시 |
+| 00:30:38~51 | run 4416 PRD 꼬리 `postrun.sh 4416 --from 797 --to 799 --heartbeat /dev/null --rawroot /Data_ssd/RAW --log-fallback /scratch/LOG` | merge 3 / 실패 0 (10 초). **FADC 800 = SADC 800 = Merged 800 = PRD 800 완결**, badrun 2 (00800 짝). 00799 는 blocked 예측과 달리 그대로 merge 됨. 로그 `/Data_ssd/LOG/harness/20261102_postrun-4416-tail.log`, runcheck 완결 |
+| 00:37:49~00:38:33 | 보드 PDU 전원 재투입 (사용자 승인 "예, PDU 로 지금", HV "켜져 있다" 확인) | off 1 2 3 -> TCB(ch2) on -> 30 s -> FADC(ch1)·SADC(ch3) on, 되읽기 1:1 2:1 3:1, lsusb 3 종 |
+| 00:39 | `NOTICE_CODE_RUN.sh` 1 회 | rc 0, 7 s, 오류 0. FADC ped 3690~3717 |
+| 00:39:12~00:43:14 | usbreset 연속 2 회 -> 확인 런 1 -> usbreset 1 회 더 | 확인 런 1 : DRAM **8/8 정렬 실패**, 0 사건. usbreset 세 번째 뒤 확인 런 2 : **is aligned 8 / Fail 0** (DRAM 은 usbreset 3 회째에 맞음 -- §11.224 와 같은 모양, 다섯 번째 재현) |
+| 00:43:19~00:46:46 | 확인 런 2 | DRAM 8/8, USB 오류 0, 그러나 **FADC 0 · SADC 0 사건**. TCB 로그는 4416 과 링크·트리거 조건·pedestal 이 같다 (아날로그 입력 없음) |
+| (사용자) | GECO 로 SY4527 **채널 출력 ON** ("HV 채널 다 켰어") | 전원 재투입·NOTICE 는 다시 하지 않음 |
+| 00:50:50~00:54:07 | 확인 런 3 | exit 0 · aligned 8 / Fail 0 · LIBUSB·TIMEOUT·OVERFLOW 0 · FADC 81,876 / 180.4 s = **453.9 Hz** · SADC 81,600 / 179.8 s = **454.0 Hz** |
+| 00:54:18 | `scripts/daq-tmux.sh --start` (tty 없음, `open terminal failed` 는 실패 아님) | rcsupervisor pid 90208, **run 4417** 시작 |
+
+0 사건의 원인은 **SY4527 채널 출력 OFF** 로 확정 -- 사용자는 "HV 켜져 있음" 이라 했으나 크레이트 전원만이 켜진 것이었고(정전 뒤 크레이트가 채널 OFF 로 올라온 것으로 추정), 채널을 켜자 같은 보드 상태로 454 Hz 가 나왔다.
+
+**run 4417 검증 (실측).**
+
+| 항목 | 결과 |
+|---|---|
+| SADCT THR 30 ch | 100 x 30 (config · registered 모두) |
+| FADC THR | 100 x 4 |
+| TCB 트리거 | MTHRF 4 · MTHRSM 6 · TSWF/TSWSM 0 1 0 0 (config · register) |
+| 링크 · DRAM | FADCT[mid=3] found @ 3 · SADCT[mid=65] found @ 4 · is aligned 8 / Fail 0 (delay 5 4 4 4 3 3 3 3) |
+| `THR :` 줄 | TCB_004416.log 와 동일 |
+| CONFIG/004417.config 대 `_all30_thr100_m6.config` | 비주석 diff 없음 |
+| DB config | `...pidfix_all30_thr100_m6.config` |
+| notify | rcsupervisor.log 00:54:18 `notify=... recover=...` 켜짐 |
+| 계수율 (00:55~00:56) | FADC ar 456.4 -> 455.3 Hz · SADC 455.8 -> 454.8 Hz (4416 첫 88 s 447.2 와 같은 크기) |
+| USB 오류 (daqtime 44~89 s) | TCB 0 · FADCDAQ 0 · SADCDAQ 0 |
+| pane · 감시 | tmux `daq` 5 pane 살아 있음 (rcmon 90210 · supervisor · postrun --follow 90211 · work space · dataflow --follow 90209), chainwatch 운용 중 카운터 0. DISPLAY :1 에 `tmux attach -t daq` 창 (사용자 요청) |
+
+**수집 공백** 11-01 14:49:33 ~ 11-02 00:54:18 (약 10 h 05 m). run 4416 은 13 h 20 m 분 자료 보존. 다음 로테이션 **11-03 00:54:18**.
+
+**교훈 (추가)**
+1. 정전 뒤 SY4527 은 크레이트가 켜져 있어도 채널 출력이 OFF 로 올라온다 -- 확인 런이 0 Hz 면 보드를 더 파기 전에 GECO 채널 출력부터 (§11.131 의 재확인).
+2. 전원 재투입 뒤 DRAM 은 `usbreset` 을 맞을 때까지 건다 -- 이번엔 3 회째에 맞았다. 확인 런 TCB 로그의 `is aligned` 8 줄을 세는 것을 빼먹지 말 것.
+3. HV 망 USB 랜 어댑터는 다시 꽂으면 DHCP 로 붙는다. interface-name 고정이 이제 적용돼 10G 포트로 새지 않는다.
+4. 저장소 서버 IPv4 가 안 잡혀도 IPv6 링크로컬 임시 마운트로 후처리를 이어갈 수 있다 (§11.220 선례 재사용).
+
+**남은 것.**
+1. 저장소 서버 콘솔 `nmcli con up ens6f1` 로 10.0.0.10 IPv4 복구 -> postrun · dataflow 를 세우고 `umount /scratch` -> fstab 정식 마운트 -> 재기동 (현재 /scratch 는 임시 IPv6 마운트).
+2. run 4417 첫 PRD 확인 (`/Data_ssd/RAW/004417/PRD/`, 00:58~59 이후) · USB 오류 3 분 이상 재확인 (`grep -cE 'LIBUSB|TIMEOUT|OVERFLOW' /Data_ssd/LOG/{TCB,FADCDAQ,SADCDAQ}_004417.log`).
+3. chainwatch 의 `resumed` 메일 (전문가 목록 + 책임자, 자동) 도착 확인 -- 4416 이 정전으로 끝나 간격이 크다.
+4. veto-check / daqerr-watch 는 걸지 않았다 (필요하면 사용자 결정).
+5. journald `Storage=persistent` 검토 (§6 백로그) · UPS 도입 검토 · 현장 정전 확인.
+6. 4416 시트 자동 등재 확인 (FADC == PRD 가 됐으므로 다음 07분 회차).
+7. GitHub push 는 자격증명 만료 시 사용자가 한다.
 
 #### 11.224 ★★ PDU 원격 전원 재투입으로 4409 사건 복구 · 빛샘 조명 런 4410~4414 (반응 PMT 없음) · 뮤온 데이터 런 4415 (`_all30_thr200_m6`, 24 h 로테이션) (사용자 지시, 11-01 00:3x ~ 01:2x)
 
@@ -4886,7 +4938,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★★ **11-01 14:49 부터 대기 상태** (사이트 정전 추정으로 PC·저장소 서버 다운, 11-02 00:02 재부팅. run 4416 은 13 h 20 m 에서 중단, DB 마감·00800 격리 완료. 보드 NOTICE 가 TCB TIMEOUT 으로 두 번 실패 -> 전원 재투입 필요, 감시자 미기동. rcterm.params = `_all30_thr100_m6`, §11.225). 이하 직전 기록 — run 4416 (11-01 01:29 부터, `_all30_thr100_m6` = 30 채널 THR 100 · MTHRSM 6, 뮤온 데이터, ~447 Hz, 24 h 로테이션, 다음 교체 11-02 01:29, rcterm.params 백업 .bak-20261101b, §11.224). 이하 직전 기록 — run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
+수집       ★★★★★ run 4417 (11-02 00:54 부터, `_all30_thr100_m6`, ~455 Hz, 24 h 로테이션, 다음 교체 11-03 00:54, §11.225; 정전 뒤 PDU 전원 재투입 + usbreset 3 회 + HV 채널 ON 으로 복구, 공백 10 h 05 m). 이하 직전 기록 — ★★★★ **11-01 14:49 부터 대기 상태** (사이트 정전 추정으로 PC·저장소 서버 다운, 11-02 00:02 재부팅. run 4416 은 13 h 20 m 에서 중단, DB 마감·00800 격리 완료. 보드 NOTICE 가 TCB TIMEOUT 으로 두 번 실패 -> 전원 재투입 필요, 감시자 미기동. rcterm.params = `_all30_thr100_m6`, §11.225). 이하 직전 기록 — run 4416 (11-01 01:29 부터, `_all30_thr100_m6` = 30 채널 THR 100 · MTHRSM 6, 뮤온 데이터, ~447 Hz, 24 h 로테이션, 다음 교체 11-02 01:29, rcterm.params 백업 .bak-20261101b, §11.224). 이하 직전 기록 — run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
 수집       ★ **10-31 21:49 부터 대기 상태** (run 4405 사용자 지시로 마감, exit 0, 284.1 Hz, 14 h 14 m; rcterm.params = `_typeB_3`; VETO 현장 점검 중 — 전원 재투입 시 §11.119 절차, 재기동은 사용자 결정, §11.222). 이하 직전 기록 — run 4403 (10-29 07:35 부터, `_typeB_3` = B1+B2 ch18~29 THR 100 · MTHRSM 4, ~284 Hz, 24 h 로테이션, 다음 교체 10-30 07:35, §11.222). 이하 직전 기록 — **10-25 16:10 부터 대기 상태** (run 4402 사용자 지시로 마감, exit 0, 102.1 Hz; rcterm.params = `_all100_noveto5_m12`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — run 4400 (10-22 17:07 부터, `_noveto5_m12` = Type A 8 패널 중 6 패널 AND(MTHRSM 12), ~102 Hz, 24 h 로테이션, 다음 교체 10-23 17:07, §11.222). 이하 직전 기록 — run 4399 는 15:00 예약 정지.
 수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
@@ -5057,7 +5109,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **정전 뒤 복구 (순서대로)** | ①현장 정전·UPS 확인 ②저장소 서버 ens6f1 IPv4 -> `sudo mount /scratch` -> run 4416 PRD 꼬리 `postrun.sh 4416 --from 797 --to 799 …` ③HV 망 `nmcli connection up "프로파일 1" ifname enp0s20f0u1u4` + interface-name 고정 ④보드 전원 재투입 `scripts/pdu-power.sh cycle` (또는 현장) -> NOTICE 1 회 -> usbreset ×2 -> 확인 런 -> `scripts/daq-tmux.sh --start` ⑤HV(SY4527) 켜짐 확인 ⑥postrun 재기동 ⑦UPS 검토 | §11.225 |
+| **정전 뒤 남은 것** | ①저장소 서버 콘솔 `nmcli con up ens6f1` 로 10.0.0.10 IPv4 복구 -> postrun · dataflow 세우고 `umount /scratch` -> fstab 마운트 -> 재기동 (지금은 IPv6 임시 마운트) ②run 4417 첫 PRD · chainwatch resumed 메일 확인 ③UPS · journald persistent 검토 ④GitHub push (자격증명 만료 시 사용자) | §11.225 |
 | **해 뜬 뒤 태양빛 빛샘 재점검 (사용자 결정)** | 약한 조명 런 4410~4414 는 반응 PMT 없음. 수집은 11-01 01:22 부터 4415 뮤온 런으로 재개됨, rcterm.params = `_all30_thr200_m6`. 재점검 전에 재초기화 뒤 어둠 런 3 분, 빛은 FADC 10 kHz 아래로 | §11.224 |
 | **새 외장하드 2 장 교체 (RAW 용 · PRD 용)** | 10 회차가 10-21 11:53 에 두 하드 가득으로 종료 (런 1,098 개 남음) — 다시 열림. 뽑기 전 `sudo umount`, 새 하드는 `scripts/storage-backup-mount.sh` | §11.221 |
 | **수집 재개 결정** | 10-29 07:35 run 4403 으로 재개(`_typeB_3`, ~284 Hz). 이후 런 교체·정지는 사용자 결정 — 재기동 전 rcterm.params 설정 확인 | §11.222 |
