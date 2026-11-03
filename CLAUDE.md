@@ -1207,6 +1207,29 @@ run 4429 검증 (실측): SADCT THR config · registered 200×30 · MTHRSM 4/4 (
 **교훈**: ① chainwatch `rate_high`·`rate_low` 가 `ar=`(누적 평균)을 읽어 긴 런의 순간 폭주를 못 잡는다 → `sr=` 기준으로 고쳐야 한다 (§6 백로그). 그 전까지 순간 감시는 ratestop 스크립트(16:00 까지). ② 낮 THR 100 · MTHRSM 2 는 포화 (4423 09:24 41.7 kHz, 4428 99.6 kHz) — §10 의 금지 재확인. ③ 포화 상태에서 USB 이탈하면 usbreset 으로 안 풀리고 PDU 재투입이 필요했다 (dmesg `descriptor read error -110`). 재투입 뒤 더미 런 DRAM 8/8 실패 → usbreset 추가로 정렬 (§11.224 와 같은 모양). ④ 포화 런을 마감하면 FADC TIMEOUT 이 따르므로 usbreset 1 회 + 확인 런을 거칠 것 (4428 이후 확인).
 **남은 것**: 판 7 차광 (근본 대책, 16:00 뒤에는 순간 감시 없음) · chainwatch sr 수정 (코드 갈래) · 4423 DB 행 채우기 (4416 처럼 stime 11-02 16:25:44 · etime ~10:29:48 · nfadc 549,186,524 / 65,021.8 s, FADC == PRD 1084 완결 → 시트 자동 등재 대상) 여부 사용자 결정 · 4428 (1 초, onlbit 1) 을 4418·4419·4422 와 함께 시트에서 뺄지 사용자 결정 · veto-check · daqerr-watch 는 걸지 않음.
 
+**일출 뒤 판 7 재상승 감시 3 회차(08:07 · 09:37 · 12:37) 결과 — 하루 곡선 (run 4423, THR 100 · MTHRSM 2).** 정본 `/Data_ssd/LOG/harness/20261103_orchestrator_sunrise-rate-4423.md` (회차 1~3 절). 수집·하드웨어 무접촉. 판 7 짝 = ch12+ch13 (PMT12+PMT33), 총 Hz = FADC 10 분 평균.
+
+| 시각 | 판 7 짝 % | 판 7 Hz | 총 Hz |
+|---|---|---|---|
+| 11-02 18:00 (sub 95) | 2.4 | 163 | 6,847 |
+| 11-02 18:30 (sub 125) | 2.5 | 172 | 6,812 |
+| 11-03 06:30 (sub 844) | 2.4 | 168 | 6,9xx |
+| 07:30 (sub 904) | 3.0 | 212 | 7,127 |
+| 08:00 (sub 934) | 5.2 | 414 | 7,854 |
+| 08:30 (sub 964) | 9.3 | 811 | 8,468 |
+| 09:00 (sub 994) | 18.2 | 1,910 | 12,156 |
+| 09:16 (sub 1010) | 56.5 | 12,094 | 21,773 |
+| 09:18 (sub 1012) | 61.8 | 13,199 | — |
+| 09:24 | — | — | 41,663 (1 분 최고) |
+| 10:00 (sub 1054) | 36.0 | 5,656 | 21,174 |
+| 10:16 (sub 1070) | 54.8 | 11,426 | 36,160 |
+| 10:29 (sub 1083, 부분) | 66.2 | — | 47,667 (마지막 heartbeat) |
+
+- 판정: 판 7 낮 빛샘 재상승 확정. 밤 바닥 6,811 Hz 대비 10:30 최고 47,667 Hz = 7.0 배. 07:40 부터 상승, 09:14 20 k · 09:18 30 k 통과, 09:24 41.7 k.
+- 09:45~09:56 에 9.5~13 k 로 잠깐 내려왔다(구름 추정, 미확인) 10:10 부터 30 k 위, 10:26~10:30 45~48 k = FADC 포화선(42 k) 위에서 10:29:48 USB 이탈.
+- 어제 4419 의 109 kHz 에 닿기 전에 보드가 먼저 죽었다. 어제 4416/4417 PMT33 곡선(09 시대 최고)과 같은 자리에서 오른다. 총 증가의 90 % 안팎이 판 7 짝.
+- chainwatch rate_high 는 끝내 0 건(ar 기준) · 4423 의 TCB/FADCDAQ/SADCDAQ 로그 LIBUSB·TIMEOUT·OVERFLOW 는 0(이탈 증거는 dmesg). heartbeat sr 대 PRD Hz 차이 원인 미확인.
+
 **이어서 (12:33) — run 4429 사용자 지시로 마감, 수집 대기. DB 빛샘테스트 표시.** 정본 `/Data_ssd/LOG/harness/20261103_orchestrator_sunrise-rate-4423.md` 뒤 절. 사용자 지시 "일단 run 정지해 줘".
 - 12:33:41 감시자(pid 1129204) TERM -> 12:33:46 exit 0 (`rcsupervisor stop`), phase=ended, 고아 0, 포트 7809/7814/7815 비어 있음. DB 4429: 11:34:21 ~ 12:33:41, onlbit 1, nfadc 2,362,392 / 3,560.57 s = 663.5 Hz. 마감 로그 TCB·FADCDAQ·SADCDAQ LIBUSB·TIMEOUT·OVERFLOW 0·0·0 -> usbreset 불필요. **재기동 없음 -> 수집 대기.** `config/rcterm.params` = `_all30_thr200_m4` 그대로. 30 kHz 정지 감시 `ratestop-20261103.sh`(pid 1129130)는 16:00 까지 돌지만 할 일 없음(무해).
 - 꼬리: `postrun.sh 4429 --from 58 --to 59 --heartbeat /dev/null` 뒤 서브런 57 이 no_merge(merge·prod 로그 ok, carry yes)로 비어 있어 `runcheck.sh --run 4429 --heartbeat /dev/null --fix` 로 복구 -> **FADC 60 = SADC 60 = Merged 60 = PRD 60 완결**. (57 결손 사유는 확인 못 함.)
@@ -5187,7 +5210,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 ```
 
 **최근에 크게 바뀐 것 아홉** (자세한 것은 각 절)
-§11.227         ★★ 11-03 일출 뒤 판 7 폭주(run 4423 09:24 41.7 kHz 포화 → 10:29 FADC USB 이탈 사망, chainwatch 30 kHz 가드는 ar 기준이라 침묵) → PDU 재투입 + usbreset 복구 → 11:34 run 4429 = `_all30_thr200_m4` (~666 Hz)
+§11.227         ★★ 11-03 일출 뒤 판 7 폭주(run 4423 09:24 41.7 kHz 포화 → 10:29 FADC USB 이탈 사망, chainwatch 30 kHz 가드는 ar 기준이라 침묵) → PDU 재투입 + usbreset 복구 → 11:34 run 4429 = `_all30_thr200_m4` (~666 Hz). 일출 뒤 하루 곡선: 밤 6.8 k → 10:30 47.7 k (7.0 배), 판 7 짝 2.4 → 66 %
 §11.227         ★★ MTHRSM 6 -> 4 -> 2 -> 4 : run 4419(m2)가 판 7 빛샘으로 ~108 kHz 폭주해 15 초 만에 중단(마감 TIMEOUT 은 usbreset 1 회로 충분), 13:38 run 4420 = `_all30_thr100_m4` (~962 Hz) ; 14:42 run 4421 = `_all30_thr200_m2` (THR 200 · m2, ~2.9 kHz 안정); 18:37 일몰 뒤 판 7 몫 3.8 → 2.4 %, 총 −1.5 %, 빛샘 확정
 
 ```
