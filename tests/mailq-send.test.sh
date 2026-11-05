@@ -6,6 +6,7 @@
 # =====================================================================
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
+export NETSYNC_STATE=/nonexistent/netsync.state   # 운영 netsync 의 net=down 이 시험을 막지 않게
 SUT="$HERE/../scripts/mailq-send.sh"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  ✅ %s\n' "$1"; }
@@ -185,7 +186,7 @@ teardown
 echo ""; echo "[12] cron 환경(env -i)에서도 돈다"
 setup 0
 mkmail a "cron" routine "본문"
-env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" \
+env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" NETSYNC_STATE="$NETSYNC_STATE" \
 	MAILQ_DIR="$Q" MAILQ_PARAMS="$T/params" MAILQ_SENDER="$T/fake_send.py" \
 	MAILQ_LOG="$T/mailq.log" MAILQ_LOCK="$T/.mailq.lock" \
 	bash "$SUT" > "$T/out.txt" 2>&1
@@ -199,6 +200,89 @@ for i in 1 2 3 4 5; do mkmail "m$i" "메일 $i" routine "본문"; done
 run_sut --max 2
 chk "2 통만 보냈다" "$(ncall)" "2"
 chk "3 통이 남았다" "$(nq)" "3"
+teardown
+
+echo ""; echo "[14] 망 실패(rc 5)는 시도 횟수에 세지 않고, 그 회차는 거기서 멈춘다 (25 분 끊겨도 큐가 남는다)"
+setup 5
+mkmail a "망 실패 1" routine "본문"
+mkmail b "망 실패 2" routine "본문"
+for i in 1 2 3 4 5 6 7; do run_sut; done
+chk "7 회차 뒤에도 큐에 2 통" "$(nq)" "2"
+chk "failed/ 없음" "$(nfail)" "0"
+chk "시도 횟수 파일 없음" "$(ls "$Q"/*.try 2>/dev/null | wc -l)" "0"
+chk "회차마다 첫 통에서 멈춰 7 번만 불렀다" "$(ncall)" "7"
+if grep -q '망 실패 (rc=5, 횟수에 세지 않음)' "$T/mailq.log"; then ok "로그에 망 실패라고 남긴다"; else bad "망 실패 로그 없음"; fi
+teardown
+
+echo ""; echo "[15] 인증 실패(rc 4)는 센다 -- 5 회면 failed/"
+setup 4
+mkmail a "인증 실패" routine "본문"
+for i in 1 2 3 4 5; do run_sut; done
+chk "failed/ 로" "$(nfail)" "1"
+teardown
+
+echo ""; echo "[16] to: both 를 그대로 넘긴다 (daq-notify 의 로컬 큐가 쓴다)"
+setup 0
+mkmail a "둘 다" both "본문"
+run_sut
+if grep -q '^CALL to=both subject=둘 다$' "$T/calls.txt"; then ok "both 로 보냈다"; else bad "수신자" "$(head -1 "$T/calls.txt")"; fi
+teardown
+
+echo ""; echo "[17] 두 큐 : /scratch 쪽 큐가 없거나 빠져 있어도 로컬 큐는 보낸다"
+setup 0
+L="$T/LOCALQ"; mkdir -p "$L"
+{ echo "subject: 로컬"; echo "to: routine"; echo "body:"; echo "x"; } > "$L/l1.mail"
+mkmail a "원격" routine "본문"
+MAILQ_DIRS="/scratch/__no_such__/MAILQ $L" MAILQ_PARAMS="$T/params" MAILQ_SENDER="$T/fake_send.py" \
+MAILQ_LOG="$T/mailq.log" MAILQ_LOCK="$T/.mailq.lock" bash "$SUT" >/dev/null 2>&1
+chk "로컬 큐를 보냈다" "$(find "$L/sent" -name '*.mail' | wc -l)" "1"
+chk "한 통만 불렀다" "$(ncall)" "1"
+MAILQ_DIRS="$Q $L" MAILQ_PARAMS="$T/params" MAILQ_SENDER="$T/fake_send.py" \
+MAILQ_LOG="$T/mailq.log" MAILQ_LOCK="$T/.mailq.lock" bash "$SUT" >/dev/null 2>&1
+chk "마운트 요구 없는 두 큐면 둘째 큐도 보낸다" "$(nsent)" "1"
+out=$(MAILQ_DIRS="$Q $L" MAILQ_LOG="$T/mailq.log" bash "$SUT" --status 2>&1)
+if printf '%s' "$out" | grep -q "큐      : $L"; then ok "--status 가 두 큐를 보인다"; else bad "--status" "$out"; fi
+teardown
+
+echo ""; echo "[18] 큐 상한 : 넘치면 오래된 것부터 failed/"
+setup 0
+for i in 01 02 03 04 05; do mkmail "m$i" "메일 $i" routine "본문"; done
+MAILQ_CAP=3 run_sut --max 0
+chk "넘친 2 통이 failed/" "$(nfail)" "2"
+chk "오래된 것이 갔다" "$(ls "$Q/failed" | tr '\n' ' ')" "m01.mail m02.mail "
+chk "3 통 남았다" "$(nq)" "3"
+teardown
+
+echo ""; echo "[19] netsync 가 망 단절이라고 적어 두었으면 보내지 않는다 · 상태가 오래됐으면 보낸다"
+setup 0
+mkmail a "단절 중" routine "본문"
+echo "net=down" > "$T/netsync.state"
+NETSYNC_STATE="$T/netsync.state" run_sut
+chk "보내지 않았다" "$(ncall)" "0"
+chk "큐 그대로" "$(nq)" "1"
+touch -d '1 hour ago' "$T/netsync.state"
+NETSYNC_STATE="$T/netsync.state" run_sut
+chk "오래된 down 은 믿지 않고 보냈다" "$(nsent)" "1"
+teardown
+
+echo ""; echo "[20] 서버가 거부하는 메일(rc 6) 한 통이 큐를 막지 않는다 -- 뒤의 정상 3 통이 나가고, 그 한 통은 5 회 뒤 failed/"
+setup 0
+cat > "$T/fake_send.py" <<FAKE
+#!/bin/bash
+subj=""; while [ \$# -gt 0 ]; do case "\$1" in --subject) subj=\$2; shift 2 ;; *) shift ;; esac; done
+echo "CALL subject=\$subj" >> "$T/calls.txt"
+case "\$subj" in *poison*) exit 6 ;; esac
+exit 0
+FAKE
+chmod +x "$T/fake_send.py"
+mkmail a0 "poison 550" routine "본문"
+mkmail a1 "정상 1" routine "본문"; mkmail a2 "정상 2" routine "본문"; mkmail a3 "정상 3" routine "본문"
+run_sut
+chk "첫 회차에 정상 3 통이 나갔다" "$(nsent)" "3"
+chk "poison 은 큐에 남고 1 회로 셌다" "$(cat "$Q"/a0.try 2>/dev/null || echo -)" "1"
+for i in 2 3 4 5; do run_sut; done
+chk "5 회 뒤 poison 은 failed/" "$(nfail)" "1"
+chk "큐가 비었다" "$(nq)" "0"
 teardown
 
 echo ""

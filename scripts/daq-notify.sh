@@ -22,6 +22,19 @@
 #                      위 넷은 scripts/chainwatch.sh 가 보낸다
 #     backup_session   저장소 서버의 외장하드 백업 세션이 시작/종료됐다 (새 판인지 포함). scripts/backup-sheetlog.sh
 #     websummary       런 서머리 웹 발행이 막혔다 (단계 실패·대조 불일치). tools/monitor/websummary.sh. 같은 사유로는 한 번만
+#     supervisor_down  ★ 감시자가 FATAL 로 끝나 수집이 멎었다 (chainwatch). 알람 + 메일. 자동 재기동 결과를 함께 싣는다
+#     disk_low         /Data_ssd 여유가 문턱 아래다 (chainwatch). 알람 문턱 아래면 --force-alarm 으로 온다
+#     mid_disk_low     /data 여유가 문턱 아래다 (같은 규칙). 사건명을 나눈 것은 도배 방지(300 초)에 서로 먹히지 않게
+#     standby_retry    감시자가 대기(standby) 중 재시도했다 (시간당 1 회, 하루 24 통 가능). ★ 기본은 로그만(none) --
+#                      대기에 들어간 사건(fatal)은 이미 한 번 나간다. 메일로 받으려면 on_standby_retry = mail
+#     net_down         바깥 망(메일·시트)이 끊겼다 (scripts/netsync.sh). 큐에 들어가 망이 돌아올 때 나간다
+#     net_restored     바깥 망이 돌아왔다 -- 밀린 메일·시트를 내보낸 결과
+#
+#  ★ 메일이 안 나가면 버리지 않는다 (2026-11-05). /Data_ssd/LOG/MAILQ 에 mailq-send.sh 와 같은 형식으로
+#    적재하고, mailq-send(cron 5분) · netsync(망 복귀 때) 가 내보낸다. netsync 가 망 단절(net=down)이라고
+#    적어 두었으면 30 초 타임아웃을 기다리지 않고 곧바로 적재한다. 알람(소리)은 메일과 무관하게 먼저 울린다.
+#
+#  옵션 --force-alarm : 그 사건의 on_<이벤트> 가 mail 이어도 이번에는 알람까지 (disk_low 알람 문턱)
 #
 #  누구에게 가나 (config/notify.params 의 mail_expert_events, 2026-09-09 사용자 지시)
 #     목록에 있는 사건  -> 전문가 목록 + 책임자   (문제가 생겼거나, 해결돼 다시 정상 가동)
@@ -51,11 +64,17 @@ DAQLOG=/Data_ssd/LOG
 ALARM_STATE=/Data/LOG/daq-alarm.state
 MAIL_MIN_INTERVAL=300
 NOTIFY_LOG=${NOTIFY_LOG:-/Data/LOG/daq-notify.log}   # 시험은 갈아끼운다 -- 운영 로그를 더럽히지 않게
+NOTIFY_MAILQ=${NOTIFY_MAILQ:-/Data_ssd/LOG/MAILQ}      # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
+[ -n "${NOTIFY_MAILER:-}" ] && MAILER=$NOTIFY_MAILER   # 시험용 가짜 발송기
+[ -n "${NOTIFY_ALARM:-}" ] && ALARM=$NOTIFY_ALARM      # 시험용 가짜 알람
+# shellcheck source=/dev/null
+. "$DIR/scripts/netsync-lib.sh" 2>/dev/null || netsync_is_down() { return 1; }
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
-                [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail )
+                [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
+                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
@@ -87,6 +106,13 @@ load_params() {
          on_resumed)         ON[resumed]=$v ;;
          on_backup_session)  ON[backup_session]=$v ;;
          on_websummary)      ON[websummary]=$v ;;
+         on_supervisor_down) ON[supervisor_down]=$v ;;
+         on_disk_low)        ON[disk_low]=$v ;;
+         on_mid_disk_low)    ON[mid_disk_low]=$v ;;
+         on_standby_retry)   ON[standby_retry]=$v ;;
+         on_net_down)        ON[net_down]=$v ;;
+         on_net_restored)    ON[net_restored]=$v ;;
+         mail_queue)         NOTIFY_MAILQ=$v ;;
          mail_expert_events) EXPERT_EVENTS=$v ;;
          *) : ;;
       esac
@@ -94,7 +120,7 @@ load_params() {
 }
 
 # ---- 인자 ------------------------------------------------------------
-EVENT=""; RUN=""; MSG=""; DETAIL=""; DRY=0
+EVENT=""; RUN=""; MSG=""; DETAIL=""; DRY=0; FORCE_ALARM=0
 while [ $# -gt 0 ]; do
    case "$1" in
       --params)      PARAMS=$2; shift 2 ;;
@@ -102,6 +128,7 @@ while [ $# -gt 0 ]; do
       --msg)         MSG=$2; shift 2 ;;
       --detail-file) DETAIL=$2; shift 2 ;;
       --dry-run)     DRY=1; shift ;;
+      --force-alarm) FORCE_ALARM=1; shift ;;
       -h|--help)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       -*)            echo "모르는 인자 : $1" >&2; exit 0 ;;
       *)             EVENT=$1; shift ;;
@@ -109,23 +136,44 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$EVENT" ]; then sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
 load_params "$PARAMS"
+#  시험용 : 도배 방지 표식(.notify-<사건>.last)이 운영 /Data/LOG 에 남지 않게. params 보다 이긴다
+[ -n "${NOTIFY_ALARM_STATE:-}" ] && ALARM_STATE=$NOTIFY_ALARM_STATE
 
 ACT=${ON[$EVENT]:-mail}
+if [ "$FORCE_ALARM" -eq 1 ]; then
+   case "$ACT" in mail) ACT=both ;; none) ACT=alarm ;; esac
+fi
 log "event=$EVENT run=${RUN:-?} act=$ACT msg=${MSG:-}"
 
 # ---- 도배 방지 -------------------------------------------------------
 #  놓치면 안 되는 둘은 제한하지 않는다.
+#  ★ 표식은 메일을 보냈거나 큐에 쌓은 뒤에만 남긴다 (throttle_mark). 예전에는 보내기 전에 남겨
+#    발송이 실패해도 MAIL_MIN_INTERVAL 동안 같은 사건을 다시 시도하지 않았다.
+throttle_markfile() { echo "$(dirname "$ALARM_STATE")/.notify-$EVENT.last"; }
 throttled() {
    case "$EVENT" in recovery_failed|fatal) return 1 ;; esac
    local mark now last
-   mark=$(dirname "$ALARM_STATE")/.notify-$EVENT.last
+   mark=$(throttle_markfile)
    now=$(date +%s)
    if [ -r "$mark" ]; then
       last=$(cat "$mark" 2>/dev/null || echo 0)
       if [ $(( now - ${last:-0} )) -lt "$MAIL_MIN_INTERVAL" ] 2>/dev/null; then return 0; fi
    fi
-   echo "$now" > "$mark" 2>/dev/null
    return 1
+}
+throttle_mark() { date +%s > "$(throttle_markfile)" 2>/dev/null; return 0; }
+
+#  못 보낸 메일을 mailq-send.sh 가 읽는 형식으로 쌓는다 (subject: / to: / body: / 본문).
+#  .tmp 로 쓴 뒤 rename -- mailq-send 가 반쪽짜리를 집지 않게.
+queue_mail() {           # $1=수신자 $2=제목 $3=본문 파일  -> 쌓은 경로를 찍는다
+   local who=$1 subj=$2 body=$3 base tmp
+   mkdir -p "$NOTIFY_MAILQ" 2>/dev/null || return 1
+   base="$NOTIFY_MAILQ/$(date +%Y%m%d%H%M%S)-$$-$RANDOM"
+   tmp="$base.tmp"
+   { printf 'subject: %s\n' "$(printf '%s' "$subj" | tr '\n' ' ')"; printf 'to: %s\n' "$who"; echo "body:"
+     cat "$body" 2>/dev/null; } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+   mv -f "$tmp" "$base.mail" 2>/dev/null || { rm -f "$tmp"; return 1; }
+   echo "$base.mail"
 }
 
 # ---- 메일 본문 : 받는 사람이 바로 판단할 수 있게 -----------------------
@@ -227,6 +275,24 @@ build_body() {
             echo "  3) 마운트한 뒤 pane 에서 다시 띄운다 :"
             echo "     postrun  : scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot /Data_ssd/RAW"
             echo "     dataflow : scripts/dataflow.sh --params config/dataflow.params --follow" ;;
+         supervisor_down)
+            echo "  ★ 감시자(rcsupervisor)가 FATAL 로 끝나 수집이 멎었다. chainwatch 가 pane 에서 다시 띄웠는지는 위 '내용' 의 자동 재기동 줄."
+            echo "  1) 감시자 로그 마지막 줄(위)을 본다 -- 'too many consecutive failures' 면 보드를 의심 (CLAUDE.md 11.119 · 11.224)"
+            echo "  2) 고아 daq/tcb 가 있으면 :  scripts/killdaq.sh -b /home/frontend/DAQ/DAQ_cup/install/bin"
+            echo "  3) 손으로 띄우려면 tmux daq 의 supervisor pane 에서 scripts/daq-tmux.sh --print-cmd supervisor 가 찍는 줄"
+            echo "  4) 알람을 끄려면 :  scripts/daq-alarm.sh --silence" ;;
+         disk_low|mid_disk_low)
+            echo "  디스크 여유가 문턱 아래다. /Data_ssd 가 차면 DAQ 가 쓰기를 못 해 멎는다."
+            echo "  1) dataflow 가 도는지 :  scripts/chainwatch.sh --status  (dataflow 줄)"
+            echo "  2) 무엇이 차지하나 :  du -sh /Data_ssd/RAW/* | sort -h | tail ;  scripts/dataflow.sh --params config/dataflow.params --once --dry-run"
+            echo "  3) 경희대 서버의 데이터는 절대 임의로 지우지 않는다 (CLAUDE.md 8)" ;;
+         net_down)
+            echo "  바깥 망(smtp.gmail.com · sheets.googleapis.com)이 끊겼다. 수집·후처리는 영향이 없다."
+            echo "  메일은 /Data_ssd/LOG/MAILQ 에 쌓였다가 망이 돌아오면 나간다. 이 메일도 그렇게 나온 것이다."
+            echo "  상태 :  scripts/netsync.sh --status" ;;
+         net_restored)
+            echo "  바깥 망이 돌아왔다. 밀린 메일과 시트 등재를 내보냈다 (위 '내용')."
+            echo "  상태 :  scripts/netsync.sh --status ;  scripts/mailq-send.sh --status" ;;
          rotate)
             echo "  정상적인 런 교체다. 할 일은 없다."
             echo "  계수율이 이전 런과 크게 다르면 그때만 볼 것 (위 '런 교체 상세')." ;;
@@ -293,12 +359,33 @@ case "$ACT" in
       [ -n "$MSG" ] && SUBJ="$SUBJ - $MSG"
       if [ "$DRY" -eq 1 ]; then
          echo "[DRY] 메일 -> $WHO : $SUBJ"; echo "--- 본문 ---"; cat "$BODY"
+      elif netsync_is_down; then
+         #  망이 끊긴 것을 이미 안다. 30 초 타임아웃을 기다리지 않고 곧바로 쌓는다.
+         if q=$(queue_mail "$WHO" "$SUBJ" "$BODY"); then
+            log "mail queued (net=down) -> $q"; throttle_mark
+         else
+            log "WARN 망 단절인데 큐에도 못 쌓았다 ($NOTIFY_MAILQ)"
+         fi
       else
          out=$(python3 "$MAILER" --params "$PARAMS" --to "$WHO" \
                   --subject "$SUBJ" --body-file "$BODY" 2>&1)
          rc=$?
          log "mail rc=$rc $out"
-         [ $rc -ne 0 ] && echo "daq-notify: 메일 실패 -> $out" >&2
+         if [ $rc -eq 0 ]; then
+            throttle_mark
+         else
+            echo "daq-notify: 메일 실패 -> $out" >&2
+            #  설정을 못 읽거나(2) 필수값이 없으면(3) 몇 번을 다시 해도 안 나간다 -- 쌓지 않는다.
+            #  망(5) · 인증(4) · 그 밖은 쌓는다. mailq-send 가 망 복귀 뒤 다시 보낸다.
+            case "$rc" in
+               2|3) : ;;
+               *) if q=$(queue_mail "$WHO" "$SUBJ" "$BODY"); then
+                     log "mail queued (rc=$rc) -> $q"; throttle_mark
+                  else
+                     log "WARN 큐에도 못 쌓았다 ($NOTIFY_MAILQ)"
+                  fi ;;
+            esac
+         fi
       fi
       rm -f "$BODY" ;;
 esac

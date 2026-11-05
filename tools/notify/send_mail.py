@@ -9,6 +9,10 @@ config/notify.params 를 읽어 SMTP 로 메일 한 통을 보낸다.
 
 메일이 안 나가는 것은 알람이 안 울리는 것과 다르다 -- 조용히 실패하면
 아무도 모른다. 그래서 실패하면 종료코드로 알리고 stderr 에 이유를 적는다.
+
+종료코드 : 0 보냄(또는 mail_enable=0) · 2 설정 파일 못 읽음 · 3 필수값 없음 · 4 인증 실패
+          5 연결 단계 실패 (망·DNS·타임아웃·연결 끊김) -- 메일 탓이 아니므로 mailq-send 가 세지 않는다
+          6 서버가 이 메일을 거부 (550·수신자/발신자 거부 등) -- 다시 보내도 같으므로 센다
 """
 import argparse, os, smtplib, socket, ssl, sys
 from email.message import EmailMessage
@@ -122,9 +126,24 @@ def main():
         print("SMTP 인증 실패. Gmail 이라면 계정 비밀번호가 아니라 "
               "'앱 비밀번호'여야 한다.", file=sys.stderr)
         return 4
-    except Exception as e:                      # 망 장애·DNS·타임아웃 전부 여기로
-        print(f"SMTP 발송 실패 : {type(e).__name__}: {e}", file=sys.stderr)
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected) as e:
+        #  연결 단계. ★ SMTPConnectError 는 SMTPResponseException 의 자식이라 아래보다 먼저 잡는다
+        print(f"SMTP 발송 실패 (연결) : {type(e).__name__}: {e}", file=sys.stderr)
         return 5
+    except (smtplib.SMTPResponseException, smtplib.SMTPRecipientsRefused, smtplib.SMTPException) as e:
+        #  서버가 이 메일을 받지 않았다 (550 · 수신자/발신자 거부 · DATA 거부 등). 다시 보내도 같다 -> 6.
+        #  ★ SMTPException 은 OSError 의 자식이다 -- OSError 보다 먼저 잡아야 한다 (안 그러면 전부 5 가 된다).
+        #  예전에는 이것도 5 라 mailq-send 가 세지 않아, 거부되는 메일 한 통이 큐를 영원히 막았다.
+        print(f"SMTP 발송 거부 (서버 응답) : {type(e).__name__}: {e}", file=sys.stderr)
+        return 6
+    except OSError as e:
+        #  연결 단계 (망 장애·DNS·타임아웃·연결 거부·TLS). 메일 탓이 아니다 -> 5.
+        #  mailq-send.sh 는 5 를 시도 횟수에 세지 않는다 (socket.timeout · ssl.SSLError 도 OSError 다)
+        print(f"SMTP 발송 실패 (연결) : {type(e).__name__}: {e}", file=sys.stderr)
+        return 5
+    except Exception as e:                      # 그 밖. 세는 쪽으로
+        print(f"SMTP 발송 실패 : {type(e).__name__}: {e}", file=sys.stderr)
+        return 6
 
     print(f"보냄 : {msg['Subject']}  ->  {msg['To']}")
     return 0

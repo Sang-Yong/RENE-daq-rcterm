@@ -30,6 +30,9 @@
 #      scripts/daq-tmux.sh --no-postrun 후처리 pane 없이 구성
 #      scripts/daq-tmux.sh --no-dataflow 데이터 이동 pane 없이 구성
 #      scripts/daq-tmux.sh --kill-layout   화면만 정리 (DAQ 는 그대로 둔다)
+#      scripts/daq-tmux.sh --print-cmd supervisor|postrun|dataflow
+#                                       그 pane 에 넣을 명령 한 줄만 찍는다 (tmux·DAQ 무접촉).
+#                                       chainwatch.sh 가 죽은 pane 을 되살릴 때 같은 줄을 쓴다
 #
 #  안전 규칙 :
 #   * 이미 rcsupervisor 가 돌고 있으면 **절대 다시 띄우지 않는다.**
@@ -49,22 +52,87 @@ SUP_LOG=${DAQ_SUP_LOG:-/Data/LOG/rcsupervisor.log}
 HB=${DAQ_HEARTBEAT:-/Data/LOG/rcterm.hb}
 DESC_FILE=$DIR/config/rundesc.txt      # 있으면 --desc 로 넘긴다
 
-START=0; POSTRUN=1; DATAFLOW=1
+START=0; POSTRUN=1; DATAFLOW=1; PRINT=""
 DF_PARAMS=$DIR/config/dataflow.params
 while [ $# -gt 0 ]; do
 case "${1:-}" in
    --start)       START=1; shift ;;
    --no-postrun)  POSTRUN=0; shift ;;
    --no-dataflow) DATAFLOW=0; shift ;;
+   --print-cmd)   PRINT=${2:-}
+                  #  ★ 인자가 없으면 화면 구성으로 넘어가지 않는다 (이 옵션은 읽기 전용이어야 한다)
+                  case "$PRINT" in supervisor|postrun|dataflow) ;;
+                     *) echo "사용 : $0 --print-cmd supervisor|postrun|dataflow" >&2; exit 1 ;; esac
+                  shift 2 ;;
    --kill-layout) tmux kill-session -t "$SESSION" 2>/dev/null &&
                      echo "세션 '$SESSION' 정리함 (DAQ 프로세스는 그대로)"
                   echo "주의: rcsupervisor 가 이 세션 안에서 돌고 있었다면 같이 죽는다."
-                  echo "      먼저 'pgrep -f install/bin/rcsupervisor' 로 확인할 것."
+                  echo "      먼저 'pgrep -x rcsupervisor' 로 확인할 것."
                   exit 0 ;;
    "")            shift ;;
    *)             echo "unknown option : $1"; sed -n '2,28p' "$0"; exit 1 ;;
 esac
 done
+
+# ---- pane 마다 넣을 명령 (--print-cmd 와 화면 구성이 같은 것을 쓴다) ----
+#  chainwatch.sh 가 죽은 pane 을 되살릴 때 --print-cmd 로 이 줄을 받아 간다.
+#  그래서 여기 한 곳만 고치면 둘이 함께 바뀐다.
+SUP_NOTE=""
+build_sup_cmd() {
+   CMD="$SUP --params '$SUP_PARAMS'"
+   #  알람/메일/자동 USB 복구를 붙인다.
+   #  ★ 설정 파일을 안 고쳐서 알람이 조용히 꺼져 있는 것이 가장 위험한
+   #    실패 방식이다. rcsupervisor.params 에 이미 적혀 있으면 그것을 쓰고,
+   #    안 적혀 있는데 notify.params 가 있으면 여기서 붙여 준다.
+   #    (--params 뒤에 오므로 파일보다 이긴다 -- CLAUDE.md 5.6)
+   NOTIFY_PARAMS=$DIR/config/notify.params
+   if [ -r "$NOTIFY_PARAMS" ] && ! grep -q '^[[:space:]]*notify-cmd' "$SUP_PARAMS" 2>/dev/null; then
+      CMD="$CMD --notify-cmd '$DIR/scripts/daq-notify.sh'"
+      CMD="$CMD --notify-params '$NOTIFY_PARAMS'"
+      CMD="$CMD --recover-cmd '$DIR/scripts/usb-recover.sh'"
+      SUP_NOTE="알람/메일/자동 USB 복구를 붙였다 (config/notify.params)."
+   elif [ ! -r "$NOTIFY_PARAMS" ]; then
+      SUP_NOTE="주의: config/notify.params 가 없어 알람·메일이 꺼진 채로 뜬다.
+      cp config/notify.params.example config/notify.params 후 채울 것."
+   fi
+   if [ -r "$DESC_FILE" ]; then
+      # 주석(#)과 빈 줄은 버리고 첫 줄만 쓴다. 줄 끝 공백은 남긴다 --
+      # rcterm 이 뒤에 ', Split T [m] = N' 을 붙이므로 이전 런의 rundesc 와
+      # 글자 하나까지 같으려면 그 공백이 있어야 한다.
+      DESC=$(grep -v '^[[:space:]]*#' "$DESC_FILE" | grep -m1 '[^[:space:]]')
+      [ -n "$DESC" ] && CMD="$CMD -- --desc '$DESC'"
+   fi
+}
+build_post_cmd() {
+   POSTRUN_RAW=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
+
+   #  로그 디렉터리를 갈아끼운 뒤에는(scripts/swap-logdir.sh) 그 이전 런의 carry 가
+   #  옛 자리에 남는다. 지금 쓰는 곳과 다를 때만 그 옛 자리를 함께 넘긴다.
+   #  못 찾으면 postrun 이 carry 를 0 으로 초기화하는데, 그러면 개수는 맞아도
+   #  내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68)
+   POSTRUN_PROD=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
+   POSTRUN_FB=${POSTRUN_LOG_FALLBACK:-/scratch/LOG}
+   PRODLOG_NOW=$(readlink -f "$POSTRUN_PROD/LOG" 2>/dev/null)
+   FBOPT=""
+   if [ -n "$POSTRUN_FB" ] && [ -d "$POSTRUN_FB" ] && [ "$POSTRUN_FB" != "$PRODLOG_NOW" ]; then
+      FBOPT=" --log-fallback '$POSTRUN_FB'"
+   fi
+   POST_CMD="$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot '$POSTRUN_RAW'$FBOPT"
+}
+build_flow_cmd() {
+   FLOW_CMD="$DIR/scripts/dataflow.sh --params '$DF_PARAMS' --follow"
+}
+
+if [ -n "$PRINT" ]; then
+   case "$PRINT" in
+      supervisor) build_sup_cmd; printf '%s\n' "$CMD" ;;
+      postrun)    build_post_cmd; printf '%s\n' "$POST_CMD" ;;
+      dataflow)   [ -r "$DF_PARAMS" ] || { echo "설정 파일이 없다: $DF_PARAMS" >&2; exit 1; }
+                  build_flow_cmd; printf '%s\n' "$FLOW_CMD" ;;
+      *) echo "--print-cmd 는 supervisor | postrun | dataflow" >&2; exit 1 ;;
+   esac
+   exit 0
+fi
 
 command -v tmux >/dev/null || { echo "tmux 가 없다"; exit 1; }
 
@@ -125,29 +193,8 @@ if [ "$SUP_RUNNING" -eq 1 ]; then
    echo "rcsupervisor 가 이미 돌고 있다 -> 새로 띄우지 않고 로그를 따라간다."
    tmux send-keys -t "$BOTLEFT" "tail -n 40 -f '$SUP_LOG'" C-m
 else
-   CMD="$SUP --params '$SUP_PARAMS'"
-   #  알람/메일/자동 USB 복구를 붙인다.
-   #  ★ 설정 파일을 안 고쳐서 알람이 조용히 꺼져 있는 것이 가장 위험한
-   #    실패 방식이다. rcsupervisor.params 에 이미 적혀 있으면 그것을 쓰고,
-   #    안 적혀 있는데 notify.params 가 있으면 여기서 붙여 준다.
-   #    (--params 뒤에 오므로 파일보다 이긴다 -- CLAUDE.md 5.6)
-   NOTIFY_PARAMS=$DIR/config/notify.params
-   if [ -r "$NOTIFY_PARAMS" ] && ! grep -q '^[[:space:]]*notify-cmd' "$SUP_PARAMS" 2>/dev/null; then
-      CMD="$CMD --notify-cmd '$DIR/scripts/daq-notify.sh'"
-      CMD="$CMD --notify-params '$NOTIFY_PARAMS'"
-      CMD="$CMD --recover-cmd '$DIR/scripts/usb-recover.sh'"
-      echo "알람/메일/자동 USB 복구를 붙였다 (config/notify.params)."
-   elif [ ! -r "$NOTIFY_PARAMS" ]; then
-      echo "주의: config/notify.params 가 없어 알람·메일이 꺼진 채로 뜬다."
-      echo "      cp config/notify.params.example config/notify.params 후 채울 것."
-   fi
-   if [ -r "$DESC_FILE" ]; then
-      # 주석(#)과 빈 줄은 버리고 첫 줄만 쓴다. 줄 끝 공백은 남긴다 --
-      # rcterm 이 뒤에 ', Split T [m] = N' 을 붙이므로 이전 런의 rundesc 와
-      # 글자 하나까지 같으려면 그 공백이 있어야 한다.
-      DESC=$(grep -v '^[[:space:]]*#' "$DESC_FILE" | grep -m1 '[^[:space:]]')
-      [ -n "$DESC" ] && CMD="$CMD -- --desc '$DESC'"
-   fi
+   build_sup_cmd
+   [ -n "$SUP_NOTE" ] && echo "$SUP_NOTE"
    if [ "$START" -eq 1 ]; then
       tmux send-keys -t "$BOTLEFT" "$CMD" C-m
    else
@@ -164,22 +211,9 @@ fi
 #  처리한다. 이미 끝난 서브런은 건너뛰므로 바로 돌려도 안전하다.
 #  RAW 가 이미 로컬 NVMe 에 있으므로(rcterm.params 의 rawdatadir) 처리도 그 자리에서
 #  한다. --outroot 는 필요 없다. 완료된 런은 scripts/dataflow.sh 가 옮긴다.
-POSTRUN_RAW=${POSTRUN_RAWROOT:-/Data_ssd/RAW}
-
-#  로그 디렉터리를 갈아끼운 뒤에는(scripts/swap-logdir.sh) 그 이전 런의 carry 가
-#  옛 자리에 남는다. 지금 쓰는 곳과 다를 때만 그 옛 자리를 함께 넘긴다.
-#  못 찾으면 postrun 이 carry 를 0 으로 초기화하는데, 그러면 개수는 맞아도
-#  내용이 조용히 부족할 수 있다 (CLAUDE.md §11.68)
-POSTRUN_PROD=${POSTRUN_PRODDIR:-/home/frontend/DAQ/DAQ_cup/production}
-POSTRUN_FB=${POSTRUN_LOG_FALLBACK:-/scratch/LOG}
-PRODLOG_NOW=$(readlink -f "$POSTRUN_PROD/LOG" 2>/dev/null)
-FBOPT=""
-if [ -n "$POSTRUN_FB" ] && [ -d "$POSTRUN_FB" ] && [ "$POSTRUN_FB" != "$PRODLOG_NOW" ]; then
-   FBOPT=" --log-fallback '$POSTRUN_FB'"
-fi
+build_post_cmd
 if [ -n "$POSTPANE" ]; then
-   tmux send-keys -t "$POSTPANE" \
-      "$DIR/scripts/postrun.sh --follow --jobs 3 --lag 3 --rawroot '$POSTRUN_RAW'$FBOPT" C-m
+   tmux send-keys -t "$POSTPANE" "$POST_CMD" C-m
 fi
 
 # ---- 우하 : 데이터 이동 + 외부 백업 ----
@@ -188,8 +222,8 @@ fi
 #  읽고 옮기기만 하므로 수집 중에 시작해도 안전하다(수집 중인 런은 건드리지 않는다).
 if [ -n "$FLOWPANE" ]; then
    if [ -r "$DF_PARAMS" ]; then
-      tmux send-keys -t "$FLOWPANE" \
-         "$DIR/scripts/dataflow.sh --params '$DF_PARAMS' --follow" C-m
+      build_flow_cmd
+      tmux send-keys -t "$FLOWPANE" "$FLOW_CMD" C-m
    else
       tmux send-keys -t "$FLOWPANE" \
          "echo '설정 파일이 없다: $DF_PARAMS  (config/dataflow.params.example 에서 복사할 것)'" C-m

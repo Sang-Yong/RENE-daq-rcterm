@@ -17,6 +17,11 @@
 #    그래서 FADC 개수 == PRD 개수 인 런까지만 쓰고, 그 뒤는 다음으로 미룬다.
 #    (badrun 격리분은 하위 폴더라 최상위 개수에서 빠진다 -- §5.9)
 #
+#  ★ 실패 메일은 같은 사유로 한 번만 (2026-11-05). 예전에는 매시 실패할 때마다 메일이 나갔다
+#    (2026-10-16 시트 그리드가 차서 20 시간 동안 매시, §11.220). 사유가 바뀌거나 한 번 성공하면 다시 알린다.
+#  ★ netsync.sh 가 망 단절(net=down)이라고 적어 두었으면 시도 자체를 건너뛴다 (로그만).
+#    망이 돌아오면 netsync 가 이것을 --force 로 부른다.
+#
 #  ★ 기존 행은 절대 건드리지 않는다. append_runs.py 가 마지막 Run 행
 #    아래에 무엇이든 있으면 스스로 멈춘다.
 #
@@ -26,14 +31,18 @@
 set -u
 
 DIR=$(cd "$(dirname "$0")/.." && pwd)
-TOOL=$DIR/tools/sheetlog/append_runs.py
-NOTIFY=$DIR/scripts/daq-notify.sh
+#  시험은 아래를 전부 갈아끼운다 (진짜 시트·메일·운영 로그 무접촉)
+TOOL=${SHEETLOG_TOOL:-$DIR/tools/sheetlog/append_runs.py}
+NOTIFY=${SHEETLOG_NOTIFY:-$DIR/scripts/daq-notify.sh}
 PARAMS=$DIR/config/notify.params
 
-STATE=/Data_ssd/LOG/sheetlog-auto.state
-LOG=/Data_ssd/LOG/sheetlog-auto.log
-LOCK=/Data_ssd/LOG/.sheetlog-auto.lock
-ROOTS="/Data_ssd/RAW /data/RAW /scratch/RAW"
+STATE=${SHEETLOG_STATE:-/Data_ssd/LOG/sheetlog-auto.state}
+LOG=${SHEETLOG_LOG:-/Data_ssd/LOG/sheetlog-auto.log}
+LOCK=${SHEETLOG_LOCK:-/Data_ssd/LOG/.sheetlog-auto.lock}
+FAILSTATE=${SHEETLOG_FAILSTATE:-/Data_ssd/LOG/sheetlog-auto.failstate}
+ROOTS=${SHEETLOG_ROOTS:-"/Data_ssd/RAW /data/RAW /scratch/RAW"}
+# shellcheck source=/dev/null
+. "$DIR/scripts/netsync-lib.sh" 2>/dev/null || netsync_is_down() { return 1; }
 
 THRESHOLD=5
 INTERVAL_H=24
@@ -66,6 +75,12 @@ run_complete() {
    done
    return 1
 }
+
+#  망이 끊긴 것을 이미 안다 -- 구글에 붙어 보지도 않는다 (--status 는 그래도 보여 준다)
+if [ $STATUS -eq 0 ] && netsync_is_down; then
+   log "망 단절 (netsync net=down) -- 건너뛴다. 망이 돌아오면 netsync 가 부른다"
+   exit 0
+fi
 
 # ---- 상태 ------------------------------------------------------------
 last_ts=0
@@ -143,17 +158,27 @@ DETAIL=$(mktemp /tmp/sheetlog-detail.XXXXXX)
    printf '%s\n' "$out"
 } > "$DETAIL"
 
+send_mail=1
 if [ -n "$wrote" ]; then
    printf 'last_commit=%s\n' "$now" > "$STATE"
    log "[OK] 등재 $ok 런 -> $wrote  ($reason)"
    msg="시트에 $ok 런 등재 -- $wrote"
+   rm -f "$FAILSTATE" 2>/dev/null          # 다음 실패는 다시 알린다
 else
    log "[FAIL] 등재 실패 ($reason)"
    printf '%s\n' "$out" | tail -5 >> "$LOG"
    msg="시트 등재 실패 -- 로그를 볼 것 : $LOG"
+   #  사유 서명 = 출력 마지막 줄에서 숫자를 지운 것 (행 번호·시각이 바뀌어도 같은 사유로 본다)
+   sig=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | tr -d '0-9' | md5sum | cut -c1-12)
+   if [ "$(cat "$FAILSTATE" 2>/dev/null)" = "$sig" ]; then
+      send_mail=0
+      log "같은 사유의 실패라 메일은 생략 (첫 실패 때 이미 알렸다, $FAILSTATE)"
+   else
+      printf '%s\n' "$sig" > "$FAILSTATE" 2>/dev/null
+   fi
 fi
 
-if [ $NONOTIFY -eq 0 ] && [ -x "$NOTIFY" ]; then
+if [ $NONOTIFY -eq 0 ] && [ $send_mail -eq 1 ] && [ -x "$NOTIFY" ]; then
    "$NOTIFY" --params "$PARAMS" sheetlog --msg "$msg" --detail-file "$DETAIL" >/dev/null 2>&1
 fi
 rm -f "$DETAIL"

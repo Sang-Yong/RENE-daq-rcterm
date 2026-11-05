@@ -1,0 +1,14 @@
+time=1793847615
+pid=3897166
+phase=ended
+run=4432
+subrun=1372
+state=RunEnd
+statebit=5
+error=0
+status=32
+daqtime=82385.1
+totev=1123803792
+ndaq=2
+daq0=FADCDAQ n=561934224 sr=6396.74 ar=6820.82
+daq1=SADCDAQ n=561869568 sr=6277.09 ar=6820.04
