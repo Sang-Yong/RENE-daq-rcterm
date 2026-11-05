@@ -101,6 +101,14 @@ reset; out=$("$NT" --params "$P" supervisor_down --msg "FATAL" --dry-run 2>&1)
 check "알람"                 'printf "%s" "$out" | grep -q "\[DRY\] 알람 : supervisor_down"'
 check "메일 -> both"         'printf "%s" "$out" | grep -q "메일 -> both"'
 
+echo "[9b] standby_retry : 기본은 로그만 (메일·알람·큐 없음), on_standby_retry = mail 이면 메일"
+reset; FAKE_RC=0 "$NT" --params "$P" standby_retry --run 4433 --msg "재시도 3" >/dev/null 2>&1
+check "메일기 0 · 큐 0 · 알람 0"  '[ "$(ncall)" = 0 ] && [ "$(nq)" = 0 ] && [ ! -s "$T/alarm.calls" ]'
+check "로그에는 남는다 (act=none)" 'grep -q "event=standby_retry run=4433 act=none" "$NOTIFY_LOG"'
+cp "$P" "$P.sr"; echo "on_standby_retry = mail" >> "$P.sr"
+FAKE_RC=0 "$NT" --params "$P.sr" standby_retry --run 4433 --msg "재시도 4" >/dev/null 2>&1
+check "켜면 메일 1"              '[ "$(ncall)" = 1 ]'
+
 echo "[10] 쌓인 메일을 mailq-send 가 그대로 내보낸다 (형식 호환)"
 reset; FAKE_RC=5 "$NT" --params "$P" chain_down --run 7 --msg "통합" >/dev/null 2>&1
 cat > "$T/fake_send.sh" <<'S'

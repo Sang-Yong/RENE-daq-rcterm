@@ -25,6 +25,8 @@
 #     supervisor_down  ★ 감시자가 FATAL 로 끝나 수집이 멎었다 (chainwatch). 알람 + 메일. 자동 재기동 결과를 함께 싣는다
 #     disk_low         /Data_ssd 여유가 문턱 아래다 (chainwatch). 알람 문턱 아래면 --force-alarm 으로 온다
 #     mid_disk_low     /data 여유가 문턱 아래다 (같은 규칙). 사건명을 나눈 것은 도배 방지(300 초)에 서로 먹히지 않게
+#     standby_retry    감시자가 대기(standby) 중 재시도했다 (시간당 1 회, 하루 24 통 가능). ★ 기본은 로그만(none) --
+#                      대기에 들어간 사건(fatal)은 이미 한 번 나간다. 메일로 받으려면 on_standby_retry = mail
 #     net_down         바깥 망(메일·시트)이 끊겼다 (scripts/netsync.sh). 큐에 들어가 망이 돌아올 때 나간다
 #     net_restored     바깥 망이 돌아왔다 -- 밀린 메일·시트를 내보낸 결과
 #
@@ -72,7 +74,7 @@ declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
-                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [net_down]=mail [net_restored]=mail )
+                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
@@ -107,6 +109,7 @@ load_params() {
          on_supervisor_down) ON[supervisor_down]=$v ;;
          on_disk_low)        ON[disk_low]=$v ;;
          on_mid_disk_low)    ON[mid_disk_low]=$v ;;
+         on_standby_retry)   ON[standby_retry]=$v ;;
          on_net_down)        ON[net_down]=$v ;;
          on_net_restored)    ON[net_restored]=$v ;;
          mail_queue)         NOTIFY_MAILQ=$v ;;

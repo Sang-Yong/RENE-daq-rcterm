@@ -86,6 +86,7 @@ on_websummary       = mail      # 런 서머리 웹 발행이 막혔다 (단계 
 on_supervisor_down  = both      # ★ 감시자가 FATAL 로 끝났다 (chainwatch). 알람 + 메일. 아래 목록에 넣어 전문가에게도
 on_disk_low         = mail      # /Data_ssd 여유가 문턱 아래 (chainwatch). 알람 문턱 아래면 알람도 함께 온다
 on_mid_disk_low     = mail      # /data 여유가 문턱 아래 (같은 규칙, 사건명만 따로 -- 도배 방지에 서로 먹히지 않게)
+on_standby_retry    = none      # 감시자 대기(standby) 중 재시도 (시간당 1 회, 하루 24 통 가능). 기본 로그만. 받으려면 mail
 on_net_down         = mail      # 바깥 망 단절 (netsync). 큐에 들어가 복귀 뒤에 나간다
 on_net_restored     = mail      # 바깥 망 복귀 -- 밀린 메일·시트를 내보낸 결과
 mail_queue          = /Data_ssd/LOG/MAILQ   # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
