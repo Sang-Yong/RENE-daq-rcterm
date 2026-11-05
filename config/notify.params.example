@@ -161,6 +161,8 @@ chain_autorestart   = 1          # postrun · dataflow 가 죽었으면 그 pane
                                  # postrun 은 /scratch 가 있을 때만. dataflow 는 자체 마운트 가드가 있어 늘
 chain_sup_restart_after_min = 30 # 감시자가 끝난 뒤(FATAL 또는 stop 줄 없이 사라짐) 이만큼 지나야 다시 띄운다
 chain_sup_standby_max_age = 900  # 감시자 대기 상태 파일(<heartbeat>.sup 의 time=)이 이보다 오래되면 믿지 않는다
+chain_sup_restart_manual = 0     # 1 이면 사람이 TERM 으로 세운 감시자도 chain_sup_restart_after_min 뒤 다시 띄운다 (수집을 늘 돌릴 때).
+                                 #   ★ 일부러 세워 두려면 touch <chain_hold_file>. 알림은 없고, 다시 뜨면 런 교체(resumed) 메일이 간다
 chain_hold_file     = /Data_ssd/LOG/chainwatch.hold   # ★ 이 파일이 있으면 pane 자동 재기동 안 함 (알림은 나감)
                                  # 사람이 손으로 작업할 때 :  touch … 하고, 끝나면 rm …
 #  pane 에 넣는 명령은 scripts/daq-tmux.sh --print-cmd supervisor|postrun|dataflow 가 찍는 줄 그대로다

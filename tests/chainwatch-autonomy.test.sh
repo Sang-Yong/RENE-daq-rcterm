@@ -138,6 +138,26 @@ check "한 시간 안에는 다시 띄우지 않는다"          '[ ! -s "$T/tmu
 check "알림도 재알림 간격 안이라 생략"             '! grep -q " supervisor_down --" "$T/notify.calls"'
 fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run
 check "'rcsupervisor stop' 으로 끝났으면 조용"     '[ ! -s "$T/notify.calls" ] && [ ! -s "$T/tmux.calls" ]'
+
+echo "[D3m] chain_sup_restart_manual=1 : 사람이 세운 감시자도 30 분 뒤 다시 띄운다 (2026-11-05 사용자 지시)"
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; printf 'chain_sup_restart_manual = 1\n' >> "$P"; run
+check "재기동 (stop 줄이 30 분 넘게 지났다)"         'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
+check "supervisor_down 알림은 없다 (사건이 아니다)"  '! grep -q " supervisor_down --" "$T/notify.calls"'
+check "로그 : 사람이 세웠다 + 다시 띄웠다"           'grep -q "사람이 세웠다, chain_sup_restart_manual=1.*다시 띄웠다" "$LOG"'
+run
+check "한 시간 안에는 다시 띄우지 않는다"            '[ ! -s "$T/tmux.calls" ]'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; touch "$T/hold"; run; rm -f "$T/hold"
+check "멈춤 파일이 있으면 안 띄운다"                 '[ ! -s "$T/tmux.calls" ] && grep -q "멈춤 파일" "$LOG"'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"
+{ head -9 "$FX/rcsupervisor_stop_20261105.txt"; printf '%s [SUP] ==================== rcsupervisor stop =====================\n' "$(date -d '-5 min' '+%F %T')"; } > "$T/sup.log"; run
+check "세운 지 5 분이면 아직 안 띄운다 (사람이 손대는 중)" '[ ! -s "$T/tmux.calls" ] && grep -q "30분이 지나야" "$LOG"'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; head -9 "$FX/rcsupervisor_stop_20261105.txt" > "$T/sup.log"; run
+check "'stop requested' 뒤에 죽은 것도 사람이 세운 것 -> 재기동" 'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run
+check "--status 가 manual 재기동 설명을 보인다"      '"$CW" --params "$P" --status --heartbeat "$HB" --state "$ST" --log "$LOG" 2>&1 | grep -q "chain_sup_restart_manual=1"'
+sed -i '/chain_sup_restart_manual/d' "$P"
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run
+check "키가 없으면 예전처럼 조용"                    '[ ! -s "$T/notify.calls" ] && [ ! -s "$T/tmux.calls" ]'
 fresh; hb 4427 10 0 0 ended; echo "daq 777" > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"; run
 check "고아 daq 가 있으면 재기동하지 않는다"       '[ ! -s "$T/tmux.calls" ]'
 check "사유에 고아"                                'grep -q "daq 가 아직 살아 있다" "$T/notify.calls"'

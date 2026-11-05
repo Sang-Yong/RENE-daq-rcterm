@@ -97,6 +97,7 @@ SUP_RESTART_DAILY=3  # 하루 상한 -- 보드가 정말 죽었으면 매시 런
 AUTORESTART=1        # postrun · dataflow 가 죽었으면 pane 에서 다시 띄운다 (시간당 1 회)
 SUP_RESTART_AFTER_MIN=30   # 감시자가 끝난 뒤(마지막 [SUP] 줄) 이만큼 지나야 다시 띄운다 -- 사람이 손대는 중일 수 있다
 SUP_MAX_AGE=900      # 감시자 대기 상태 파일(time=)이 이보다 오래되면 믿지 않는다
+SUP_RESTART_MANUAL=0 # 1 이면 사람이 'rcsupervisor stop' 으로 세운 감시자도 SUP_RESTART_AFTER_MIN 뒤 다시 띄운다 (세워 두려면 멈춤 파일)
 STATUS=0; DRY=0; NONOTIFY=0
 GATE=auto            # auto | on | off   (off/on 은 시험용 강제)
 
@@ -133,6 +134,7 @@ load_params() {
          chain_autorestart)  AUTORESTART=$v ;;
          chain_sup_restart_after_min) SUP_RESTART_AFTER_MIN=$v ;;
          chain_sup_standby_max_age) SUP_MAX_AGE=$v ;;
+         chain_sup_restart_manual) SUP_RESTART_MANUAL=$v ;;
          chain_hold_file)    HOLD=$v ;;
       esac
    done < "$f"
@@ -551,6 +553,9 @@ in_standby() {
 #     FATAL                      -> 감시자가 포기했다          (SUPKIND=fatal)
 #     'rcsupervisor stop' 이 아님 -> stop 줄 없이 사라졌다      (SUPKIND=gone : kill -9 · OOM, §11.208)
 #  ★ 사람이 세운 것('rcsupervisor stop' 으로 끝남)은 알리지 않는다. 대기(standby) 중이면 멎은 것이 아니다.
+#  ★ chain_sup_restart_manual=1 이면 사람이 세운 것도 SUPKIND=manual 로 돌려 sup_autorestart 가 (멈춤 파일이 없을 때)
+#    SUP_RESTART_AFTER_MIN 뒤 다시 띄운다 -- "수집은 언제나 돌아야 한다" (2026-11-05 사용자 지시). 알림은 내지 않는다 :
+#    다시 뜨면 런 교체 추적이 resumed 를 낸다. 일부러 세워 두려면 touch $HOLD.
 SUPDOWN=""; SUPKIND=""; SUPGONE=""
 check_supervisor() {
    local last
@@ -561,10 +566,13 @@ check_supervisor() {
    local recent
    recent=$(tail -n 400 "$SUPLOG" 2>/dev/null | grep -a '\[SUP\]' | tail -5)
    last=$(printf '%s\n' "$recent" | tail -1)
+   [ -n "$last" ] || return 0
    #  사람이 TERM 을 보내면 'stop requested' -> … -> 'rcsupervisor stop' 이다. 그 사이에 죽었어도 사람이 세운 것
-   printf '%s\n' "$recent" | grep -q 'stop requested' && return 0
+   if printf '%s\n' "$recent" | grep -q 'stop requested' || printf '%s\n' "$last" | grep -q 'rcsupervisor stop'; then
+      [ "$SUP_RESTART_MANUAL" = 1 ] || return 0
+      SUPDOWN=$last; SUPKIND=manual; return 1
+   fi
    case "$last" in
-      *'rcsupervisor stop'*|'') return 0 ;;
       *FATAL*) SUPDOWN=$last; SUPKIND=fatal; return 1 ;;
       *)       SUPDOWN=$last; SUPKIND=gone; SUPGONE=$last; return 1 ;;
    esac
@@ -687,7 +695,14 @@ main() {
    handle chain_down "$c" "$cmsg"
 
    check_supervisor; local sd=$?
-   if [ "$sd" -ne 0 ]; then
+   if [ "$sd" -ne 0 ] && [ "$SUPKIND" = manual ]; then
+      #  사람이 세운 감시자 : 사건이 아니다. 재기동만 하고(상한·멈춤 파일·30 분 유예는 sup_autorestart 그대로) 로그는 사유가 바뀔 때만
+      sup_autorestart
+      local mm="감시자 없음 (사람이 세웠다, chain_sup_restart_manual=1) -- 자동 재기동 : ${RESTART_MSG:-다시 띄웠다 (supervisor pane)}"
+      if [ "$(st_get manual_restart_msg)" != "$mm" ]; then log "$mm"; [ "$DRY" -eq 1 ] || st_set manual_restart_msg "$mm"; fi
+      say "  supervisor : $mm"
+      handle supervisor_down 0 ""
+   elif [ "$sd" -ne 0 ]; then
       sup_autorestart
       if [ "$SUPKIND" = fatal ]; then
          handle supervisor_down 1 "감시자가 FATAL 로 끝나 수집이 멎었다 : ${SUPDOWN#* \[SUP\] } ; 자동 재기동 : ${RESTART_MSG:-없음}" 1
@@ -741,7 +756,8 @@ if [ "$STATUS" -eq 1 ]; then
       check_supervisor
       if [ "$SUPKIND" = fatal ]; then echo "  감시자      : ★ FATAL 로 끝났다 -- $SUPDOWN"
       elif [ "$SUPKIND" = gone ]; then echo "  감시자      : ★ 'stop' 줄 없이 사라졌다 (kill -9 · OOM?) -- 마지막 줄 : $SUPGONE"
-      else echo "  감시자      : 없음 (사람이 세웠다)"; fi
+      elif [ "$SUPKIND" = manual ]; then echo "  감시자      : 없음 (사람이 세웠다) -- chain_sup_restart_manual=1 : 멈춤 파일이 없으면 ${SUP_RESTART_AFTER_MIN}분 뒤 다시 띄운다 ($(st_get manual_restart_msg | sed 's/.*자동 재기동 : //' | grep . || echo "아직 회차 전"))"
+      else echo "  감시자      : 없음 (사람이 세웠다 -- chain_sup_restart_manual=0 이라 다시 띄우지 않는다)"; fi
    fi
    [ -e "$HOLD" ] && echo "  ★ 멈춤 파일 : $HOLD -- pane 자동 재기동을 하지 않는다 (알림은 나간다)"
    echo "  자동 재기동 : postrun/dataflow chain_autorestart=$AUTORESTART · 감시자 chain_sup_autorestart=$SUP_AUTORESTART (하루 ${SUP_RESTART_DAILY} 회, 끝난 뒤 ${SUP_RESTART_AFTER_MIN}분) · 마지막 $(for k in postrun dataflow supervisor; do t=$(st_get autorestart_$k); printf '%s=%s ' $k "$( [ -n "$t" ] && date -d @"$t" '+%m-%d %H:%M' || echo -)"; done)"
