@@ -132,7 +132,7 @@ while [ $# -gt 0 ]; do
       --bindir)     BINDIR=$2; shift 2 ;;
       --rcterm)     RCTERM=$2; shift 2 ;;
       --runs)       RUNS_ARG=$2; shift 2 ;;
-      --dry-run)    DRY=1; shift ;;
+      --dry-run)    DRY=1; NOTIFY_ON=0; shift ;;      # 미리보기는 알림도 안 보낸다
       --diagnose)   DIAGNOSE=1; NOTIFY_ON=0; shift ;;
       --force-power-cycle) FORCE_POWER=1; shift ;;
       --no-notify)  NOTIFY_ON=0; shift ;;
@@ -260,7 +260,7 @@ recent_runs() {
       if [ -r "$SUPHB" ] && [ -n "$(find "$SUPHB" -mmin "-$LOGAGEMIN" 2>/dev/null)" ]; then
          sed -n 's/^run=\([0-9][0-9]*\).*/\1/p' "$SUPHB" | head -1
       fi
-   } | awk 'NF && !s[$1]++' | sort -n
+   } | awk -v chk="$CHECKRUN" 'NF && $1+0 != chk+0 && !s[$1]++' | sort -n     # 확인 런 자신은 실패 런이 아니다
 }
 
 RUNS=$(recent_runs | tr '\n' ' ')
@@ -299,6 +299,7 @@ if [ -z "$SUSPECT" ] && [ "$FORCE_POWER" -eq 0 ]; then
    say "USB 오류의 근거가 없다. 다른 원인이므로 usbreset 을 돌리지 않는다."
    say "  (조사한 런의 TCB · FADCDAQ · SADCDAQ 로그와 dmesg 에 USB 오류가 없고 보드 셋 다 보인다)"
    say "  ★ 계수가 0 인데 여기까지 왔다면 검출기 쪽을 볼 것 — PMT HV 가 먼저다 (11.131)"
+   [ "$DRY" -eq 1 ] && { say "[DRY] 판정만 했다. 알림도 보내지 않았다."; exit 0; }
    notify recovery_failed "연속 실패했으나 USB 문제는 아니다 - 사람이 원인을 봐야 한다"
    exit 1
 fi
@@ -368,7 +369,9 @@ usbreset_n() {            # $1 회 연속 usbreset -> SETTLE 대기
 }
 
 CHK_N=0
-check_run() {             # $1 = 시험 이름 (증거 폴더용). 합격이면 0
+#  종료 : 0 합격 · 1 하드웨어성 불합격 (rc≠0 · DRAM · USB/TIMEOUT/OVERFLOW · 산출 크기 · 로그 없음)
+#         4 계수율 창만 어긋남 (하한·상한·미기록) -- 보드는 멀쩡할 수 있다. 전원 단계의 근거로 쓰지 않는다
+check_run() {             # $1 = 시험 이름 (증거 폴더용)
    local hb=$LOGDIR/usb-recover-check.hb
    local rp; rp=$(printf '%06d' "$CHECKRUN")
    local rawdir=$RAWROOT/RAW/$rp
@@ -432,12 +435,12 @@ check_run() {             # $1 = 시험 이름 (증거 폴더용). 합격이면 
         | awk 'NR==1{lo=$1;hi=$1} $1<lo{lo=$1} $1>hi{hi=$1} END{ if (NR) printf "%.1f %.1f", lo, hi }')
    if [ -z "$mm" ]; then
       note "  ★ heartbeat 에서 계수율을 읽지 못했다 ($hb) -- 상한을 볼 수 없으니 불합격으로 본다"
-      return 1
+      return 4
    fi
    note "  ADC 별 계수율 : 최소 ${mm% *} Hz · 최대 ${mm#* } Hz (범위 ${MINRATE} ~ ${MAXRATE} Hz)"
-   awk -v r="${mm% *}" -v m="$MINRATE" 'BEGIN{ exit !(r+0 >= m+0) }' || { note "  ★ 어느 ADC 의 계수율이 너무 낮다"; return 1; }
+   awk -v r="${mm% *}" -v m="$MINRATE" 'BEGIN{ exit !(r+0 >= m+0) }' || { note "  ★ 어느 ADC 의 계수율이 너무 낮다"; return 4; }
    awk -v r="${mm#* }" -v m="$MAXRATE" 'BEGIN{ exit !(r+0 <= m+0) }' || {
-      note "  ★ 계수율이 상한을 넘는다 -- 트리거 설정이 날아갔거나(NOTICE_CODE_RUN.sh) 포화다"; return 1; }
+      note "  ★ 계수율이 상한을 넘는다 -- 트리거 설정이 날아갔거나(NOTICE_CODE_RUN.sh) 포화다"; return 4; }
    return 0
 }
 
@@ -455,9 +458,14 @@ power_used() {            # 최근 POWER_WINDOW_H 시간의 전원 재투입 횟
    awk -v c=$((now - POWER_WINDOW_H*3600)) '$1+0 >= c { n++ } END { print n+0 }' "$POWER_STATE" 2>/dev/null
 }
 
+isint() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
 power_allowed() {         # 허용이면 0. 아니면 사유를 POWER_WHY 에
    POWER_WHY=""
    if [ "$POWER_ENABLE" != "1" ] && [ "$FORCE_POWER" -eq 0 ]; then POWER_WHY="recover_power_cycle = 0"; return 1; fi
+   #  ★ 상한 값이 정수가 아니면 막는다 (fail-closed). 그대로 비교하면 상한이 없는 것처럼 열린다
+   if ! isint "$POWER_MAX" || ! isint "$POWER_WINDOW_H"; then
+      POWER_WHY="recover_power_max='$POWER_MAX' / recover_power_window_h='$POWER_WINDOW_H' 가 정수가 아니다"; return 1
+   fi
    local u; u=$(power_used)
    if [ "${u:-0}" -ge "$POWER_MAX" ]; then
       POWER_WHY="최근 ${POWER_WINDOW_H} h 에 이미 ${u} 회 ($POWER_STATE, 상한 $POWER_MAX)"; return 1
@@ -475,7 +483,7 @@ if [ "$DRY" -eq 1 ]; then
       say "[DRY] [3/5] usbreset 단계 : 건너뜀 (--force-power-cycle)"
    fi
    if power_allowed; then
-      say "[DRY] [4/5] 전원 단계 : killdaq -> $PDU cycle --allow-supervisor (TCB 먼저, 30 s 뒤 FADC·SADC)"
+      say "[DRY] [4/5] 전원 단계 (usbreset 단계에서 하드웨어성 불합격이 났을 때만) : killdaq -> $PDU cycle --allow-supervisor (TCB 먼저, 30 s 뒤 FADC·SADC)"
       say "[DRY]       -> 보드 3 종 ${POWER_USB_WAIT} s 대기 -> timeout ${NOTICE_TIMEOUT} NOTICE_CODE_RUN.sh -> usbreset 2 회"
       say "[DRY]       -> 더미 런 ${DUMMYLEN} h -> 확인 런 (실패 시 usbreset 1 회 + 확인 런 ${POWER_EXTRA} 회 더)"
       say "[DRY]       전원 재투입 사용량 $(power_used)/${POWER_MAX} (최근 ${POWER_WINDOW_H} h)"
@@ -490,6 +498,7 @@ fi
 #  3단계 — usbreset + 확인 런.  최대 MAXTRY 회, 시도마다 usbreset RESETS 회
 # =====================================================================
 TRY=0; OK=0; HOW=""
+HWFAIL=0                 # 하드웨어성 불합격이 한 번이라도 있었나 (보드 미열거 포함). 전원 단계의 근거
 if [ "$FORCE_POWER" -eq 1 ]; then
    say "[3/5] usbreset 단계 — 건너뜀 (--force-power-cycle)"
 else
@@ -501,15 +510,18 @@ else
       usbreset_n "$RESETS" || break
       if ! boards_present; then
          say "  보드가 아직 USB 에 다 보이지 않는다. 다음 시도로 넘어간다."
+         HWFAIL=1
          continue
       fi
-      if check_run "usbreset-$TRY"; then
+      check_run "usbreset-$TRY"; crc=$?
+      if [ "$crc" -eq 0 ]; then
          say "  ✓ 확인 런 통과. 복구됐다."
          cleanup_check
          OK=1; HOW="usbreset 시도 ${TRY}회 (시도당 ${RESETS}회)"
          break
       fi
-      say "  확인 런 실패. 다음 시도로 넘어간다."
+      if [ "$crc" -eq 4 ]; then say "  확인 런 실패 (계수율 창만 어긋남). 다음 시도로 넘어간다."
+      else HWFAIL=1; say "  확인 런 실패 (하드웨어성). 다음 시도로 넘어간다."; fi
       cleanup_check
    done
 fi
@@ -559,15 +571,24 @@ power_stage() {
       fi
       orphans_clear || { POWER_FAIL="고아를 치우지 못했다"; return 1; }
       boards_present || continue
-      if check_run "power-$k"; then cleanup_check; POWER_TRIES=$k; return 0; fi
+      check_run "power-$k" && { cleanup_check; POWER_TRIES=$k; return 0; }
       cleanup_check
    done
    POWER_FAIL="전원 재투입 뒤 확인 런이 $((POWER_EXTRA+1)) 번 모두 불합격"
    return 1
 }
 
-POWER_FAIL=""; POWER_TRIES=0; POWER_DONE=0; POWER_WHY=""
-if [ "$OK" -eq 0 ]; then
+POWER_FAIL=""; POWER_TRIES=0; POWER_DONE=0; POWER_WHY=""; RATE_ONLY=0
+if [ "$OK" -eq 0 ] && [ "$FORCE_POWER" -eq 0 ] && [ "$HWFAIL" -eq 0 ]; then
+   #  ★ 하드웨어성 불합격 없이 계수율 창만 어긋났으면 보드를 끄지 않는다 -- 정상 보드를 6 h 에 2 번 끄게 된다
+   #    (typeB/_mid3 는 40~57 Hz 로 운영 하한 100 아래, 낮 thr100_m2 는 20 kHz 위)
+   if [ "$CHK_N" -gt 0 ]; then
+      RATE_ONLY=1; POWER_WHY="확인 런이 계수율 창만 벗어났다 -- 하드웨어 근거 없음"
+   else
+      POWER_WHY="확인 런을 한 번도 띄우지 못해 하드웨어 근거가 없다"
+   fi
+   say "[4/5] 전원 재투입 — 하지 않는다 ($POWER_WHY)"
+elif [ "$OK" -eq 0 ]; then
    if power_allowed; then
       POWER_DONE=1
       if power_stage; then
@@ -595,6 +616,11 @@ fi
 if [ "$POWER_DONE" -eq 1 ]; then
    say "★ usbreset 과 전원 재투입 모두 실패했다. 사람이 현장에 가야 한다."
    MSG="usbreset ${TRY}회 + 전원 재투입 실패 : $POWER_FAIL (${SUSPECT# })"
+elif [ "$RATE_ONLY" -eq 1 ]; then
+   say "★ 보드는 응답하는데 확인 런의 계수율이 창(${MINRATE} ~ ${MAXRATE} Hz) 밖이다. 전원은 내리지 않았다."
+   say "  recover_check_params(확인 런 설정) 와 recover_min_rate / recover_max_rate 를 지금 설정의 정상 계수율에 맞는지 확인할 것."
+   say "  계수가 0 에 가깝다면 PMT HV 를 먼저 볼 것 (11.131)."
+   MSG="usbreset ${TRY}회 뒤에도 확인 런 계수율이 창 밖 -- recover_check_params / recover_min_rate 확인 필요, 전원 재투입 안 함 (${SUSPECT# })"
 else
    say "★ usbreset ${TRY}회 시도했으나 복구하지 못했다. 사람이 현장에 가야 한다."
    say "  ★ 다음은 보드 크레이트 전원 재투입이다 (scripts/pdu-power.sh cycle). usbreset 으로는 FPGA 상태가 안 풀린다."
@@ -602,6 +628,8 @@ else
    say "     (안 하면 계수율이 정상의 20배가 넘는다 - 실측 23,527 Hz)"
    MSG="usbreset ${TRY}회 실패, 전원 재투입 안 함 ($POWER_WHY) (${SUSPECT# })"
 fi
+#  감시자는 곧 대기로 들어간다. 확인 런이 남긴 고아가 포트를 쥔 채 남지 않게 한 번 더 치운다
+orphans_clear || say "  ★ 고아가 남았다 -- scripts/killdaq.sh -b $BINDIR 로 손으로 치울 것"
 say "  기록 : $DETAIL"
 notify recovery_failed "$MSG"
 exit 2

@@ -229,10 +229,12 @@ for a in "" "--force-power-cycle"; do
    chk "dry-run $a : usbreset·PDU·NOTICE·rcterm·killdaq·알림 0 회, rc 0" "reset; usb_case; power_on; run --runs 4424 --dry-run $a; [ \"\$(rc)\" = 0 ] && ! grep -qE '^(USBRESET|PDU|NOTICE|RCTERM|KILLDAQ|NOTIFY)' \"\$T/seq\""
 done
 reset; usb_case; power_on; run --runs 4424 --dry-run
-chk "dry-run 이 전원 단계 계획과 사용량을 찍는다" 'grep -q "\[DRY\] \[4/5\] 전원 단계 : killdaq" "$T/out" && grep -q "사용량 0/2" "$T/out"'
+chk "dry-run 이 전원 단계 계획과 사용량을 찍는다" 'grep -q "\[DRY\] \[4/5\] 전원 단계 (usbreset 단계에서 하드웨어성 불합격이 났을 때만) : killdaq" "$T/out" && grep -q "사용량 0/2" "$T/out"'
 chk "dry-run 은 state 를 안 만든다" '[ ! -e "$T/power.state" ]'
 reset; usb_case; run --runs 4424 --dry-run
 chk "dry-run (꺼짐) : 하지 않는다 + 사유" 'grep -q "전원 단계 : 하지 않는다 (recover_power_cycle = 0)" "$T/out"'
+
+chk "USB 근거 없는 dry-run : 알림 0 · rc 0 (금지 3)" 'reset; run --runs 4500 --dry-run; [ "$(rc)" = 0 ] && [ ! -s "$T/seq" ]'
 
 echo "[13] 그 밖"
 chk "recover_enable = 0 이면 rc 1, 아무것도 안 함" 'reset; usb_case; printf "recover_enable = 0\n" > "$T/params"; run --runs 4424; [ "$(rc)" = 1 ] && [ ! -s "$T/seq" ]'
@@ -244,6 +246,52 @@ chk "hook 파일이 없으면 아무것도 안 하고 rc 1 (안전하게 --diagn
 reset; usb_case
 ( cd / && env -i PATH=/usr/bin:/bin HOME="$HOME" USBRECOVER_TEST_HOOK="$T/hook" bash "$S" --params "$T/params" --diagnose --runs 4424 > "$T/out" 2>&1; echo $? > "$T/rc" )
 chk "cd / + env -i 에서 --diagnose" '[ "$(rc)" = 2 ] && grep -q "USB 오류 3 건" "$T/out"'
+
+echo "[14] 계수율 창만 어긋나면 전원을 내리지 않는다 (리뷰 2)"
+three() { reset; usb_case; power_on; for i in 1 2 3; do echo "$1"; done > "$T/scen"; run --runs 4424; }
+chk "A : ar 50 Hz x3 -> PDU 0, rc 2" 'three "0 d 2000000 50,51 n"; [ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ] && [ ! -e "$T/power.state" ]'
+chk "A : recover_check_params / recover_min_rate 확인 안내" 'grep -q "recover_check_params" "$T/out" && grep -q "^NOTIFY recovery_failed | .*recover_check_params / recover_min_rate" "$T/seq"'
+chk "B : ar 30000 Hz x3 -> PDU 0, rc 2" 'three "0 d 2000000 30000,30001 n"; [ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ] && grep -q "Hz) 밖이다" "$T/out"'
+chk "계수율 미기록 x3 -> PDU 0" 'three "0 d 2000000 - n"; [ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ]'
+reset; usb_case; power_on; printf '0 c 2000000 650,651 n
+0 d 2000000 50,51 n
+0 d 2000000 50,51 n
+0 d 2000000 650,651 n
+' > "$T/scen"; run --runs 4424
+chk "하드웨어성 불합격(DRAM)이 한 번이라도 있으면 전원 단계로 간다" '[ "$(rc)" = 0 ] && [ "$(n_of PDU)" = 1 ]'
+reset; usb_case; power_on; printf '2 d 2000000 650,651 n
+0 d 8192 650,651 n
+0 a 2000000 650,651 n
+' > "$T/scen"; run --runs 4424
+chk "rc≠0 · 산출 8 kB · 마감 TIMEOUT 은 하드웨어성 -> 전원 단계" '[ "$(n_of PDU)" = 1 ]'
+reset; usb_case; power_on; printf 'recover_enable = 1\nrecover_power_cycle = 1\nrecover_max_try = 1\n' > "$T/params"; echo 0547:1502 > "$T/missing"; run --runs 4424
+chk "보드 미열거는 하드웨어성 -> 전원 단계" '[ "$(n_of PDU)" = 1 ]'
+
+echo "[15] 확인 런 999999 는 실패 런이 아니다 (리뷰 3)"
+reset; NOW=$(date -d '-2 min' '+%F %T')
+printf '%s [INFO] ===== cycle 1 : booting run 999999 =====\n%s [INFO] ===== cycle 1 : booting run 004424 =====\n%s [INFO] ===== cycle 1 : booting run 999999 =====\n' "$NOW" "$NOW" "$NOW" > "$T/logdir/rcterm.log"
+run --diagnose
+chk "조사할 런 : 4424 만 (999999 빠짐)" 'grep -q "조사할 런 : 4424 *$" "$T/out"'
+cp "$FX/FADCDAQ_004424.log" "$T/daqlog/FADCDAQ_999999.log"; run --diagnose
+chk "확인 런 로그에 오류가 있어도 근거로 쓰지 않는다 -> rc 1" '[ "$(rc)" = 1 ]'
+
+echo "[16] 끝나기 전에 고아를 한 번 더 치운다 (리뷰 4)"
+reset; usb_case; printf '0 c 2000000 650,651 y
+0 c 2000000 650,651 y
+0 c 2000000 650,651 y
+' > "$T/scen"; run --runs 4424
+chk "마지막 확인 런 뒤 KILLDAQ, 고아·포트 비움, rc 2" '[ "$(rc)" = 2 ] && [ "$(tail -2 "$T/seq" | head -1 | cut -d" " -f1)" = KILLDAQ ] && [ ! -s "$T/busy" ] && [ "$(cat "$T/ports")" = 0 ]'
+reset; usb_case; printf '0 c 2000000 650,651 y
+0 c 2000000 650,651 y
+0 c 2000000 650,651 y
+' > "$T/scen"; touch "$T/stuck"; run --runs 4424
+chk "안 치워지면 손으로 치우라고 알린다" '[ "$(rc)" = 2 ] && grep -q "손으로 치울 것" "$T/out"'
+
+echo "[17] 상한 값이 정수가 아니면 전원 단계를 막는다 (리뷰 5, fail-closed)"
+for kv in "recover_power_max = abc" "recover_power_max = 2.5" "recover_power_window_h = six" "recover_power_max ="; do
+   chk "$kv -> PDU 0" "reset; usb_case; printf 'recover_enable = 1\nrecover_power_cycle = 1\n$kv\n' > \"\$T/params\"; for i in 1 2 3; do echo '0 c 2000000 650,651 n'; done > \"\$T/scen\"; run --runs 4424; [ \"\$(rc)\" = 2 ] && [ \"\$(n_of PDU)\" = 0 ] && grep -q '정수가 아니다' \"\$T/out\""
+done
+chk "--force-power-cycle 도 막는다" 'reset; printf "recover_enable = 1\nrecover_power_max = x\n" > "$T/params"; run --runs 4500 --force-power-cycle; [ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ]'
 
 echo "통과 $PASS / 실패 $FAIL"
 [ "$FAIL" = 0 ]

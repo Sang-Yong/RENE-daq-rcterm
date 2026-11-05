@@ -263,6 +263,11 @@ SADCDAQ 로그에 LIBUSB·TIMEOUT·OVERFLOW 0 건 (**마감 읽기 포함** — 
 기다리는 중이므로 `pdu-power.sh` 에는 `--allow-supervisor` 를 준다 — rcsupervisor
 만 예외이고 rcterm·daq·tcb·merger 가 살아 있으면 그대로 거부한다.
 **키가 없으면 0(꺼짐)이다** — `git pull` 만으로 전원을 내리기 시작하면 안 된다.
+**전원은 하드웨어성 불합격이 있을 때만 내린다.** 확인 런이 rcterm rc≠0 · DRAM · USB/TIMEOUT/OVERFLOW ·
+산출 크기로 떨어졌거나 보드가 `lsusb` 에 없을 때만 전원 단계로 간다. **계수율 창만 어긋난 불합격**(하한·상한·미기록)은
+설정 탓일 수 있으므로(typeB 40 Hz, 낮 thr100_m2 20 kHz 위) 전원 없이 exit 2 와 `recover_check_params` / `recover_min_rate`
+확인 안내로 끝낸다. 상한 값(`recover_power_max` · `recover_power_window_h`)이 정수가 아니면 전원 단계를 막는다.
+확인 런 999999 자신은 '실패 런' 으로 세지 않는다. 실패로 끝나기 전에 고아를 한 번 더 치운다.
 
 **5.6 알림 실패가 감시자를 끌고 내려가면 안 된다.** `Notify()` 는 백그라운드로
 던지고 결과를 보지 않는다. 메일이 안 나가는 것보다 수집이 멎는 것이 나쁘다.
@@ -302,7 +307,7 @@ DAQ 옆에서 시험할 때는 반드시 그렇게 할 것.
 
 ### 2026-11-05 다시 짠 뒤의 시험
 
-`tests/usb-recover.test.sh` (83 건) — `USBRECOVER_TEST_HOOK` 으로 usbreset · lsusb ·
+`tests/usb-recover.test.sh` (100 건) — `USBRECOVER_TEST_HOOK` 으로 usbreset · lsusb ·
 rcterm · pdu-power · NOTICE · killdaq · sleep · pgrep · ss · dmesg 를 전부 갈아끼운다.
 DAQ 로그 픽스처는 실물(`tests/fixtures/usb-recover/`). 옮겨진 로그 탐색 · 패턴 ·
 고아 정리 · usbreset 횟수 · DRAM/마감 TIMEOUT/상한 불합격 · 전원 단계 순서 · 상한 state ·
