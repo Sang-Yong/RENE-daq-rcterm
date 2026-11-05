@@ -131,6 +131,8 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$EVENT" ]; then sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
 load_params "$PARAMS"
+#  시험용 : 도배 방지 표식(.notify-<사건>.last)이 운영 /Data/LOG 에 남지 않게. params 보다 이긴다
+[ -n "${NOTIFY_ALARM_STATE:-}" ] && ALARM_STATE=$NOTIFY_ALARM_STATE
 
 ACT=${ON[$EVENT]:-mail}
 if [ "$FORCE_ALARM" -eq 1 ]; then
