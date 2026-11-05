@@ -34,6 +34,7 @@ scripts/autonomy-drill.sh --plan offline-full --dry-run --confirm-test-run
 #    (망이 끊긴 동안은 큐에 쌓였다가 망이 돌아오면 한꺼번에 나간다)
 
 # 3) 콘솔(현장 키보드)에서 드릴을 띄운다. 원격 세션은 2 단계에서 끊긴다
+#    ★ 콘솔 셸에서 직접(전경으로) 띄우지 말 것 — 터미널이 닫히면 드릴도 죽는다. 반드시 setsid nohup
 mkdir -p /Data_ssd/LOG/autonomy-drill
 setsid nohup scripts/autonomy-drill.sh --plan offline-full --confirm-test-run \
       > /Data_ssd/LOG/autonomy-drill/console.log 2>&1 &
@@ -46,7 +47,9 @@ sudo nmcli connection down enp0s31f6
 #      (실측 11-05 : 활성 프로파일 enp0s31f6 = 장치 enp0s31f6, 203.230.111.71)
 #    netsync 가 net=down 을 적을 때까지 최대 15 분. 드릴이 혼자 3~8 단계를 진행한다 (1~2 시간)
 
-# 5) '★ 사람 차례 : 바깥 망을 되살려라' 가 나오면 (root)
+# 5) '★ 사람 차례 1' 이 나오면 : 망을 되살리기 *전에* 배너에 찍힌 onlbit=0 명령(백업 + sqlite3 한 줄)을 친다.
+#    망이 돌아오는 순간 netsync 가 sheetlog-auto --force 로 onlbit=1 런을 GoodRuns 에 싣기 때문이다
+#    '★ 사람 차례 2 : 바깥 망을 되살려라' 가 나오면 (root)
 sudo nmcli connection up enp0s31f6      # 케이블을 뽑았으면 다시 꽂는다
 #    ★ daq_gateway 를 up 하지 말 것 — .71 을 다른 포트에 올리려 해 충돌한다 (CLAUDE.md 11.132)
 
@@ -71,9 +74,9 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
 | 7 SIGUSR1 | 감시자에 USR1 (`/proc/<pid>/status` SigCgt 에 0x200 이 있을 때만) | 감시자 로그 `SIGUSR1 : ending` + 새 런 + DRAM 8 | 900 s |
 | 8 전원 (기본) | `usb-recover.sh --force-power-cycle --dry-run` | rc 3 (수집 중이라 게이트가 막음) 또는 0 — 하드웨어 0 | — |
 | 8 전원 (`--with-power`) | 감시자 TERM → DAQ 전부 내려감 확인 → `usb-recover --force-power-cycle` 실물 → supervisor pane 에 `daq-tmux.sh --print-cmd supervisor` 명령 | usb-recover rc 0 + 새 런 + DRAM 8 | 2400 s |
-| 9 [사람] 망 복귀 | 안내만 | `net=up` → 두 메일 큐 0 → `sheetlog-auto --status` 의 '완결돼 쓸 수 있는 것' 0 | 1800 + 900 s |
+| 9 [사람] 망 복귀 | 먼저 드릴 런 onlbit=0 명령을 배너에 찍고, 그다음 망 복귀 안내 | `net=up` → `netsync.log` 의 `sheetlog-auto --force rc=0` (이번 오프셋 이후) → 두 메일 큐 0. flush 뒤 완결된 런은 판정에서 뺀다 | 1800 + 1500 + 900 s |
 
-매 주입(4~8) 전에 heartbeat 를 다시 읽는다. `phase=running` 이 아니거나 heartbeat 가 오래됐으면
+매 주입(4~8) 전에 멈춤 파일과 heartbeat 를 다시 읽는다. 멈춤 파일이 새로 생겼으면 남은 주입을 모두 건너뛴다. `phase=running` 이 아니거나 heartbeat 가 오래됐으면
 그 단계를 FAIL 로 적고 **남은 주입을 모두 건너뛴다.** 기다리는 동안 멈춤 파일이 생겨도 같다
 (사람이 작업 중이라고 본다). 망 복귀 안내(9)는 중단돼도 그대로 한다.
 
@@ -110,15 +113,16 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
 
 드릴이 낸 시험 런(시험 런과 4~8 에서 생긴 런들)은 DB 에서 `onlbit=0` + runlog `autonomy drill` 로 표시해
 시트 등재에서 빼는 것을 잊지 말 것 (드릴은 DB 를 건드리지 않는다). 런 번호는 `result.tsv` 의 관측 열(`run A -> B`)과
-`baseline.txt` 의 `run=` 에 있다. 백업 먼저, 그다음 한 줄 (예 : 4440 ~ 4445) :
+`baseline.txt` 의 `run=` 에 있다. offline-full 은 드릴이 9 단계에서 이 명령을 범위까지 채워 배너로 찍고(망 복귀 *전에* 칠 것),
+report.md 끝에도 남긴다. 백업 먼저, 그다음 한 줄 (예 : 4440 ~ 4445) :
 
 ```bash
 cp -p /Data_ssd/runcatalog.db /Data_ssd/LOG/harness/runcatalog.db.bak-$(date +%Y%m%d%H%M)-before-drill && \
 sqlite3 /Data_ssd/runcatalog.db "UPDATE runcatalog SET onlbit=0, runlog='autonomy drill test run, excluded from sheet' || COALESCE(' ; ' || runlog, '') WHERE runnum BETWEEN 4440 AND 4445;"
 ```
 
-`sheetlog-auto.sh` 가 07 분에 등재하므로 망이 돌아오기 전(또는 9 단계 직후)에 할 것. 이미 시트에 실렸으면 우리 행이라
-고칠 수 있다 (CLAUDE.md 11.5).
+offline-full 은 **망을 되살리기 전에** (복귀 순간 netsync 의 `sheetlog-auto --force` 가 싣는다), quick 은 드릴이 끝나자마자
+(매시 07 분 cron 전에) 할 것. 이미 시트에 실렸으면 우리 행이라 고칠 수 있다 (CLAUDE.md 11.5).
 
 ## 시험
 

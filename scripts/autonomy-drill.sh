@@ -48,6 +48,8 @@ HB=${DRILL_HB:-/Data/LOG/rcterm.hb}
 SUPLOG=${DRILL_SUPLOG:-/Data/LOG/rcsupervisor.log}
 CWLOG=${DRILL_CWLOG:-/Data_ssd/LOG/chainwatch.log}
 NSSTATE=${DRILL_NSSTATE:-/Data_ssd/LOG/netsync.state}
+NSLOG=${DRILL_NSLOG:-/Data_ssd/LOG/netsync.log}
+DBFILE=${DRILL_DBFILE:-/Data_ssd/runcatalog.db}
 HOLD=${DRILL_HOLD:-/Data_ssd/LOG/chainwatch.hold}
 LOCALQ=${DRILL_LOCALQ:-/Data_ssd/LOG/MAILQ}
 NFSQ=${DRILL_NFSQ:-/scratch/MAILQ}
@@ -76,6 +78,7 @@ T_USR1=${DRILL_T_USR1:-900}
 T_POWER=${DRILL_T_POWER:-2400}
 T_NETUP=${DRILL_T_NETUP:-1800}
 T_FLUSH=${DRILL_T_FLUSH:-900}
+T_SHEET=${DRILL_T_SHEET:-1500}       # netsync flush 의 sheetlog-auto --force 는 최대 1200 s
 PROMPT_RE=${DRILL_PROMPT_RE:-'[$#] ?$'}
 
 PLAN=""; DRY=0; CONFIRM=0; POWER=0; LOGDIR=""
@@ -172,13 +175,15 @@ sup_timing() {           # 감시자 기동 머리줄의 check · stale 초
    SUP_STALE=$(printf '%s' "$l" | sed -n 's/.*stale=\([0-9]*\) s.*/\1/p'); SUP_STALE=${SUP_STALE:-300}
 }
 
+hold_new() { [ -e "$HOLD" ] && [ "$HOLD_AT_START" = 0 ]; }
 #  조건을 기다린다. $1=초  나머지=조건 명령. 참이면 0, 시간이 다 되면 1
 wait_for() {
    local lim=$1 t0; shift; t0=$(now_s)
    while :; do
+      #  ★ 멈춤 파일을 조건보다 먼저 본다. 새 런과 멈춤 파일이 같은 회차에 생기면 다음 주입이 나가던 것 (리뷰 재현)
+      hold_new && { log "★ 멈춤 파일이 생겼다 ($HOLD) -- 사람이 작업 중. 기다림을 멈춘다"; ABORTED="멈춤 파일"; return 1; }
       "$@" && return 0
       [ $(( $(now_s) - t0 )) -ge "$lim" ] && return 1
-      [ -e "$HOLD" ] && [ "$HOLD_AT_START" = 0 ] && { log "★ 멈춤 파일이 생겼다 ($HOLD) -- 사람이 작업 중. 기다림을 멈춘다"; ABORTED="멈춤 파일"; return 1; }
       sleep_s "$POLL"
    done
 }
@@ -188,6 +193,8 @@ MARK=$ROOT/RUNNING; OWN_MARK=0; STOPPED=""
 cleanup() {
    local p
    for p in $STOPPED; do pid_alive "$p" && { send_sig CONT "$p"; log "정리 : pid $p 에 CONT (STOP 해 둔 것)"; }; done
+   STOPPED=""
+   [ "${POWER_DOWN:-0}" = 1 ] && log "★ 수집 멈춤 (전원 단계 도중 끝났다). 손으로 띄울 것 : tmux daq:1.2 에서 ${POWER_CMD:-bash scripts/daq-tmux.sh --print-cmd supervisor 의 명령}"
    [ "$OWN_MARK" = 1 ] && [ "$REPORTED" = 0 ] && type write_report >/dev/null 2>&1 && write_report
    [ "$OWN_MARK" = 1 ] && rm -f "$MARK"
    return 0
@@ -223,10 +230,10 @@ s0() {
    hb_running || why="$why; heartbeat phase=$(hbf phase) (running 이고 ${HB_FRESH} s 안이어야)"
    sp=$(first_pid rcsupervisor); [ -n "$sp" ] || why="$why; 감시자(rcsupervisor) 없음"
    ct=$(crontab_l)
-   printf '%s\n' "$ct" | grep -q 'scripts/chainwatch\.sh' || why="$why; chainwatch cron 없음"
+   printf '%s\n' "$ct" | grep -q '^[^#]*scripts/chainwatch\.sh' || why="$why; chainwatch cron 없음"
    if [ "$PLAN" = offline-full ]; then
       [ -r "$NETSYNC" ] || why="$why; netsync.sh 없음 ($NETSYNC)"
-      printf '%s\n' "$ct" | grep -q 'scripts/netsync\.sh' || why="$why; netsync cron 없음"
+      printf '%s\n' "$ct" | grep -q '^[^#]*scripts/netsync\.sh' || why="$why; netsync cron 없음"
    fi
    [ "$HOLD_AT_START" = 0 ] || why="$why; 멈춤 파일 있음 ($HOLD)"
    av=$(df_avail_gb "$SSD"); av=${av:-0}
@@ -289,6 +296,10 @@ guard() {                # $1=단계 $2=이름.  주입해도 되면 0
    if [ "$CONFIRM" != 1 ]; then record "$1" "$2" - "시험 런에서만" "--confirm-test-run 없음" SKIP ""; return 1; fi
    if [ -n "$ABORTED" ]; then record "$1" "$2" - "-" "중단 : $ABORTED" SKIP ""; return 1; fi
    if [ "$DRY" -eq 1 ]; then return 1; fi
+   if hold_new; then
+      ABORTED="멈춤 파일 ($HOLD) -- 사람이 작업 중"
+      record "$1" "$2" - "-" "중단 : $ABORTED" SKIP "$HOLD"; return 1
+   fi
    if ! hb_running; then
       ABORTED="주입 전 phase=$(hbf phase), heartbeat 나이 $(( $(now_s) - $(hbf time | tr -dc 0-9 | grep . || echo 0) )) s (running 이고 ${HB_FRESH} s 안이어야)"
       record "$1" "$2" - "주입 전 phase=running" "$ABORTED" FAIL "$HB"; return 1
@@ -333,13 +344,14 @@ s5() {
    t=$(ts); log "주입 : rcterm pid $p 에 STOP (run $R0). 감시자 check=${SUP_CHECK} s stale=${SUP_STALE} s -> 최대 ${lim} s 기다린다"
    STOPPED="$STOPPED $p"; send_sig STOP "$p"
    if wait_for "$lim" new_run_up; then
-      ev=$(sup_has 'stale')
+      ev=$(sup_has 'heartbeat stale')
       if [ -n "$ev" ]; then record 5 stale "$t" "heartbeat stale -> 재시작 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
       else record 5 stale "$t" "감시자 로그 'stale'" "새 런 $NEWRUN 은 떴으나 stale 줄이 없다" FAIL "$(sup_has 'restart #')"; fi
    else
-      record 5 stale "$t" "새 런 (${lim} s 안)" "run=$(hb_run) phase=$(hbf phase)" FAIL "$(sup_has 'stale|restart #|standby|FATAL')"
+      record 5 stale "$t" "새 런 (${lim} s 안)" "run=$(hb_run) phase=$(hbf phase)" FAIL "$(sup_has 'heartbeat stale|restart #|standby|FATAL')"
    fi
    pid_alive "$p" && { send_sig CONT "$p"; log "rcterm pid $p 가 아직 있어 CONT 를 보냈다"; }
+   STOPPED=$(printf '%s\n' $STOPPED | grep -vx "$p" | tr '\n' ' ')
 }
 
 # =====================================================================
@@ -379,7 +391,7 @@ s7() {
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); t=$(ts); log "주입 : 감시자 pid $sp 에 USR1 (run $R0)"
    send_sig USR1 "$sp"
    if wait_for "$T_USR1" new_run_up; then
-      ev=$(sup_has 'SIGUSR1')
+      ev=$(sup_has 'SIGUSR1 : ending')
       if [ -n "$ev" ]; then record 7 SIGUSR1 "$t" "정상 마감 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
       else record 7 SIGUSR1 "$t" "감시자 로그 'SIGUSR1'" "새 런 $NEWRUN 은 떴으나 SIGUSR1 줄이 없다" FAIL "$SUPLOG"; fi
    else
@@ -421,19 +433,28 @@ s8() {
    cmd=$(print_cmd supervisor)
    [ -n "$cmd" ] || { record 8 전원 - "감시자 재기동 명령" "daq-tmux.sh --print-cmd supervisor 가 없다 -- 전원 단계를 하지 않았다" FAIL "$DAQTMUX"; return; }
    t=$(ts); log "주입 : 감시자 pid $sp 에 TERM (run $R0 정상 마감) -> 전원 단계"
+   POWER_CMD=$cmd; POWER_DOWN=1          # 여기부터 감시자 재기동까지 수집이 멎는다. 신호로 끝나도 안내가 남게
    send_sig TERM "$sp"
    all_down() { [ -z "$(first_pid rcsupervisor)$(first_pid rcterm)$(first_pid daq)$(first_pid tcb)$(first_pid merger)" ]; }
-   if ! wait_for 600 all_down; then record 8 전원 "$t" "감시자·DAQ 정상 마감" "아직 살아 있다 -- 전원 단계를 하지 않았다" FAIL "$(sup_has 'stop|finished')"; return; fi
+   if ! wait_for 600 all_down; then
+      record 8 전원 "$t" "감시자·DAQ 정상 마감" "${ABORTED:-아직 살아 있다} -- 전원 단계를 하지 않았다. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$(sup_has 'stop|finished')"
+      ABORTED="전원 단계 도중 중단 (수집이 멎어 있다)"; return
+   fi
+   if hold_new; then
+      record 8 전원 "$t" "전원 단계" "멈춤 파일이 생겨 전원을 건드리지 않았다. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$HOLD"
+      ABORTED="멈춤 파일 (수집이 멎어 있다)"; return
+   fi
    run_usbrecover --force-power-cycle > "$LOGDIR/usb-recover-power.txt" 2>&1; rc=$?
    log "usb-recover --force-power-cycle rc=$rc"
    if [ "$rc" != 0 ]; then
-      record 8 전원 "$t" "usb-recover rc=0 (확인 런 합격)" "rc=$rc -- 감시자를 다시 띄우지 않았다. ★ 사람이 볼 것" FAIL "$LOGDIR/usb-recover-power.txt"
+      record 8 전원 "$t" "usb-recover rc=0 (확인 런 합격)" "rc=$rc -- 감시자를 다시 띄우지 않았다. ★ 사람이 볼 것. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$LOGDIR/usb-recover-power.txt"
       ABORTED="전원 단계 실패 (수집이 멎어 있다)"; return
    fi
    if ! type_in_pane supervisor "$cmd"; then
       record 8 전원 "$t" "감시자 재기동" "전원 합격, 그러나 $PANE_MSG -- ★ 손으로 띄울 것 : $cmd" FAIL ""
       ABORTED="감시자 재기동 실패 (수집이 멎어 있다)"; return
    fi
+   POWER_DOWN=0
    if wait_for "$T_POWER" new_run_up; then
       record 8 전원 "$t" "전원 재투입 -> 확인 런 합격 -> 새 런 + DRAM" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$LOGDIR/usb-recover-power.txt"
    else
@@ -444,23 +465,41 @@ s8() {
 # =====================================================================
 #  9 — [사람] 바깥 망 복귀
 # =====================================================================
+drill_runs_cmd() {       # 이번 드릴의 런 범위를 onlbit=0 으로 빼는 명령 (백업 먼저). 드릴은 DB 를 건드리지 않는다
+   local lo=${B_RUN:-0} hi; hi=$(hb_run)
+   [ "$hi" -ge "$lo" ] || hi=$lo
+   printf "cp -p %s /Data_ssd/LOG/harness/runcatalog.db.bak-\$(date +%%Y%%m%%d%%H%%M)-before-drill && sqlite3 %s \"UPDATE runcatalog SET onlbit=0, runlog='autonomy drill test run, excluded from sheet' || COALESCE(' ; ' || runlog, '') WHERE runnum BETWEEN %s AND %s;\"" \
+      "$DBFILE" "$DBFILE" "$lo" "$hi"
+}
 s9() {
-   local t sl left
+   local t off line rc runs
    t=$(ts)
-   banner "★ 사람 차례 : 바깥 망을 되살려라 (root).  예) sudo nmcli connection up enp0s31f6  또는 뽑은 케이블을 다시 꽂는다 (★ daq_gateway 를 올리지 말 것 -- .71 충돌)
+   DRILL_DB_CMD=$(drill_runs_cmd)
+   banner "★ 사람 차례 1 : 망을 되살리기 *전에* 이번 드릴의 런($B_RUN ~ $(hb_run))을 시트에서 뺀다.
+   망이 돌아오는 순간 netsync 가 sheetlog-auto --force 로 onlbit=1 런을 GoodRuns 에 싣는다. 먼저 이것을 친다 (백업 먼저) :
+   $DRILL_DB_CMD"
+   off=$(fsize "$NSLOG")
+   banner "★ 사람 차례 2 : 그다음 바깥 망을 되살려라 (root).  예) sudo nmcli connection up enp0s31f6  또는 뽑은 케이블을 다시 꽂는다 (★ daq_gateway 를 올리지 말 것 -- .71 충돌)
    netsync 가 net=up 을 적고 밀린 메일·시트를 내보낼 때까지 최대 ${T_NETUP} s 기다린다"
    if ! wait_for "$T_NETUP" ns_is_up; then
       record 9 망복귀 "$t" "netsync net=up" "net=$(ns_get net) checked=$(ns_get checked)" FAIL "$NSSTATE"; return
    fi
+   #  netsync 는 up 을 먼저 적고 flush 안에서 mailq-send -> sheetlog-auto --force (최대 1200 s) 순으로 돈다.
+   #  그래서 큐 0 이나 --status 가 아니라 netsync.log 의 'sheetlog-auto --force rc=' 줄(이번 오프셋 이후)을 기다린다.
+   flushed() { line=$(since "$NSLOG" "$off" | grep 'sheetlog-auto --force rc=' | tail -1); [ -n "$line" ]; }
+   if ! wait_for "$T_SHEET" flushed; then
+      record 9 망복귀 "$t" "netsync flush 의 sheetlog-auto --force 결과 (${T_SHEET} s 안)" "net=up 이나 flush 기록 없음" FAIL "$NSLOG"; return
+   fi
+   rc=$(printf '%s' "$line" | sed -n 's/.*--force rc=\([0-9]*\).*/\1/p'); runs=$(printf '%s' "$line" | sed -n 's/.*등재 \([0-9]*\) 런.*/\1/p')
    q_empty() { [ "$(qcount "$LOCALQ")" = 0 ] && [ "$(qcount "$NFSQ")" = 0 ]; }
    if ! wait_for "$T_FLUSH" q_empty; then
-      record 9 망복귀 "$t" "메일 큐 0" "local=$(qcount "$LOCALQ") nfs=$(qcount "$NFSQ") 통 남음" FAIL "mailq-send.sh --status"; return
+      record 9 망복귀 "$t" "메일 큐 0" "local=$(qcount "$LOCALQ") nfs=$(qcount "$NFSQ") 통 남음 (sheetlog rc=${rc:-?})" FAIL "mailq-send.sh --status"; return
    fi
-   sl=$(run_sheetstatus); left=$(printf '%s\n' "$sl" | sed -n 's/^완결돼 쓸 수 있는 것 : *\([0-9]*\).*/\1/p' | head -1)
-   if [ "${left:-x}" = 0 ]; then
-      record 9 망복귀 "$t" "net=up · 큐 0 · 시트에 밀린 완결 런 0" "up since=$(ns_get since), 큐 0, 시트 0" PASS "$NSSTATE"
+   #  flush 뒤에 완결된 런(7·8 단계의 꼬리, 드릴 런)은 다음 cron 몫이라 판정에 넣지 않는다 -- rc 와 등재 수로만
+   if [ "${rc:-x}" = 0 ]; then
+      record 9 망복귀 "$t" "net=up · sheetlog --force rc 0 · 큐 0" "up since=$(ns_get since), 시트 등재 ${runs:-0} 런, 큐 0" PASS "$line"
    else
-      record 9 망복귀 "$t" "시트에 밀린 완결 런 0" "완결돼 쓸 수 있는 것 ${left:-?} 개" FAIL "sheetlog-auto.sh --status"
+      record 9 망복귀 "$t" "sheetlog-auto --force rc 0" "rc=${rc:-?} 등재 ${runs:-?} 런" FAIL "$line"
    fi
 }
 
@@ -506,6 +545,12 @@ REPORTED=1
    echo "PASS $(cut -f6 "$RES" | grep -c '^PASS$') · FAIL $(cut -f6 "$RES" | grep -c '^FAIL$') · SKIP $(cut -f6 "$RES" | grep -c '^SKIP$')"
    echo
    echo "FAIL 이 있으면 docs/AUTONOMY-DRILL.md 의 '실패했을 때' 표를 볼 것."
+   if [ -n "${B_RUN:-}" ] && [ "$CONFIRM" = 1 ]; then
+      echo
+      echo "★ 이번 드릴의 런($B_RUN ~ $(hb_run))을 시트에서 뺄 것 (아직 안 했으면, 백업 먼저) :"
+      echo
+      echo '```'; drill_runs_cmd; echo; echo '```'
+   fi
 } > "$LOGDIR/report.md"
 }
 # =====================================================================
@@ -513,9 +558,11 @@ REPORTED=1
 # =====================================================================
 if [ "$DRY" -eq 1 ]; then
    for s in $STEPS; do log "[계획] 단계 $s : $(plan_line "$s")"; done
-   s0 >/dev/null; log "[계획] 전제 : $(tail -1 "$RES" | cut -f5,6)"
+   s0 >/dev/null; pre=$?; log "[계획] 전제 : $(tail -1 "$RES" | cut -f5,6)"
    log "[DRY] 주입 0 회. 아무것도 하지 않았다."
-   exit 0
+   [ "$pre" -eq 0 ] && exit 0
+   log "[DRY] 전제가 충족되지 않아 지금은 드릴을 돌릴 수 없다 (rc 1)"
+   exit 1
 fi
 
 PREOK=1
