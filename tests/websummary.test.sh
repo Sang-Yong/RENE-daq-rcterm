@@ -23,6 +23,10 @@ set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 SUT="$DIR/tools/monitor/websummary.sh"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+#  ★ 어느 검사가 진짜 daq-notify.sh 로 빠져도 운영 로그·메일 큐·메일에 닿지 않게 (2026-11-05 : 검사 [7] 이
+#    /Data/LOG/daq-notify.log 에 run 4300 가짜 사건을 남겼다. 메일은 work 클론에 params 가 없어 rc=2 로 안 나간 것뿐)
+printf 'import sys\nsys.exit(0)\n' > "$T/fake_mail.py"
+export NOTIFY_LOG="$T/daq-notify.log" NOTIFY_MAILQ="$T/MAILQ" NOTIFY_MAILER="$T/fake_mail.py" NOTIFY_ALARM=/bin/true NETSYNC_STATE="$T/netsync.state"
 
 R=""   # CHK 이름=1/0 누적 (monitor-html.test.sh 와 같은 관용구)
 
