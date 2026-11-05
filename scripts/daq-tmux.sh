@@ -59,7 +59,11 @@ case "${1:-}" in
    --start)       START=1; shift ;;
    --no-postrun)  POSTRUN=0; shift ;;
    --no-dataflow) DATAFLOW=0; shift ;;
-   --print-cmd)   PRINT=${2:-}; shift 2 2>/dev/null || shift ;;
+   --print-cmd)   PRINT=${2:-}
+                  #  ★ 인자가 없으면 화면 구성으로 넘어가지 않는다 (이 옵션은 읽기 전용이어야 한다)
+                  case "$PRINT" in supervisor|postrun|dataflow) ;;
+                     *) echo "사용 : $0 --print-cmd supervisor|postrun|dataflow" >&2; exit 1 ;; esac
+                  shift 2 ;;
    --kill-layout) tmux kill-session -t "$SESSION" 2>/dev/null &&
                      echo "세션 '$SESSION' 정리함 (DAQ 프로세스는 그대로)"
                   echo "주의: rcsupervisor 가 이 세션 안에서 돌고 있었다면 같이 죽는다."
