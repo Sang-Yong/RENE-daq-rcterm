@@ -1,0 +1,12 @@
+2026-11-03 10:33:41 [SUP] cycle 5 launch: /home/frontend/DAQ/RENE-daq-rcterm/install/bin/rcterm --params /home/frontend/DAQ/RENE-daq-rcterm/config/rcterm.params --max-runs 1 --run-length 24.016667 --quiet --heartbeat /Data/LOG/rcterm.hb --desc Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP
+2026-11-03 10:33:51 [SUP] cycle 5 finished : exit=code 2
+2026-11-03 10:33:51 [SUP] recovering : cleaning up stale DAQ processes
+2026-11-03 10:33:51 [SUP] cleanup: pkill -f '/home/frontend/DAQ/DAQ_cup/install/bin/tcb' >/dev/null 2>&1
+2026-11-03 10:33:51 [SUP] cleanup: pkill -f '/home/frontend/DAQ/DAQ_cup/install/bin/merger' >/dev/null 2>&1
+2026-11-03 10:33:51 [SUP] cleanup: pkill -f '/home/frontend/DAQ/DAQ_cup/install/bin/daq' >/dev/null 2>&1
+2026-11-03 10:34:02 [SUP] restart #5 (consecutive failures 5/5); next run will be new
+2026-11-03 10:34:02 [SUP] notify: restart : restart #5 (consecutive failures 5/5); next run will be new
+2026-11-03 10:34:02 [SUP] consecutive failure limit reached; trying automatic USB recovery
+2026-11-03 10:34:02 [SUP] recover: /home/frontend/DAQ/RENE-daq-rcterm/scripts/usb-recover.sh --params '/home/frontend/DAQ/RENE-daq-rcterm/config/notify.params'
+2026-11-03 10:36:33 [SUP] automatic recovery returned 2 (0=recovered 1=not-usb 2=failed 3=unsafe)
+2026-11-03 10:36:33 [SUP] FATAL too many consecutive failures; giving up. please inspect the DAQ logs

@@ -31,6 +31,16 @@ while [ $# -gt 0 ]; do case "$1" in --detail-file) cat "$2" > "$CALLS.detail"; s
 exit 0
 N
 chmod +x "$T/notify.sh"; export CALLS; export NOTIFY_LOG=$T/notify.log
+#  ★ 바깥 명령을 전부 가짜로. 진짜 tmux send-keys · kill · df 가 나가지 않게, 운영 cron 과 잠금이 겹치지 않게
+#    (잠금이 겹치면 회차가 '이미 실행 중' 으로 빠져 시험이 들쭉날쭉 깨졌다 -- 2026-11-05 실측 4/41)
+mkdir -p "$T/bin"
+printf '#!/bin/bash\nexit 1\n' > "$T/bin/false"; chmod +x "$T/bin/false"
+printf '#!/bin/bash\nexit 0\n' > "$T/bin/true";  chmod +x "$T/bin/true"
+: > "$T/ps.txt"; : > "$T/df.txt"
+export CHAINWATCH_LOCK=$T/.lock CHAINWATCH_TMUX=$T/bin/false CHAINWATCH_PGREP=$T/bin/false \
+       CHAINWATCH_KILL=$T/bin/false CHAINWATCH_MOUNTPOINT=$T/bin/true CHAINWATCH_PS=$T/ps.txt \
+       CHAINWATCH_DF_FILE=$T/df.txt CHAINWATCH_SUPLOG=$T/sup.log CHAINWATCH_PROC=$T/proc \
+       NETSYNC_STATE=$T/netsync.state
 
 sqlite3 "$DB" "create table runcatalog(runnum integer primary key, onlbit integer, stime integer, etime integer, nfadc integer, tfadc real, rundesc text);"
 hb() {  # run daqtime [phase]
@@ -156,11 +166,11 @@ check "300 Hz : 알림 없음"                   '[ ! -s "$CALLS" ]'
 check "300 Hz : 경고 문구 없음"              '! grep -q "계수율이 높습니다" "$LOG"'
 hbr 4350 460 25000; run --min-rate 100
 check "25,000 Hz : 알림 없음 (경고만)"       '[ ! -s "$CALLS" ]'
-check "25,000 Hz : 한글 경고 문구가 로그에"  'grep -q "경고 : 계수율이 높습니다 — ADC 별 최댓값 25000 Hz" "$LOG"'
+check "25,000 Hz : 한글 경고 문구가 로그에"  'grep -q "경고 : 계수율이 높습니다 — ADC 별(순간 sr) 최댓값 25000 Hz" "$LOG"'
 check "25,000 Hz : --status 에 경고"         '"$CW" --params /nonexistent --status --heartbeat "$HB" --state "$ST" --log "$LOG" --dbfile "$DB" 2>/dev/null | grep -q "★ 경고"'
 hbr 4350 520 35000; run --min-rate 100
 check "35,000 Hz : rate_high 즉시 알림 (연속 조건 없이)" 'grep -q " rate_high --msg" "$CALLS"'
-check "35,000 Hz : 사유가 한글"              'grep -q "계수율 비정상 : ADC 별 계수율 최댓값 35000 Hz 가 알람 기준 30000 Hz 이상" "$CALLS"'
+check "35,000 Hz : 사유가 한글"              'grep -q "계수율 비정상 : ADC 별 계수율(순간 sr) 최댓값 35000 Hz 가 알람 기준 30000 Hz 이상" "$CALLS"'
 hbr 4350 580 35000; run --min-rate 100
 check "이어지면 재알림 간격 안에는 생략"     '[ ! -s "$CALLS" ]'
 hbr 4350 640 400; run --min-rate 100
