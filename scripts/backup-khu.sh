@@ -49,6 +49,10 @@ DBFILE=${BACKUP_DBFILE:-/Data_ssd/runcatalog.db}
 BADRUN_LIST=${BADRUN_LIST:-/Data_ssd/LOG/badrun_list.txt}   # 문제 런 목록 (scripts/badrun.sh)
 DATA_SRC=${BACKUP_DATA_SRC:-}            # 원격 Data/ 로 보낼 잡다한 경로. 비우면 안 함
 BWLIMIT=${BACKUP_BWLIMIT:-0}             # KB/s. 0 = 제한 없음
+RSYNC_TIMEOUT=${BACKUP_RSYNC_TIMEOUT:-600}      # rsync --timeout [초]. 0 = 끔 (아래 RSH 주석)
+VERIFY_TIMEOUT=${BACKUP_VERIFY_TIMEOUT:-0}      # 체크섬 대조의 --timeout [초]. 0 = 끔 (기본, 아래 RSH 주석)
+SSD=${DATAFLOW_SSD_ROOT:-/Data_ssd}      # 1단계 원본. 여기에 아직 있는 런은 '옮기는 중' 이라 --all 에서 뺀다
+LOCKF=${BACKUP_LOCK:-/tmp/.backup-khu.$(id -u).lock}   # 손으로 돌린 것과 겹치지 않게
 NICE=${BACKUP_NICE:-10}
 PARAMS=""
 
@@ -103,12 +107,15 @@ load_params() {
       [ -n "$k" ] || continue
       case "$k" in
          MID_ROOT|MID)   MID=$v ;;
+         SSD_ROOT|SSD)   SSD=$v ;;
          BACKUP_HOST)    HOST=$v ;;
          BACKUP_DEST)    DEST=$v ;;
          BACKUP_DBFILE)  DBFILE=$v ;;
          BADRUN_LIST)    BADRUN_LIST=$v ;;
          BACKUP_DATA_SRC) DATA_SRC=$v ;;
          BACKUP_BWLIMIT) BWLIMIT=$v ;;
+         BACKUP_RSYNC_TIMEOUT)  RSYNC_TIMEOUT=$v ;;
+         BACKUP_VERIFY_TIMEOUT) VERIFY_TIMEOUT=$v ;;
          BACKUP_SKIP)    SKIP=$v ;;
          NICE)           NICE=$v ;;
          *)              : ;;   # dataflow.sh 전용 키는 여기서 무시한다
@@ -147,8 +154,18 @@ command -v ssh   >/dev/null || die "ssh 가 필요하다"
 
 SKIP=$(printf '%s' "$SKIP" | tr ',' ' ')
 
-RSH="ssh -o BatchMode=yes -o ConnectTimeout=20"
+#  ★ 2026-11-05 : 망이 끊긴 채 행에 걸리지 않게 한다.
+#    ServerAlive 30 s x 4 = 약 2 분 동안 응답이 없으면 ssh 가 끊고, rsync 는 그 EOF 로 끝난다.
+#    rsync --timeout 은 전송 중 그 시간 동안 자료가 한 바이트도 안 오가면 끊는다.
+#    ★ 체크섬 대조(verify_dir, rsync -c -n)에는 기본으로 --timeout 을 걸지 않는다.
+#      rsync 3.2.5 는 체크섬을 계산하는 동안 keepalive 를 보내지 않는다 — 12 GB 파일 하나에
+#      --timeout=3 이 22 s 뒤 code 30 으로 죽는 것을 재현했다 (2026-11-05 리뷰). 런 RAW 620 GB 는
+#      대조에 약 40 분이 걸려 어떤 고정값도 '매 주기 rc=30 -> 마커 미기록 -> 3단계 영영 대기'
+#      로 갈 수 있다. 망 단절은 ServerAlive(약 2 분)가 잡는다. 굳이 걸려면 backup_verify_timeout.
+RSH="ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=4"
 RSYNC_BASE="-a --partial-dir=.rsync-partial --mkpath"
+[ "$RSYNC_TIMEOUT" != "0" ] && RSYNC_BASE="$RSYNC_BASE --timeout=$RSYNC_TIMEOUT"
+VERIFY_T=""; [ "$VERIFY_TIMEOUT" != "0" ] && VERIFY_T="--timeout=$VERIFY_TIMEOUT"
 [ "$BWLIMIT" != "0" ] && RSYNC_BASE="$RSYNC_BASE --bwlimit=$BWLIMIT"
 [ "$QUIET" -eq 1 ] || RSYNC_BASE="$RSYNC_BASE --info=progress2"
 VERIFY_C=""; [ "$VERIFY" -eq 1 ] && VERIFY_C="-c"   # 파일 하나짜리는 전송에 바로 붙인다
@@ -263,7 +280,7 @@ verify_dir() {           # 이름표 로컬디렉터리 원격상대경로 [추�
    local out rc n_diff
    log "  $what : 체크섬 대조 중..."
    # shellcheck disable=SC2086
-   out=$(nice -n "$NICE" rsync -a -c -n -i "$@" -e "$RSH" \
+   out=$(nice -n "$NICE" rsync -a -c -n -i $VERIFY_T "$@" -e "$RSH" \
          "$src"/ "$HOST:$DEST/$rel"/ 2>&1); rc=$?
    if [ "$rc" -ne 0 ]; then
       err "  $what : 체크섬 대조 실행 실패 (rc=$rc). 미완료로 둔다"
@@ -504,6 +521,12 @@ backup_run() {           # run_num
 pending_runs() {
    local rp m c ok
    for rp in $(ls -1 "$MID/RAW" 2>/dev/null | grep -E '^[0-9]{6}$' | sort -n); do
+      #  ★ 1단계가 아직 옮기는 중인 런(원본이 $SSD 에 남아 있다)은 집지 않는다.
+      #    반쪽을 몇 시간 동안 보내 대역을 낭비하고, 그동안 1단계 재시도를 막는다
+      #    (2026-11-05 실측 : 옮기는 중인 004431 을 보내고 있었다).
+      if [ -d "$SSD/RAW/$rp" ]; then
+         log "  run $rp : $SSD 에서 아직 옮기는 중이다. 이번에는 건너뜀" >&2; continue
+      fi
       m=$(marker_of "$rp"); ok=1
       for c in $CATS_DEF; do
          [ "$c" = "db" ] && continue
@@ -516,6 +539,15 @@ pending_runs() {
 
 # =====================================================================
 [ -n "$DATA_SRC" ] && CATS_DEF="$CATS_DEF Data"
+
+#  ★ 겹쳐 돌지 않게 한다 (손으로 띄운 것과 dataflow 가 띄운 것이 같은 마커를 쓴다).
+#    미리보기는 잠금 파일을 만들지 않는다.
+if [ "$DRYRUN" -eq 0 ]; then
+   exec 8>"$LOCKF"
+   if ! flock -n 8; then
+      warn "다른 backup-khu 가 돌고 있다 ($LOCKF). 종료"; exit 75
+   fi
+fi
 
 check_host || exit 1
 

@@ -49,7 +49,23 @@ HB=${DAQ_HEARTBEAT:-/Data/LOG/rcterm.hb}
 BACKUP_ENABLE=${DATAFLOW_BACKUP:-1}      # 0 이면 2단계를 건너뛴다
 KEEP_SSD=${DATAFLOW_KEEP_SSD:-2}         # ssd 에 남길 런 수 (수집 중인 것 포함)
 KEEP_MID=${DATAFLOW_KEEP_MID:-0}         # 백업 뒤에도 mid 에 남길 런 수
-MINFREE_GB=${DATAFLOW_MINFREE_GB:-700}   # /Data_ssd 여유가 이 아래면 경고
+MINFREE_GB=${DATAFLOW_MINFREE_GB:-700}   # /Data_ssd 여유가 이 아래면 경고 + ★압박 모드 (아래)
+#  ★ 압박 모드 (2026-11-05) — /Data_ssd 여유가 MINFREE_GB 아래로 내려가면 1단계가
+#    KEEP_SSD 를 무시하고, 다른 관문(수집 중 아님 · 후처리 완결 · 조용함 · 백업이
+#    안 읽음 · 심볼릭 링크 아님)을 통과한 런을 오래된 것부터 옮긴다. 런을 하나
+#    옮길 때마다 여유를 다시 재고, 회복되면 그 자리에서 보통 모드로 돌아간다.
+#    왜 : 6.8 kHz 런은 하나가 1.7 T 라 KEEP_SSD=2 가 런 '수' 기준이면 3.7 T 가
+#    두 런으로 찬다. 2026-11-05 에 실제로 100 % (13 G) 가 됐다.
+#  ★ 조용함 관문 — 런 디렉터리 안 무엇이든 최근 QUIET_MIN 분 안에 바뀌었으면 옮기지
+#    않는다. PRD 는 매크로가 최종 이름으로 바로 쓰므로, 마지막 PRD 가 쓰이는 도중에도
+#    'PRD 개수 == FADC 개수' 가 성립한다. 직전 런을 KEEP 으로 보호하지 않을 때
+#    (압박 모드 · keep_ssd=1) 그 틈을 막는다. 0 이면 끈다 (시험용).
+QUIET_MIN=${DATAFLOW_QUIET_MIN:-10}
+#  ★ 부팅 실패 잔재 — 최상위 FADC 파일이 MIN_SUBRUNS 개 미만인 런은 후처리 완결을
+#    기다리지 않고 옮긴다 (지우지 않는다). 영영 PRD==FADC 가 될 수 없어 /Data_ssd 에
+#    붙박이로 남기 때문이다 (실측 2026-11-05 : 4324 4342 4389 4424 4425 4428).
+MIN_SUBRUNS=${DATAFLOW_MIN_SUBRUNS:-2}
+RESIDUE_QUIET_MIN=${DATAFLOW_RESIDUE_QUIET_MIN:-2}   # 잔재 경로의 조용함 하한 [분] (quiet_min 이 0 이어도)
 DROP_MERGED=${DATAFLOW_DROP_MERGED:-0}   # 3단계에서 Merged 를 버린다 (기본 아니오)
 #  ★ Merged 보관 창 — 최근 이 개수의 런만 Merged 를 남기고 나머지는 지운다.
 #    0 이면 청소하지 않는다 (기본).  --merged-keep N 또는 params 로 켠다.
@@ -78,13 +94,17 @@ MERGED_MAX_FILES=${DATAFLOW_MERGED_MAX_FILES:-20000}   # 0 = 무제한
 VERIFY=${DATAFLOW_VERIFY:-1}             # 지우기 전에 체크섬으로 대조한다 (CLAUDE.md §8)
 POLL=${DATAFLOW_POLL:-600}
 NICE=${DATAFLOW_NICE:-10}
-BACKUP_SH=$REPO/scripts/backup-khu.sh
+BACKUP_SH=${DATAFLOW_BACKUP_SH:-$REPO/scripts/backup-khu.sh}   # 시험에서 갈아끼운다
 PARAMS=""
 
 STAGE=0; ONCE=0; FOLLOW=0; DRYRUN=0
 #  ★ 시험에서 갈아끼울 수 있어야 한다. 운영 중인 dataflow 와 잠금이 겹치면
 #    시험이 조용히 exit 0 으로 끝나 아무것도 검증하지 못한다.
 LOCK=${DATAFLOW_LOCK:-/tmp/.dataflow.$(id -u).lock}
+#  ★ 2단계(외부 백업) 전용 잠금. --follow 에서는 2단계를 뒤에 띄우므로(아래 stage2)
+#    dataflow 를 다시 띄웠을 때 옛 백업이 아직 돌면 두 번째를 띄우지 않게 한다.
+LOCK2=${DATAFLOW_LOCK2:-$LOCK.stage2}
+BK_PID=""        # --follow 에서 뒤에 띄운 2단계의 PID
 
 C_R='\033[1;31m'; C_G='\033[1;32m'; C_Y='\033[1;33m'; C_C='\033[1;36m'; C_0='\033[0m'
 ts()  { date '+%Y-%m-%d %H:%M:%S'; }
@@ -116,6 +136,9 @@ usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; cat <<EOF
                        런당 115 GB 이고 RAW 에서 다시 만들 수 있다.
                        **데이터를 지우는 옵션이므로 기본은 꺼져 있다**
   --min-free-gb N      /Data_ssd 경고 임계 [GB]  (${MINFREE_GB})
+                       ★ 이 아래면 1단계가 압박 모드로 keep-ssd 를 무시한다
+  --quiet-min N        최근 N 분 안에 바뀐 런은 1단계에서 옮기지 않는다 (${QUIET_MIN}, 0 = 끔)
+  --min-subruns N      FADC 파일이 N 개 미만인 부팅 실패 잔재는 후처리 완결 없이 옮긴다 (${MIN_SUBRUNS})
   --poll SEC           --follow 주기            (${POLL})
   --heartbeat FILE     rcterm heartbeat         (${HB})
   --dry-run            무엇을 할지만 출력
@@ -142,6 +165,8 @@ load_params() {
          KEEP_SSD)       KEEP_SSD=$v ;;
          KEEP_MID)       KEEP_MID=$v ;;
          MIN_FREE_GB)    MINFREE_GB=$v ;;
+         QUIET_MIN)      QUIET_MIN=$v ;;
+         MIN_SUBRUNS)    MIN_SUBRUNS=$v ;;
          DROP_MERGED)    DROP_MERGED=$v ;;
          KEEP_MERGED)    KEEP_MERGED=$v ;;
          MERGED_MAX_FILES) MERGED_MAX_FILES=$v ;;
@@ -172,6 +197,8 @@ while [ $# -gt 0 ]; do
       --no-verify)    VERIFY=0; shift ;;   # ★권장하지 않는다★
       --verify)       VERIFY=1; shift ;;
       --min-free-gb)  MINFREE_GB=$2; shift 2 ;;
+      --quiet-min)    QUIET_MIN=$2; shift 2 ;;
+      --min-subruns)  MIN_SUBRUNS=$2; shift 2 ;;
       --poll)         POLL=$2; shift 2 ;;
       --heartbeat)    HB=$2; shift 2 ;;
       --dry-run)      DRYRUN=1; shift ;;
@@ -188,6 +215,20 @@ hb_age()   { local t; t=$(hb_field time); [ -n "$t" ] && echo $(( $(date +%s) - 
 runs_in()  { ls -1 "$1" 2>/dev/null | grep -E '^[0-9]{6}$' | sort -n; }
 free_gb()  { df --output=avail -BG "$1" 2>/dev/null | tail -1 | tr -dc '0-9'; }
 size_gb()  { du -s -BG "$1" 2>/dev/null | cut -f1 | tr -dc '0-9'; }
+#  /Data_ssd 여유 [GB].  시험에서는 DATAFLOW_TEST_SSD_FREE_CMD (bash 한 줄, 숫자를 낸다)
+#  로 갈아끼운다. 런을 옮길 때마다 다시 부르므로 '회복' 도 시험할 수 있다.
+ssd_free_gb() {
+   if [ -n "${DATAFLOW_TEST_SSD_FREE_CMD:-}" ]; then
+      bash -c "$DATAFLOW_TEST_SSD_FREE_CMD" 2>/dev/null | tr -dc '0-9'
+   else
+      free_gb "$SSD"
+   fi
+}
+#  /Data_ssd 가 압박 상태인가 (여유를 모르면 아니라고 본다)
+ssd_pressure() {
+   local f; f=$(ssd_free_gb)
+   [ -n "$f" ] && [ "$f" -lt "$MINFREE_GB" ]
+}
 
 # 지금 수집 중인 런인가. heartbeat 가 살아 있고 run 이 같으면 손대지 않는다.
 is_acquiring() {          # run_pad
@@ -202,6 +243,21 @@ is_processed() {          # run_dir
    f=$(find -L "$1" -maxdepth 1 -name 'FADC_*.root.*' 2>/dev/null | wc -l)
    p=$(find -L "$1/PRD" -maxdepth 1 -name '*.root' 2>/dev/null | wc -l)
    [ "$f" -gt 0 ] && [ "$p" -eq "$f" ]
+}
+
+# 최상위 FADC 파일 개수
+n_fadc() { find -L "$1" -maxdepth 1 -name 'FADC_*.root.*' 2>/dev/null | wc -l; }
+
+# 부팅 실패 잔재인가 — 최상위 FADC 가 MIN_SUBRUNS 개 미만.
+#  (수집 중 여부와 조용함은 호출자가 따로 본다)
+is_residue() {            # run_dir
+   [ "$(n_fadc "$1")" -lt "$MIN_SUBRUNS" ]
+}
+
+# 최근 QUIET_MIN 분 안에 바뀐 것이 있는가 (디렉터리 자신 포함). 0 이면 끈다.
+recently_modified() {     # run_dir
+   [ "${QUIET_MIN:-0}" -gt 0 ] || return 1
+   [ -n "$(find "$1" -mmin "-$QUIET_MIN" -print -quit 2>/dev/null)" ]
 }
 
 # 예전 --outroot 구성이 남긴 심볼릭 링크가 있으면 통째로 옮길 수 없다.
@@ -428,15 +484,29 @@ dest_mounted() {                     # $1 = 확인할 경로
 }
 
 stage1() {
-   local keep rp src
+   local keep rp src pressure=0 in_keep
    if ! dest_mounted "$MID"; then
       log "${C_R}[1] $MID 가 마운트돼 있지 않다. 1단계를 건너뛴다${C_0}"
       log "${C_R}    (그대로 옮기면 루트 파일시스템을 채운다)${C_0}"
       return 0
    fi
+   if ssd_pressure; then
+      pressure=1
+      log "${C_R}[1] 압박 모드 : $SSD 여유 $(ssd_free_gb)G < ${MINFREE_GB}G — keep_ssd=${KEEP_SSD} 를 무시하고 오래된 런부터 옮긴다${C_0}"
+   fi
    keep=$(runs_in "$SSD/RAW" | tail -n "$KEEP_SSD")
    for rp in $(runs_in "$SSD/RAW"); do
-      echo "$keep" | grep -qx "$rp" && continue
+      in_keep=0; echo "$keep" | grep -qx "$rp" && in_keep=1
+      if [ "$in_keep" = 1 ]; then
+         [ "$pressure" = 1 ] || continue
+         #  ★ 보관 창 안의 런은 압박이 '지금도' 이어질 때만 옮긴다.
+         #    앞 런을 옮겨 여유가 돌아왔으면 그 자리에서 보통 모드로.
+         if ! ssd_pressure; then
+            pressure=0
+            log "${C_G}[1] 압박 모드 해제 : $SSD 여유 $(ssd_free_gb)G >= ${MINFREE_GB}G${C_0}"
+            continue
+         fi
+      fi
       is_acquiring "$rp" && { log "[1] run $rp : 수집 중. 건드리지 않는다"; continue; }
       src="$SSD/RAW/$rp"
       if has_symlink_subdir "$src"; then
@@ -444,34 +514,95 @@ stage1() {
          log "     예전 --outroot 구성의 잔재다. postrun.sh --archive-now 로 먼저 되돌릴 것"
          continue
       fi
+      local why="후처리 완결"
       if ! is_processed "$src"; then
-         log "${C_Y}[1] run $rp : 후처리 미완료. 대기${C_0}"; continue
+         if is_residue "$src"; then
+            why="부팅 실패 잔재 (FADC $(n_fadc "$src") 개 < ${MIN_SUBRUNS}). 후처리 없이 그대로 옮긴다"
+         else
+            log "${C_Y}[1] run $rp : 후처리 미완료. 대기${C_0}"; continue
+         fi
+      fi
+      local qm=$QUIET_MIN
+      #  ★ 잔재 경로는 quiet 하한을 둔다. 런이 바뀌는 순간에는 새 디렉터리가 생겼는데
+      #    heartbeat 는 아직 옛 런이라 is_acquiring 이 지켜 주지 못한다.
+      if is_residue "$src" && [ "${qm:-0}" -lt "$RESIDUE_QUIET_MIN" ]; then qm=$RESIDUE_QUIET_MIN; fi
+      if QUIET_MIN=$qm recently_modified "$src"; then
+         log "${C_Y}[1] run $rp : 최근 ${qm}분 안에 바뀐 파일이 있다. 다음 주기에${C_0}"; continue
       fi
       if backup_reading "$rp"; then
          log "${C_Y}[1] run $rp : 백업이 읽는 중이다. 끝난 뒤에 옮긴다${C_0}"; continue
       fi
-      log "${C_C}[1] run $rp : $SSD -> $MID${C_0}"
+      #  (옮기는 중인 런은 backup-khu --all 이 집지 않는다 : 원본이 $SSD 에 남아 있으면 뺀다)
+      log "${C_C}[1] run $rp : $SSD -> $MID${C_0} ($why$([ "$in_keep" = 1 ] && echo ', ★압박 모드로 보관 창 무시'))"
       if move_dir "$src" "$MID/RAW/$rp" "run $rp"; then
          move_side_files "$rp" "$SSD" "$MID"
       fi
    done
+   [ "$pressure" = 1 ] && ssd_pressure && \
+      log "${C_R}[1] 압박 모드가 이어진다 : 옮길 수 있는 런을 다 옮겼다. 남은 것은 수집 중이거나 후처리 미완료다${C_0}"
+   return 0
 }
 
 # =====================================================================
 #  2단계 : /data -> 경희대 서버 (카테고리별 rsync)
 # =====================================================================
+stage2_args() {
+   BK_ARGS=(--mid "$MID" --all)
+   [ -n "$PARAMS" ] && BK_ARGS=(--params "$PARAMS" "${BK_ARGS[@]}")
+   [ "$DRYRUN" -eq 1 ] && BK_ARGS+=(--dry-run)
+   return 0
+}
+
+# 뒤에 띄운 2단계가 아직 도는가 (우리 자식이거나, 잠금을 다른 누가 쥐었거나)
+bk_running() {
+   if [ -n "$BK_PID" ] && kill -0 "$BK_PID" 2>/dev/null; then return 0; fi
+   [ -e "$LOCK2" ] || return 1
+   ! flock -n "$LOCK2" true 2>/dev/null
+}
+
+#  ★ 2단계는 런당 수 시간 ~ 21 시간이 걸린다. --follow 에서 그것을 앞에 세우면
+#    1단계(/Data_ssd 비우기)가 그동안 멎어 DAQ 가 멈출 수 있다. 그래서 --follow 에서는
+#    뒤에 띄우고(자식 프로세스, 전용 잠금 LOCK2), 다음 주기에 아직 돌면 건너뛴다.
+#    --once 와 --dry-run 은 예전처럼 끝날 때까지 기다린다 (한 바퀴의 뜻을 유지).
 stage2() {
    if [ "$BACKUP_ENABLE" != "1" ]; then
       [ "$STAGE" = "2" ] && log "${C_Y}[2] 백업이 꺼져 있다 (--no-backup)${C_0}"
       return 0
    fi
-   local args=(--mid "$MID" --all)
-   [ -n "$PARAMS" ] && args=(--params "$PARAMS" "${args[@]}")
-   [ "$DRYRUN" -eq 1 ] && args+=(--dry-run)
+   stage2_args
+   if [ "$FOLLOW" -eq 1 ] && [ "$DRYRUN" -eq 0 ]; then
+      if [ -n "$BK_PID" ] && ! kill -0 "$BK_PID" 2>/dev/null; then
+         wait "$BK_PID" 2>/dev/null; local brc=$?
+         case $brc in
+            0)  log "${C_G}[2] 지난 외부 백업이 끝났다 (pid $BK_PID)${C_0}" ;;
+            75) log "${C_Y}[2] 지난 주기 : 다른 백업이 잠금을 쥐고 있어 띄우지 않았다${C_0}" ;;
+            *)  log "${C_Y}[2] 지난 외부 백업 rc=$brc. 일부 카테고리가 남았다. 이번에 재시도${C_0}" ;;
+         esac
+         BK_PID=""
+      fi
+      if bk_running; then
+         log "${C_Y}[2] 외부 백업이 아직 돈다$([ -n "$BK_PID" ] && echo " (pid $BK_PID)"). 이번 주기는 건너뛰고 1·3 단계를 계속한다${C_0}"
+         return 0
+      fi
+      log "${C_C}[2] 외부 백업을 뒤에서 시작한다${C_0}"
+      #  ★ 9>&- : 본 잠금(fd 9)을 자식에게 물려주지 않는다. 물려주면 dataflow 를 다시 띄울 때
+      #    살아 있는 백업이 본 잠금을 쥐고 있어 '이미 실행 중' 으로 끝난다.
+      flock -n -E 75 "$LOCK2" "$BACKUP_SH" "${BK_ARGS[@]}" 9>&- &
+      BK_PID=$!
+      return 0
+   fi
+   if bk_running; then
+      log "${C_Y}[2] 다른 외부 백업이 돌고 있다 ($LOCK2). 이번에는 건너뛴다${C_0}"
+      return 0
+   fi
    log "${C_C}[2] 외부 백업 시작${C_0}"
-   "$BACKUP_SH" "${args[@]}"
-   local rc=$?
-   [ "$rc" -ne 0 ] && log "${C_Y}[2] 일부 카테고리가 남았다. 다음 주기에 재시도${C_0}"
+   local rc
+   if [ "$DRYRUN" -eq 1 ]; then
+      "$BACKUP_SH" "${BK_ARGS[@]}"; rc=$?      # 미리보기는 잠금 파일도 만들지 않는다
+   else
+      flock -n -E 75 "$LOCK2" "$BACKUP_SH" "${BK_ARGS[@]}"; rc=$?
+   fi
+   [ "$rc" -ne 0 ] && log "${C_Y}[2] 일부 카테고리가 남았다 (rc=$rc). 다음 주기에 재시도${C_0}"
    return 0
 }
 
@@ -543,11 +674,11 @@ stage3() {
 # =====================================================================
 check_space() {
    local f m n
-   f=$(free_gb "$SSD"); m=$(free_gb "$MID"); n=$(free_gb "$NFS")
+   f=$(ssd_free_gb); m=$(free_gb "$MID"); n=$(free_gb "$NFS")
    log "  여유 : ssd ${f:-?}G / mid ${m:-?}G / nfs ${n:-?}G"
    [ -z "$f" ] && return 0
    if [ "$f" -lt "$MINFREE_GB" ]; then
-      log "${C_R}[!] /Data_ssd 여유 ${f}G < 임계 ${MINFREE_GB}G — 체인이 막히면 DAQ 가 멈춘다${C_0}"
+      log "${C_R}[!] /Data_ssd 여유 ${f}G < 임계 ${MINFREE_GB}G — 체인이 막히면 DAQ 가 멈춘다 (1단계는 압박 모드)${C_0}"
       log "${C_R}    1단계가 왜 진행되지 않는지 확인할 것 (후처리 미완료? 백업 실패?)${C_0}"
    fi
 }
@@ -572,8 +703,15 @@ fi
 log "${C_C}dataflow 시작${C_0}  ssd=$SSD  mid=$MID  nfs=$NFS  backup=$([ "$BACKUP_ENABLE" = 1 ] && echo on || echo off)"
 
 if [ "$FOLLOW" -eq 1 ]; then
-   trap 'log "중단 요청"; exit 130' INT TERM
-   while true; do one_pass; sleep "$POLL"; done
+   #  ★ 뒤에 띄운 2단계(BK_PID)는 세우지 않는다. 전용 잠금(LOCK2)을 쥐고 있어 다시
+   #    띄운 dataflow 가 두 번째 백업을 띄우지 않는다. 세우려면 그 PID 에 따로 TERM.
+   trap 'log "중단 요청$([ -n "$BK_PID" ] && kill -0 "$BK_PID" 2>/dev/null && echo " (외부 백업 pid $BK_PID 은 계속 돈다)")"; exit 130' INT TERM
+   while true; do
+      one_pass
+      #  sleep 을 뒤에 두고 wait 로 기다린다. 앞에 두면 TERM 이 sleep 이 끝날 때까지
+      #  미뤄진다 (§11.135). 2단계 자식은 wait 에 넣지 않는다.
+      sleep "$POLL" 9>&- & wait $! 2>/dev/null
+   done
 else
    one_pass
    log "완료"
