@@ -40,11 +40,15 @@ setsid nohup scripts/autonomy-drill.sh --plan offline-full --confirm-test-run \
 tail -f /Data_ssd/LOG/autonomy-drill/console.log
 
 # 4) '★ 사람 차례 : 지금 바깥 망을 끊어라' 가 나오면 (root)
-sudo nmcli connection down daq_gateway
+sudo nmcli connection down enp0s31f6
+#    또는 (더 실전에 가깝다) 벽 쪽 랜 케이블(enp0s31f6 포트)을 뽑는다. 둘 중 하나만
+#    ★ daq_gateway 가 아니다 — 그 프로파일은 케이블 없는 enp3s0f0 에 묶여 비활성이라 down 해도 아무것도 안 끊긴다
+#      (실측 11-05 : 활성 프로파일 enp0s31f6 = 장치 enp0s31f6, 203.230.111.71)
 #    netsync 가 net=down 을 적을 때까지 최대 15 분. 드릴이 혼자 3~8 단계를 진행한다 (1~2 시간)
 
 # 5) '★ 사람 차례 : 바깥 망을 되살려라' 가 나오면 (root)
-sudo nmcli connection up daq_gateway
+sudo nmcli connection up enp0s31f6      # 케이블을 뽑았으면 다시 꽂는다
+#    ★ daq_gateway 를 up 하지 말 것 — .71 을 다른 포트에 올리려 해 충돌한다 (CLAUDE.md 11.132)
 
 # 6) 결과
 cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
@@ -104,8 +108,17 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
 | 8 (`--with-power`) | `usb-recover-power.txt` · `scripts/pdu-power.sh status` | 수집이 멎어 있다. §11.224 순서 (PDU → NOTICE → usbreset 2 회 → 더미 런 → 확인 런) 뒤 tmux daq:1.2 에서 감시자 |
 | 9 | `scripts/mailq-send.sh --status` · `scripts/sheetlog-auto.sh --status` · `scripts/netsync.sh --status` | `scripts/mailq-send.sh` · `scripts/sheetlog-auto.sh --force` 를 손으로 |
 
-드릴이 낸 시험 런(4~8 에서 생긴 런들)은 DB 에서 `onlbit=0` + runlog `autonomy drill` 로 표시해
-시트 등재에서 빼는 것을 잊지 말 것 (드릴은 DB 를 건드리지 않는다).
+드릴이 낸 시험 런(시험 런과 4~8 에서 생긴 런들)은 DB 에서 `onlbit=0` + runlog `autonomy drill` 로 표시해
+시트 등재에서 빼는 것을 잊지 말 것 (드릴은 DB 를 건드리지 않는다). 런 번호는 `result.tsv` 의 관측 열(`run A -> B`)과
+`baseline.txt` 의 `run=` 에 있다. 백업 먼저, 그다음 한 줄 (예 : 4440 ~ 4445) :
+
+```bash
+cp -p /Data_ssd/runcatalog.db /Data_ssd/LOG/harness/runcatalog.db.bak-$(date +%Y%m%d%H%M)-before-drill && \
+sqlite3 /Data_ssd/runcatalog.db "UPDATE runcatalog SET onlbit=0, runlog='autonomy drill test run, excluded from sheet' || COALESCE(' ; ' || runlog, '') WHERE runnum BETWEEN 4440 AND 4445;"
+```
+
+`sheetlog-auto.sh` 가 07 분에 등재하므로 망이 돌아오기 전(또는 9 단계 직후)에 할 것. 이미 시트에 실렸으면 우리 행이라
+고칠 수 있다 (CLAUDE.md 11.5).
 
 ## 시험
 

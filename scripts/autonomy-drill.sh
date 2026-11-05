@@ -257,7 +257,7 @@ s1() {
 NETWENT=0
 s2() {
    local t; t=$(ts)
-   banner "★ 사람 차례 : 지금 바깥 망을 끊어라 (root, 콘솔에서).  예) nmcli connection down daq_gateway
+   banner "★ 사람 차례 : 지금 바깥 망을 끊어라 (root, 콘솔에서).  예) sudo nmcli connection down enp0s31f6  또는 벽 쪽 랜 케이블(enp0s31f6)을 뽑는다 (★ daq_gateway 아님)
    (원격 세션은 여기서 끊긴다. 드릴은 혼자 계속 돈다.)  netsync 가 net=down 을 적을 때까지 최대 ${T_NETDOWN} s 기다린다"
    if wait_for "$T_NETDOWN" ns_is_down; then
       NETWENT=1; record 2 망차단 "$t" "netsync net=down" "down (since=$(ns_get since))" PASS "$NSSTATE checked=$(ns_get checked)"
@@ -447,7 +447,7 @@ s8() {
 s9() {
    local t sl left
    t=$(ts)
-   banner "★ 사람 차례 : 바깥 망을 되살려라 (root).  예) nmcli connection up daq_gateway
+   banner "★ 사람 차례 : 바깥 망을 되살려라 (root).  예) sudo nmcli connection up enp0s31f6  또는 뽑은 케이블을 다시 꽂는다 (★ daq_gateway 를 올리지 말 것 -- .71 충돌)
    netsync 가 net=up 을 적고 밀린 메일·시트를 내보낼 때까지 최대 ${T_NETUP} s 기다린다"
    if ! wait_for "$T_NETUP" ns_is_up; then
       record 9 망복귀 "$t" "netsync net=up" "net=$(ns_get net) checked=$(ns_get checked)" FAIL "$NSSTATE"; return
