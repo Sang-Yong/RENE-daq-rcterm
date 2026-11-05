@@ -199,8 +199,29 @@ awk -F= '/^daq[0-9]+=/{print $2}' /Data/LOG/rcterm.hb
 **중요 : SIGTERM 은 그룹이 아니라 rcterm 단일 PID 에만 보낸다.**
 그룹에 보내면 `daq/tcb/merger` 가 쓰기 도중에 죽어 마지막 파일이 상한다.
 
-`--max-consec-fail`(기본 5) 번 연속 실패하면 감시자도 종료한다.
-무한 재시작 루프로 쓰레기 런을 대량 생산하는 상황을 막기 위한 장치다.
+`--max-consec-fail`(기본 5) 번 연속 실패하면 자동 복구(`--recover-cmd`)를 부르고,
+그래도 안 되면 **감시자는 끝나지 않고 대기-재시도(standby) 모드로 남는다** (2026-11-05).
+옛 동작(종료)이 필요하면 `--no-standby`.
+
+### 자율 복구 (2026-11-05)
+
+사람 손 없이 돌기 위해 넣었다. 판단 근거는 언제나 **DAQ 로그 파일 grep 과 heartbeat** 뿐이다
+(RunControl 을 링크하지 않는다는 원칙 그대로).
+
+| # | 무엇 | 언제 | 하는 일 |
+|---|---|---|---|
+| S-1 | 설정 오류 | rcterm 이 스스로 `exit 1` | 재시작하지 않는다. `fatal`('config error, restart pointless') 1 회 → standby(config). 주기마다 같은 인자로 `rcterm --dry-run`, 통과하면 재개 |
+| S-2 | USB 서명 | 실패한 런의 `TCB/FADCDAQ/SADCDAQ_<run6>.log` 에 `LIBUSB_ERROR_` · `open falied` · `Fail to align` · `USB3TCB…error` | 한도를 기다리지 않고 **그 자리에서** `--recover-cmd`. 한 실패 연쇄에 한 번 (`--no-early-recover` 로 끈다) |
+| S-3 | DRAM 정렬 | `--boot-grace` 가 지난 뒤 처음 `phase=running` 을 볼 때 | TCB 로그의 `is aligned` == `--dram-lines`(8) 이고 `Fail to align` 0 인가. 아니면 런 정상 마감 → recover → 재개 |
+| S-4 | 계수율 상한 | `--rate-poll`(30 s) 마다 heartbeat `daqN= … sr=` 의 최댓값 | `--max-rate`(30000) 이상이 `--rate-consec`(3) 번 연속이면 런 정상 마감 → `rate_high` 알림 → 마감 로그에 TIMEOUT/OVERFLOW 가 있으면 recover 1 회 → `--rate-cooldown`(600 s) 뒤 재기동. `--rate-window`(7200 s) 안에 `--rate-stop-limit`(3) 번이면 standby(rate) |
+| S-5 | 대기-재시도 | S-1, 한도+복구 실패, S-4 의 3 회 | `fatal` 1 회, 이후 `--standby-retry-min`(60) 마다 재시도하고 `standby_retry` 알림. hardware : recover 0 → 재개, 1 → 확인 런 1 개. rate : 확인 런 1 개. 재개 뒤 첫 실패는 곧바로 다시 standby (런 번호를 태우지 않는다) |
+
+- 대기 중에는 감시자가 heartbeat 를 쓴다 — `phase=standby` · `pid=<감시자>` · `standby=<config|hardware|rate>`, 나머지 키는 그대로.
+- **SIGUSR1** = 지금 런을 정상 마감하고 `--rate-cooldown` 뒤 재기동 (S-4 의 마감 횟수에 들어간다). 알림은 보낸 쪽이 한다.
+- SIGTERM 은 언제나(대기 중에도) 정상 종료, exit 0.
+- heartbeat 는 `pid=` 가 지금 자식 rcterm 과 같을 때만 믿는다 (옛 런·대기 heartbeat 오인 방지).
+- 로그는 `--daq-logdir`(/Data_ssd/LOG) → `--daq-logdir-old`(/scratch/DAQ_LOG/RAW_log) 순으로 찾는다.
+- 종료코드 : 0 정상 / 1 옵션 오류 (또는 `--no-standby` 에서 설정 오류) / 2 `--no-standby` 에서 포기.
 
 ---
 

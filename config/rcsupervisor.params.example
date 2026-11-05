@@ -30,7 +30,7 @@ stall-grace   = 1800          # 이벤트가 이 시간 동안 증가 안하면 
 grace         = 180           # SIGTERM 후 정상종료 대기 [초]
 settle        = 10            # 정리 후 대기 [초]
 backoff       = 30            # 실패 후 대기 [초]
-max-consec-fail = 5           # 연속 실패 한계 (초과시 감시자도 종료)
+max-consec-fail = 5           # 연속 실패 한계 (닿으면 복구 시도, 안 되면 대기-재시도)
 
 # ---- 경로 / 사이트 ----
 heartbeat     = /Data/LOG/rcterm.hb       # rcterm.params 와 반드시 동일하게!
@@ -56,3 +56,24 @@ notify-params = /home/frontend/DAQ/RENE-daq-rcterm/config/notify.params
 recover-cmd   = /home/frontend/DAQ/RENE-daq-rcterm/scripts/usb-recover.sh
 # no-notify                   # 알림을 아예 끈다
 # no-auto-recover             # usbreset 자동 시도를 끈다 (알림은 그대로)
+
+# ---- 자율 복구 (2026-11-05 추가) --------------------------------------
+#  사람 손 없이 돈다. 감시자는 포기(FATAL)하지 않고 대기-재시도(standby)로 남는다.
+#  대기 중에는 heartbeat 를 phase=standby (pid = 감시자) 로 쓴다. SIGTERM 으로만 멈춘다.
+#  SIGUSR1 = 지금 런을 정상 마감하고 rate-cooldown 뒤 재기동 (chainwatch 가 보낸다).
+standby-retry-min = 60        # 대기 중 재시도 주기 [분]
+                              #  config(exit 1) : rcterm --dry-run 이 통과하면 재개
+                              #  hardware       : recover-cmd 0 이면 재개, 1 이면 확인 런 1 개
+                              #  rate           : 확인 런 1 개
+# no-standby                  # 옛 동작 : 설정 오류 exit 1 / 한도 exit 2 로 감시자 종료
+# no-early-recover            # USB 서명이 있어도 max-consec-fail 까지 기다린다
+dram-check    = 1             # 부팅 뒤 TCB_<run>.log 의 'is aligned' 줄을 센다 (11.208)
+dram-lines    = 8             #  이만큼 + 'Fail to align' 0 이어야 정상. 아니면 마감 -> recover
+rate-poll     = 30            # heartbeat sr= 를 읽는 주기 [초]
+max-rate      = 30000         # ADC 별 순간 계수율 상한 [Hz]. 0 = 끔  (ar 이 아니라 sr, 11.227)
+rate-consec   = 3             #  연속 이만큼 넘으면 런을 정상 마감
+rate-cooldown = 600           #  마감 뒤 재기동까지 쉬는 시간 [초]
+rate-stop-limit = 3           #  rate-window 안에 이만큼 마감하면 standby
+rate-window   = 7200          #  [초]
+daq-logdir    = /Data_ssd/LOG              # TCB/FADCDAQ/SADCDAQ_<run6>.log
+daq-logdir-old = /scratch/DAQ_LOG/RAW_log  # logrotate 가 옮긴 곳 (11.169)
