@@ -265,6 +265,26 @@ NETSYNC_STATE="$T/netsync.state" run_sut
 chk "오래된 down 은 믿지 않고 보냈다" "$(nsent)" "1"
 teardown
 
+echo ""; echo "[20] 서버가 거부하는 메일(rc 6) 한 통이 큐를 막지 않는다 -- 뒤의 정상 3 통이 나가고, 그 한 통은 5 회 뒤 failed/"
+setup 0
+cat > "$T/fake_send.py" <<FAKE
+#!/bin/bash
+subj=""; while [ \$# -gt 0 ]; do case "\$1" in --subject) subj=\$2; shift 2 ;; *) shift ;; esac; done
+echo "CALL subject=\$subj" >> "$T/calls.txt"
+case "\$subj" in *poison*) exit 6 ;; esac
+exit 0
+FAKE
+chmod +x "$T/fake_send.py"
+mkmail a0 "poison 550" routine "본문"
+mkmail a1 "정상 1" routine "본문"; mkmail a2 "정상 2" routine "본문"; mkmail a3 "정상 3" routine "본문"
+run_sut
+chk "첫 회차에 정상 3 통이 나갔다" "$(nsent)" "3"
+chk "poison 은 큐에 남고 1 회로 셌다" "$(cat "$Q"/a0.try 2>/dev/null || echo -)" "1"
+for i in 2 3 4 5; do run_sut; done
+chk "5 회 뒤 poison 은 failed/" "$(nfail)" "1"
+chk "큐가 비었다" "$(nq)" "0"
+teardown
+
 echo ""
 echo "=========================================================="
 printf "  통과 %d · 실패 %d\n" "$PASS" "$FAIL"
