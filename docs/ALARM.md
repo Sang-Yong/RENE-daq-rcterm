@@ -25,11 +25,16 @@ USB 보드 문제라면 스스로 되살리는** 장치다.
         │
         ├─ [1] 안전 확인 ─ 수집이 살아 있으면 아무것도 안 한다  (exit 3)
         ├─ [2] 진단     ─ USB 오류의 근거가 없으면 손대지 않는다 (exit 1)
-        ├─ [3] usbreset ─ 최대 2회. 매번 보드 재등록 + 3분 확인 런으로 검사
+        ├─ [3] usbreset ─ 최대 3회. 매번 고아 정리(killdaq) + usbreset 2 회 연속 + 3분 확인 런
         │        │
-        │        ├─ 통과 ──► exit 0 ──► 감시자가 실패 카운터를 0 으로 되돌리고
-        │        │                      수집을 이어간다     ──► 알림 : recovered
-        │        └─ 실패 ──► exit 2 ──► 알람 + 전문가 메일  ──► 알림 : recovery_failed
+        │        └─ 통과 ──► exit 0 ──► 감시자가 실패 카운터를 0 으로 되돌리고
+        │                               수집을 이어간다     ──► 알림 : recovered
+        ├─ [4] 전원 재투입 (recover_power_cycle = 1, 6 h 에 2 회까지)  ★ 2026-11-05
+        │        killdaq -> pdu-power.sh cycle --allow-supervisor (TCB 먼저, 30 s 뒤 FADC·SADC)
+        │        -> 보드 3 종 90 s -> NOTICE_CODE_RUN.sh (120 s 제한) -> usbreset 2 회
+        │        -> 10 s 더미 런 -> 확인 런 (실패 시 usbreset 1 회 + 확인 런 2 회 더)
+        │        ├─ 통과 ──► exit 0                                  ──► 알림 : recovered
+        │        └─ 실패 ──► exit 2 ──► 알람 + 전문가 메일            ──► 알림 : recovery_failed
         │
         └─ (자동 복구가 꺼져 있으면 바로)                    ──► 알림 : fatal
 ```
@@ -222,24 +227,42 @@ scripts/daq-alarm.sh --silence     # 끈다. '사람이 인지했다'는 뜻이�
 리셋하므로 진행 중인 런이 그 자리에서 깨진다. 실측으로 확인했다 — 수집 중에
 돌리면 `rcterm daq tcb / 열린 포트 3개` 를 잡아내고 아무것도 하지 않는다.
 
-**5.2 진단 없이 리셋하지 않는다.** USB 오류의 근거(`LIBUSB_ERROR_IO` 계열,
-또는 보드가 `lsusb` 에서 사라짐)가 없으면 종료코드 1 로 물러난다. 원인이
-다른데 보드를 흔들면 문제만 더 어려워진다.
+**5.2 진단 없이 리셋하지 않는다.** USB 오류의 근거(`LIBUSB_ERROR_` 전부 ·
+`Fail to align DRAM` · `no module linked` · `open falied` · dmesg 의
+`device descriptor read`, 또는 보드가 `lsusb` 에서 사라짐)가 없으면 종료코드 1 로
+물러난다. 원인이 다른데 보드를 흔들면 문제만 더 어려워진다. **`CupFADCT::Open`
+만으로는 잡지 않는다** — 정상 로그에도 `CupFADCT::Open: ... opened` 가 있다.
 
-**5.3 최근 로그만 본다.** `recover_log_age_min`(기본 60분) 안에 쓰인 DAQ
-로그만 진단에 쓴다. 옛 장애의 로그가 디렉터리에 남아 있으므로 그냥 최신 N개를
-보면 지금과 무관한 실패를 근거로 오진한다. 실측 — 08-20 03:20 장애의
-`FADCDAQ_004299.log` 가 몇 시간 뒤에도 최신 3개 안에 있었다.
+**5.3 최근 실패 런의 로그를 본다 (2026-11-05 에 바꿨다).** 예전에는
+`/Data_ssd/LOG` 에서 60분 안에 쓰인 파일만 봤는데, postrun 의 logrotate 가 실패 런
+로그를 몇 분 안에 `/scratch/DAQ_LOG/RAW_log/` 로 옮겨 놓아 근거를 놓쳤다
+(§11.169). 이제는 `rcterm.log` 의 최근 `recover_log_age_min` 분 안 `booting run`
+줄과 감시자 heartbeat 의 run 으로 **런 번호**를 고르고, 그 런의 TCB · FADCDAQ ·
+SADCDAQ 로그를 `/Data_ssd/LOG -> RAW_log -> RAW_log.old*` 순으로 찾는다(postrun 의
+`find_tcblog` 와 같은 규칙). 사람이 손으로 돌릴 때는 `--runs 4424,4425`.
 
-**5.4 계수율은 합이 아니라 ADC 별 최솟값으로 본다.** 한 보드만 죽으면 합도
-평균도 멀쩡해 보인다. **이번 장애가 정확히 그 모양이었다** — FADC 만 먹통,
-SADC 는 1000 Hz 정상. `heartbeat` 의 `ar=` 값 중 최솟값이 문턱을 넘어야 한다.
+**5.4 계수율은 ADC 별 최솟값과 최댓값으로 본다.** 한 보드만 죽으면 합도
+평균도 멀쩡해 보인다 (08-20 장애). 반대로 전원 재투입 뒤 트리거 설정이 날아가면
+모든 ADC 가 20 배가 된다(23,527 Hz, §11.119) — `recover_max_rate`(20000) 위는 불합격.
 
-**5.5 확인 런 없이 '복구됐다'고 하지 않는다.** 보드가 `lsusb` 에 다시 보이는
-것만으로는 부족하다. 걸린 보드도 등록은 된다. 3분짜리 런을 실제로 돌려
-① 종료코드 0 ② 그 런의 로그에 USB 오류 0건 ③ FADC 산출이 1 MB 이상
-④ ADC 별 계수율 최솟값이 문턱 이상 — 넷을 다 통과해야 복구로 친다.
+**5.5 확인 런 없이 '복구됐다'고 하지 않는다.** 3분짜리 런을 실제로 돌려
+① 종료코드 0 ② **TCB 로그 `is aligned` 8 줄 · `Fail to align` 0** ③ TCB·FADCDAQ·
+SADCDAQ 로그에 LIBUSB·TIMEOUT·OVERFLOW 0 건 (**마감 읽기 포함** — 마감 TIMEOUT 뒤
+다음 부팅은 OVERFLOW 로 죽는다, §11.223) ④ FADC 산출 1 MB 이상 ⑤ 계수율 범위 —
+다섯을 다 통과해야 복구로 친다. 계수가 나와도 DRAM 이 안 맞은 채일 수 있다
+(§11.171 · §11.208). 확인 런 로그 셋은 `/Data/LOG/usb-recover-<시각>.d/` 에 남는다.
 확인 런은 `--no-db --run 999999` 로 돌아 **런 카탈로그를 더럽히지 않는다.**
+
+**5.5a 시도 사이에 고아를 치운다.** 실패한 확인 런은 `daq`·`tcb` 를 남겨 포트를
+잡는다. 치우지 않으면 다음 시도가 전부 포트 가드에 걸려 헛돈다. 시도마다
+`scripts/killdaq.sh -b <bindir>` 뒤 프로세스·포트가 비었는지 다시 본다.
+
+**5.5b 전원 재투입은 상한이 있다.** 복구 호출당 1 회, `recover_power_window_h`(6) 시간에
+`recover_power_max`(2) 회. 기록은 `recover_power_state` 에 한 줄씩(시도 전에 적는다 —
+도중에 실패해도 센다). 상한에 닿으면 `recovery_failed` 로 사람을 부른다. 감시자가
+기다리는 중이므로 `pdu-power.sh` 에는 `--allow-supervisor` 를 준다 — rcsupervisor
+만 예외이고 rcterm·daq·tcb·merger 가 살아 있으면 그대로 거부한다.
+**키가 없으면 0(꺼짐)이다** — `git pull` 만으로 전원을 내리기 시작하면 안 된다.
 
 **5.6 알림 실패가 감시자를 끌고 내려가면 안 된다.** `Notify()` 는 백그라운드로
 던지고 결과를 보지 않는다. 메일이 안 나가는 것보다 수집이 멎는 것이 나쁘다.
@@ -276,3 +299,17 @@ DAQ 옆에서 시험할 때는 반드시 그렇게 할 것.
 
 **아직 실전에서 확인하지 못한 것** — 실제 보드가 걸린 상태에서의
 `usbreset` 자동 복구. 다음에 같은 장애가 나야 확인된다.
+
+### 2026-11-05 다시 짠 뒤의 시험
+
+`tests/usb-recover.test.sh` (83 건) — `USBRECOVER_TEST_HOOK` 으로 usbreset · lsusb ·
+rcterm · pdu-power · NOTICE · killdaq · sleep · pgrep · ss · dmesg 를 전부 갈아끼운다.
+DAQ 로그 픽스처는 실물(`tests/fixtures/usb-recover/`). 옮겨진 로그 탐색 · 패턴 ·
+고아 정리 · usbreset 횟수 · DRAM/마감 TIMEOUT/상한 불합격 · 전원 단계 순서 · 상한 state ·
+`--dry-run` 무접촉 · `--force-power-cycle` · NOTICE timeout 중단. **실물 전원 단계는
+아직 한 번도 돌지 않았다** — 수집 대기 중 사용자 승인 뒤 한 번 볼 것.
+
+```bash
+scripts/usb-recover.sh --diagnose --runs 4424,4427        # 읽기 전용
+scripts/usb-recover.sh --dry-run --force-power-cycle      # 계획만. PDU·usbreset·rcterm 0 회
+```

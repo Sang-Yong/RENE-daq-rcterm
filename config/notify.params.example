@@ -95,17 +95,32 @@ mail_min_interval   = 300
 # ---- 자동 USB 복구 --------------------------------------------------
 #  감시자가 연속 실패 한계(--max-consec-fail, 기본 5)에 닿았을 때
 #  포기하기 전에 scripts/usb-recover.sh 를 한 번 부른다.
+#  순서 : 진단 -> [usbreset 2 회 연속 + 확인 런] x recover_max_try -> (안 되면) PDU 전원 재투입
 recover_enable      = 1
-recover_max_try     = 2       # usbreset 을 최대 몇 번까지 시도할까 (사용자 지침: 최소 2)
+recover_max_try     = 3       # usbreset 단계 시도 수. 시도마다 고아 정리 + usbreset 2 회 연속 + 확인 런
+recover_resets_per_try = 2    # 시도당 usbreset 횟수 (2~3 회째에 DRAM 이 맞았다, §11.130·171·224·225)
 recover_settle_sec  = 15      # 리셋 뒤 보드가 다시 잡힐 때까지 기다리는 시간 [초]
 recover_check_min   = 0.05    # 확인 런 길이 [시간]. 0.05 = 3분
 recover_check_run   = 999999  # 확인 런에 쓸 번호. 카탈로그를 더럽히지 않으려고 --no-db 로 돈다
-recover_min_rate    = 500     # 확인 런의 ADC 별 계수율이 이 [Hz] 를 넘어야 정상으로 본다
-                              # ★ 합이 아니라 최솟값을 본다. 한 보드만 죽으면
-                              #   합·평균은 멀쩡해 보인다 (이번 장애가 그 모양이었다)
-recover_log_age_min = 60      # 최근 이 시간[분] 안에 쓰인 DAQ 로그만 진단에 쓴다.
-                              # 옛 장애의 로그를 근거로 오진하지 않기 위해서다
+recover_check_params =        # 확인 런 rcterm params. 비우면 config/rcterm.params
+                              # (낮에 포화하는 설정이면 낮은 문턱의 다른 파일을 줄 것, §11.227)
+recover_min_rate    = 500     # 확인 런의 ADC 별 계수율 최솟값이 이 [Hz] 이상이어야 정상
+                              # ★ 합이 아니라 최솟값을 본다. 한 보드만 죽으면 합·평균은 멀쩡해 보인다
+                              # ★ 운영 값은 100 (2026-09-14 veto 문턱 조정 뒤 정상 ~300 Hz, §11.196)
+recover_max_rate    = 20000   # 최댓값이 이 [Hz] 를 넘으면 불합격 (설정 소실 23,527 Hz · 포화 42 kHz)
+recover_log_age_min = 60      # rcterm.log 의 'booting run' 줄과 dmesg 를 최근 이 [분] 만큼 본다.
+                              # 그 런들의 DAQ 로그는 /Data_ssd/LOG -> /scratch/DAQ_LOG/RAW_log{,.old*} 에서 찾는다
+recover_scan_runs   = 6       # 최근 실패 런을 몇 개까지 볼까
 recover_keep_data   = 0       # 1 이면 확인 런의 파일을 남긴다. 0 이면 지운다
+#  ★ 전원 재투입 단계 (§11.224 순서, 2026-11-05 사용자 결정 : 완전 자동화)
+#    killdaq -> pdu-power.sh cycle --allow-supervisor -> 보드 3 종 90 s -> NOTICE_CODE_RUN.sh
+#    -> usbreset 2 회 -> 10 s 더미 런 -> 확인 런 (실패하면 usbreset 1 회 + 확인 런 2 회 더)
+#    config/pdu.params (0600) 가 있어야 한다. 키가 없으면 0 = 하지 않는다
+recover_power_cycle = 1
+recover_power_max   = 2       # recover_power_window_h 시간에 최대 몇 번 (복구 호출당은 언제나 1 번)
+recover_power_window_h = 6
+recover_power_state = /Data_ssd/LOG/usb-recover.power.state   # 한 줄 = 한 번 (epoch 시각)
+recover_notice_timeout = 120  # NOTICE_CODE_RUN.sh 제한 [s]. TCB 가 멈추면 출력 없이 매달린다 (§11.225)
 
 # ---- 후처리 사슬 감시 (scripts/chainwatch.sh) ------------------------
 #  cron 이 5분마다 부른다 :
