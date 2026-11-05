@@ -57,7 +57,7 @@ export CHAINWATCH_LOCK=$T/.lock CHAINWATCH_TMUX=$T/bin/tmux CHAINWATCH_PGREP=$T/
        CHAINWATCH_KILL=$T/bin/kill CHAINWATCH_MOUNTPOINT=$T/bin/mountpoint CHAINWATCH_PS=$T/ps.txt \
        CHAINWATCH_DF_FILE=$T/df.txt CHAINWATCH_SUPLOG=$T/sup.log CHAINWATCH_PROC=$T/proc \
        CHAINWATCH_DAQTMUX=$T/bin/daqtmux CHAINWATCH_RCTERM_PARAMS=$T/rcterm.params \
-       CHAINWATCH_IDLE_PIDS="101 102 103 104 105" CHAINWATCH_HOLD=$T/hold NETSYNC_STATE=$T/netsync.state NOTIFY_LOG=$T/notify.log
+       CHAINWATCH_IDLE_PIDS="101 102 103 104 105" CHAINWATCH_HOLD=$T/hold CHAINWATCH_BTIME=0 NETSYNC_STATE=$T/netsync.state NOTIFY_LOG=$T/notify.log
 P=$T/cw.params
 printf 'chain_ssd_root = %s\nchain_mid_root = %s\nchain_min_rate = 100\n' "$T/ssd" "$T/mid" > "$P"
 HB=$T/rcterm.hb; ST=$T/state; LOG=$T/cw.log
@@ -227,6 +227,20 @@ fresh; hb 4372 10 0 0 ended; : > "$T/alive"; printf '%s [SUP] health OK  run=437
 check "사라진 지 5 분이면 재기동 안 함"            '[ ! -s "$T/tmux.calls" ]'
 fresh; hb 4432 10 0 0 ended; : > "$T/alive"; head -9 "$FX/rcsupervisor_stop_20261105.txt" > "$T/sup.log"; run
 check "'stop requested' 뒤에 죽었으면 사람이 세운 것 (조용)" '[ ! -s "$T/notify.calls" ] && [ ! -s "$T/tmux.calls" ]'
+
+echo "[R3d] 정전·재부팅 : 감시자가 이번 부팅 전에 끝났으면 알림만 (리뷰어 재현 입력)"
+fresh; hb 4416 10 0 0 ended; : > "$T/alive"
+printf '2026-11-01 14:39:02 [SUP] health OK  run=4416 sub=789 state=Running totev=17000000\n' > "$T/sup.log"
+CHAINWATCH_BTIME=$(date -d '2026-11-02 00:02:07' +%s) run
+check "supervisor_down 알림은 간다"                 'grep -q " supervisor_down --" "$T/notify.calls"'
+check "재기동 안 함 (맨 프롬프트 · hold 없음인데도)" '[ ! -s "$T/tmux.calls" ] && [ ! -e "$T/hold" ]'
+check "사유에 이번 부팅 전"                         'grep -q "이번 부팅(2026-11-02 00:02:07) 전에 끝났다" "$T/notify.calls"'
+fresh; hb 4427 10 0 0 ended; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"
+CHAINWATCH_BTIME=$(date -d '2026-11-04 00:00:00' +%s) run
+check "FATAL 도 부팅 전이면 재기동 안 함"           '[ ! -s "$T/tmux.calls" ]'
+fresh; hb 4427 10 0 0 ended; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"
+CHAINWATCH_BTIME=$(date -d '2026-11-01 00:00:00' +%s) run
+check "부팅 뒤에 끝난 FATAL 은 재기동"              'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
 
 echo "[R4] 감시자 대기(standby) : <heartbeat>.sup 기준, 없으면 rcterm.hb 의 phase=standby"
 fresh; hb 4433 6000 40000 40000; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"

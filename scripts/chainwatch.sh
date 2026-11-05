@@ -69,6 +69,8 @@ SESSION=${CHAINWATCH_SESSION:-daq}
 #  ★ 멈춤 파일. 사람이 손으로 작업하는 동안 이것을 만들어 두면 pane 자동 재기동(D-3 · D-4)을 하지 않는다.
 #    알림은 그대로 나간다.   touch /Data_ssd/LOG/chainwatch.hold   ...   rm /Data_ssd/LOG/chainwatch.hold
 HOLD=${CHAINWATCH_HOLD:-/Data_ssd/LOG/chainwatch.hold}
+#  이번 부팅 시각. 감시자가 이보다 먼저 끝났으면 정전·재부팅으로 끝난 것이다 -> 다시 띄우지 않는다 (CLAUDE.md 10, 11.225)
+BOOT_EPOCH=${CHAINWATCH_BTIME:-$(awk '$1 == "btime" { print $2 }' /proc/stat 2>/dev/null)}
 SUP_HB=${CHAINWATCH_SUP_HB:-}         # 감시자 대기 상태 파일. 비면 <heartbeat>.sup
 #  pane 의 마지막 줄이 '맨 프롬프트' 인가 (끝이 $ # > 이고 그 뒤에 친 글자가 없다)
 PROMPT_RE=${CHAINWATCH_PROMPT_RE:-'[$#>]$'}
@@ -575,6 +577,14 @@ sup_autorestart() {
    [ "$SUP_AUTORESTART" = 1 ] || { RESTART_MSG="자동 재기동 꺼짐 (chain_sup_autorestart=0)"; return 0; }
    [ -e "$HOLD" ] && { RESTART_MSG="멈춤 파일이 있다 ($HOLD) -- 사람이 작업 중. 다시 띄우지 않았다"; return 0; }
    t=$(supline_epoch "$SUPDOWN")
+   #  ★ 감시자가 이번 부팅 전에 끝났다 = 정전·재부팅. PC 만 켜졌다고 수집을 띄우지 않는다 -- 저장소 IPv4 ·
+   #    HV 망 · 보드 전원(TCB TIMEOUT) · HV 채널이 따로 복구 대상이다 (§10, §11.225). FATAL 이든 사라짐이든 알림만
+   case "$BOOT_EPOCH" in ''|*[!0-9]*) ;; *)
+      if [ -n "$t" ] && [ "$t" -lt "$BOOT_EPOCH" ]; then
+         RESTART_MSG="감시자가 이번 부팅($(date -d @"$BOOT_EPOCH" '+%F %T')) 전에 끝났다 -- 정전·재부팅 뒤라 다시 띄우지 않는다. 저장소·HV 망·보드 전원·HV 를 확인한 뒤 사람이 띄울 것 (CLAUDE.md 10)"
+         return 0
+      fi ;;
+   esac
    if [ -n "$t" ]; then
       age=$(( $(date +%s) - t ))
       [ "$age" -ge $(( SUP_RESTART_AFTER_MIN * 60 )) ] || { RESTART_MSG="감시자가 끝난 지 $(( age / 60 ))분 -- ${SUP_RESTART_AFTER_MIN}분이 지나야 다시 띄운다 (사람이 손대는 중일 수 있다)"; return 0; }

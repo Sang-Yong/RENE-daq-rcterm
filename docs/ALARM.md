@@ -92,6 +92,8 @@ touch /Data_ssd/LOG/chainwatch.hold      # 작업 시작
 rm    /Data_ssd/LOG/chainwatch.hold      # 작업 끝 -- 잊으면 자동 재기동이 영영 꺼진 채다. --status 에 ★ 로 보인다
 ```
 
+**★ 감시자가 이번 부팅 전에 끝났으면(정전·재부팅) FATAL 이든 사라짐이든 알림만 보내고 다시 띄우지 않는다** (`/proc/stat` 의 btime 과 마지막 `[SUP]` 줄 시각 비교). PC 만 켜졌다고 수집을 띄우지 말 것 — 저장소·HV 망·보드 전원·HV 가 따로 복구 대상이다 (CLAUDE.md §10 · §11.225).
+
 **pane 에 명령을 치기 전에** 그 pane 의 마지막 줄이 맨 프롬프트(끝이 `$ # >`)인지 `capture-pane` 으로 본다. 사람이 쳐 두고
 Enter 를 안 친 글자가 있으면 손대지 않는다 — 안 그러면 그 뒤에 명령이 이어 붙는다(리뷰 재현 `ran.txtecho …`). 맨 프롬프트여도
 `C-a C-k` 로 줄을 한 번 비운 뒤 친다.
