@@ -31,6 +31,7 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$ROOT"' EXIT
 #    CLOSE_TIMEOUT=1     TERM 받을 때 FADCDAQ 로그에 LIBUSB_ERROR_TIMEOUT
 #    REAL_TCB=<파일>     TCB 로그를 실물 사본으로 (tests/fixtures/supervisor-logs)
 #    REAL_FADC=<파일>    FADCDAQ 로그를 실물 사본으로
+#    NOHB=1              heartbeat 도 로그도 쓰지 않고 곧바로 EXIT (실물 rcterm 의 Init 단계 exit 1)
 cat > "$ROOT/fake_rcterm.sh" <<'FAKE'
 #!/usr/bin/env bash
 HB=""; RUN=0; DRY=0
@@ -50,6 +51,7 @@ fi
 echo "$RUN" >> "$D/launches"
 EXIT=""; LIFE=0; ALIGNED=8; FAIL=0; USB=0; SR=100; CLOSE_TIMEOUT=0; REAL_TCB=""; REAL_FADC=""
 [ -r "$D/plan/$RUN" ] && . "$D/plan/$RUN"
+[ "${NOHB:-0}" = 1 ] && exit "${EXIT:-1}"
 R6=$(printf '%06d' "$RUN")
 L=$D/daqlog
 { for i in $(seq 0 $((ALIGNED-1))); do echo "DRAM($i) is aligned, delay = 5, bitslip = 0"; done
@@ -129,24 +131,36 @@ stop_sup() { kill -TERM "$SPID" 2>/dev/null; local i=0; while kill -0 "$SPID" 2>
 nlaunch() { [ -r "$D/launches" ] && wc -l < "$D/launches" || echo 0; }
 ncalls()  { [ -r "$D/recover.calls" ] && wc -l < "$D/recover.calls" || echo 0; }
 
-echo "== [1] rcterm exit 1 -> 재시작 없음 + standby(config) -> dry-run 통과 뒤 재개 -> SIGTERM exit 0"
+echo "== [1] rcterm exit 1 (Init, hb 안 씀) -> 재시작 없음 + standby(config) -> rcterm.hb 무접촉 -> 재개 -> SIGTERM exit 0"
 start s1 --run-length 1
-echo "EXIT=1 LIFE=0" > "$D/plan/100"
+# 직전 런 4432 가 1 시간 전에 정상으로 끝나 남긴 heartbeat (실물 모양)
+OLD=$(( $(date +%s) - 3600 ))
+printf 'time=%s\npid=11111\nphase=ended\nrun=4432\nsubrun=1372\nstate=RunEnd\nstatebit=5\nerror=0\n' $OLD > "$D/hb"
+HBSUM=$(md5sum < "$D/hb")
+echo "EXIT=1 NOHB=1" > "$D/plan/100"
 echo 1 > "$D/dryrun_rc"
 waitfor 10 'grep -q "STANDBY (config)" "$D/sup.log"'
 chk "exit 1 에서 standby(config)" 'grep -q "STANDBY (config)" "$D/sup.log"'
 chk "fatal 알림 'config error, restart pointless'" 'grep -q "^fatal .*config error, restart pointless" "$D/notify.log"'
 chk "restart 알림 없음" '! grep -q "^restart" "$D/notify.log"'
-chk "heartbeat phase=standby" 'grep -q "^phase=standby$" "$D/hb"'
-chk "heartbeat pid = 감시자 pid" 'grep -q "^pid=$SPID$" "$D/hb"'
-chk "heartbeat 다른 키 유지 (run=100)" 'grep -q "^run=100$" "$D/hb"'
+waitfor 5 '[ -s "$D/hb.sup" ]'
+chk "대기 상태는 hb.sup : phase=standby" 'grep -q "^phase=standby$" "$D/hb.sup"'
+chk "hb.sup pid = 감시자 pid" 'grep -q "^pid=$SPID$" "$D/hb.sup"'
+chk "hb.sup standby=config" 'grep -q "^standby=config$" "$D/hb.sup"'
+sleep 2
+chk "★ rcterm.hb 는 한 바이트도 안 바뀜 (time 1 h 전 그대로)" '[ "$(md5sum < "$D/hb")" = "$HBSUM" ]'
+( HB=$D/hb; eval "$(sed -n '/^hb_field()/p;/^hb_age()/p' "$REPO/scripts/dataflow.sh")"
+  eval "$(sed -n '/^is_acquiring()/,/^}/p' "$REPO/scripts/dataflow.sh")"
+  ! is_acquiring 004432 ) && ok "dataflow is_acquiring : run 4432 은 수집 중이 아니다 (리뷰 R4b)" || bad "dataflow 가 4432 를 수집 중으로 본다"
 waitfor 8 '[ -r "$D/dryruns" ]'
 chk "대기 중 dry-run 으로 확인" '[ -r "$D/dryruns" ]'
 chk "dry-run 실패 동안 런 1 개만" '[ "$(nlaunch)" = 1 ]'
 echo 0 > "$D/dryrun_rc"
 waitfor 10 '[ "$(nlaunch)" -ge 2 ]'
 chk "dry-run 통과 -> 재개 (run 101)" 'grep -qx 101 "$D/launches"'
-chk "recovered 알림" 'grep -q "^recovered" "$D/notify.log"'
+chk "재개하면 hb.sup 를 지운다" '[ ! -e "$D/hb.sup" ]'
+waitfor 10 'grep -q "^recovered" "$D/notify.log"'
+chk "recovered 는 확인 런의 부팅·DRAM 점검 뒤" 'grep -q "^recovered" "$D/notify.log" && [ "$(grep -n "DRAM check run=101" "$D/sup.log" | cut -d: -f1)" -lt "$(grep -n "notify: recovered" "$D/sup.log" | cut -d: -f1)" ]'
 chk "standby_retry 알림" 'grep -q "^standby_retry" "$D/notify.log"'
 stop_sup
 chk "SIGTERM -> exit 0" '[ "$RC" = 0 ]'
@@ -206,10 +220,20 @@ for r in 100 101 102; do echo "SR=50000" > "$D/plan/$r"; done
 waitfor 40 'grep -q "STANDBY (rate)" "$D/sup.log"'
 chk "세 번째 마감에서 standby(rate)" 'grep -q "3 rate stops within 7200 s; entering standby" "$D/sup.log"'
 chk "fatal 알림 1 회" '[ "$(grep -c "^fatal" "$D/notify.log")" = 1 ]'
-chk "heartbeat phase=standby (rate)" 'grep -q "^standby=rate$" "$D/hb"'
+chk "hb.sup standby=rate" 'grep -q "^standby=rate$" "$D/hb.sup"'
 waitfor 10 'grep -qx 103 "$D/launches"'
 chk "retry 뒤 run 103 재개" 'grep -qx 103 "$D/launches"'
-chk "recovered 알림" 'grep -q "^recovered" "$D/notify.log"'
+waitfor 10 'grep -q "^recovered" "$D/notify.log"'
+chk "recovered 는 run 103 의 DRAM 점검 뒤" '[ "$(grep -n "DRAM check run=103" "$D/sup.log" | cut -d: -f1)" -lt "$(grep -n "notify: recovered" "$D/sup.log" | cut -d: -f1)" ]'
+stop_sup
+
+echo "== [7b] (리뷰 R3) 확인 런도 폭주 -> 첫 마감에서 바로 standby, fatal 은 한 번"
+start s7b --run-length 1 --rate-stop-limit 3 --rate-window 7200
+for r in $(seq 100 110); do echo "SR=50000" > "$D/plan/$r"; done
+waitfor 60 '[ "$(grep -c "STANDBY (rate)" "$D/sup.log")" -ge 2 ]'
+chk "standby 두 번 사이 확인 런 1 개 (launches 4)" '[ "$(nlaunch)" = 4 ]'
+chk "fatal 은 한 번" '[ "$(grep -c "^fatal" "$D/notify.log")" = 1 ]'
+chk "recovered 없음 (확인 런이 통과하지 못함)" '! grep -q "^recovered" "$D/notify.log"'
 stop_sup
 
 echo "== [8] 연속 실패 한도 + recover 실패 -> standby(hardware) -> recover 성공 -> 재개"
@@ -234,6 +258,17 @@ for r in 100 101 102 103; do echo "EXIT=2 LIFE=1" > "$D/plan/$r"; done
 echo 1 > "$D/recover_rc"        # not-usb -> probe 재개
 waitfor 30 '[ "$(grep -c "STANDBY (hardware)" "$D/sup.log")" -ge 2 ]'
 chk "probe 1 런 뒤 다시 standby" '[ "$(grep -c "STANDBY (hardware)" "$D/sup.log")" -ge 2 ] && [ "$(nlaunch)" = 4 ]'
+chk "recover 는 한도 1 + 대기 1 = 2 (확인 런 실패에 또 안 부름)" '[ "$(ncalls)" = 2 ]'
+stop_sup
+
+echo "== [9b] (리뷰 R5) 대기 recover 1 + 확인 런마다 USB 서명 -> 재시도당 recover 1 회"
+start s9b --run-length 1 --max-consec-fail 2 --standby-retry-min 0.05
+for r in $(seq 100 110); do echo "EXIT=2 LIFE=1 USB=1" > "$D/plan/$r"; done
+echo 1 > "$D/recover_rc"
+waitfor 40 '[ "$(grep -c "STANDBY (hardware)" "$D/sup.log")" -ge 3 ]'
+kill -STOP "$SPID"; N3=$(ncalls); L3=$(nlaunch); kill -CONT "$SPID"
+chk "STANDBY 3 번에 recover 4 (조기 1 + 한도 1 + 재시도 2), 런 4" '[ "$N3" = 4 ] && [ "$L3" = 4 ]'
+chk "recover 가 이미 알렸으므로 fatal 없음" '! grep -q "^fatal" "$D/notify.log"'
 stop_sup
 
 echo "== [10] SIGUSR1 -> 정상 마감 -> cooldown -> 재기동"
@@ -246,6 +281,28 @@ chk "SIGUSR1 기록" 'grep -q "SIGUSR1 : ending the current run gracefully" "$D/
 chk "run 100 exit 0 (SIGUSR1)" 'grep -q "cycle 1 finished : exit=code 0  (SIGUSR1)" "$D/sup.log"'
 chk "run 101 재기동" 'grep -qx 101 "$D/launches"'
 chk "rate_high 알림 없음 (보낸 쪽이 알린다)" '! grep -q "^rate_high" "$D/notify.log"'
+stop_sup
+
+echo "== [10b] (리뷰 R1) SIGUSR1 3 번 -> standby 아님, fatal 없음"
+start s10b --run-length 1
+for i in 1 2 3; do
+   waitfor 15 '[ "$(nlaunch)" -ge '$i' ] && grep -q "^phase=running" "$D/hb" && grep -q "^run=$((99+i))$" "$D/hb"'
+   sleep 1.5; kill -USR1 "$SPID"
+done
+waitfor 15 '[ "$(nlaunch)" -ge 4 ]'
+chk "런 4 개 (100~103), standby 없음" '[ "$(nlaunch)" = 4 ] && ! grep -q STANDBY "$D/sup.log"'
+chk "fatal 없음" '! grep -q "^fatal" "$D/notify.log"'
+stop_sup
+
+echo "== [10c] cooldown 중 온 SIGUSR1 은 다음 런을 죽이지 않는다"
+start s10c --run-length 1 --rate-cooldown 3
+waitfor 10 'grep -q "^phase=running" "$D/hb"'
+sleep 1; kill -USR1 "$SPID"
+waitfor 10 'grep -q "cooldown 3 s" "$D/sup.log"'
+sleep 1; kill -USR1 "$SPID"            # cooldown 중
+waitfor 10 '[ "$(nlaunch)" -ge 2 ]'
+sleep 4
+chk "run 101 이 4 초 넘게 산다 (SIGUSR1 마감 1 번뿐)" '[ "$(grep -c "(SIGUSR1)" "$D/sup.log")" = 1 ] && [ "$(nlaunch)" = 2 ]'
 stop_sup
 
 echo "== [11] 정상 로테이션 회귀 (테스트 H 상당)"

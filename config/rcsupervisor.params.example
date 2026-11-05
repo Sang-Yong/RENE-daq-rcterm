@@ -59,8 +59,10 @@ recover-cmd   = /home/frontend/DAQ/RENE-daq-rcterm/scripts/usb-recover.sh
 
 # ---- 자율 복구 (2026-11-05 추가) --------------------------------------
 #  사람 손 없이 돈다. 감시자는 포기(FATAL)하지 않고 대기-재시도(standby)로 남는다.
-#  대기 중에는 heartbeat 를 phase=standby (pid = 감시자) 로 쓴다. SIGTERM 으로만 멈춘다.
-#  SIGUSR1 = 지금 런을 정상 마감하고 rate-cooldown 뒤 재기동 (chainwatch 가 보낸다).
+#  대기 상태는 <heartbeat>.sup 에 쓴다 (phase=standby, pid = 감시자). rcterm.hb 는 건드리지 않는다.
+#  SIGTERM 으로만 멈춘다.
+#  SIGUSR1 = 지금 런을 정상 마감하고 rate-cooldown 뒤 재기동 (chainwatch 가 보낼 수 있다).
+#            rate-stop-limit 에는 세지 않는다.
 standby-retry-min = 60        # 대기 중 재시도 주기 [분]
                               #  config(exit 1) : rcterm --dry-run 이 통과하면 재개
                               #  hardware       : recover-cmd 0 이면 재개, 1 이면 확인 런 1 개

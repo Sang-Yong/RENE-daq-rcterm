@@ -431,40 +431,35 @@ static double MaxSR(const std::map<std::string, std::string>& hb)
    return mx;
 }
 
-//  대기 중에는 감시자가 heartbeat 를 쓴다 (chainwatch 가 phase=standby 로 읽는다).
-//  다른 키는 순서까지 그대로 두고 time / pid / phase 만 바꾼다. 원자적 rename.
-static void WriteStandbyHB(const Sup& c, const std::string& kind)
+//  대기 상태는 rcterm.hb 가 아니라 별도 파일 <heartbeat>.sup 에 쓴다.
+//  ★ rcterm.hb 의 time= 를 갱신하면 dataflow · postrun · badrun · websummary 가
+//    마지막 런을 '수집 중' 으로 보고 꼬리 처리·이동을 무기한 막는다 (리뷰 2026-11-05).
+//    그래서 rcterm.hb 는 한 바이트도 건드리지 않는다.
+static std::string SupStatePath(const Sup& c) { return c.heartbeat + ".sup"; }
+
+static void WriteSupState(const Sup& c, const std::string& kind,
+                          const std::string& run, time_t since)
 {
    if (c.heartbeat.empty() || c.dryRun) return;
-   std::vector<std::pair<std::string, std::string> > kv;
-   {
-      std::ifstream fp(c.heartbeat.c_str());
-      std::string line;
-      while (fp.is_open() && std::getline(fp, line)) {
-         const size_t eq = line.find('=');
-         if (eq == std::string::npos) continue;
-         kv.push_back(std::make_pair(Trim(line.substr(0, eq)), Trim(line.substr(eq + 1))));
-      }
-   }
-   const char* must[] = {"time", "pid", "phase", "standby", 0};
-   for (int i = 0; must[i]; ++i) {
-      bool found = false;
-      for (size_t j = 0; j < kv.size(); ++j) if (kv[j].first == must[i]) found = true;
-      if (!found) kv.push_back(std::make_pair(std::string(must[i]), std::string()));
-   }
-   for (size_t j = 0; j < kv.size(); ++j) {
-      if      (kv[j].first == "time")    kv[j].second = std::to_string((long long)time(0));
-      else if (kv[j].first == "pid")     kv[j].second = std::to_string((long long)::getpid());
-      else if (kv[j].first == "phase")   kv[j].second = "standby";
-      else if (kv[j].first == "standby") kv[j].second = kind;
-   }
-   const std::string tmp = c.heartbeat + ".sup.tmp";
+   const std::string path = SupStatePath(c);
+   const std::string tmp  = path + ".tmp";
    {
       std::ofstream o(tmp.c_str());
       if (!o.is_open()) return;
-      for (size_t j = 0; j < kv.size(); ++j) o << kv[j].first << "=" << kv[j].second << "\n";
+      o << "time="    << (long long)time(0)     << "\n"
+        << "pid="     << (long long)::getpid()  << "\n"
+        << "phase=standby\n"
+        << "standby=" << kind                   << "\n"
+        << "run="     << run                    << "\n"
+        << "since="   << (long long)since       << "\n";
    }
-   ::rename(tmp.c_str(), c.heartbeat.c_str());
+   ::rename(tmp.c_str(), path.c_str());
+}
+
+static void ClearSupState(const Sup& c)
+{
+   if (c.heartbeat.empty() || c.dryRun) return;
+   ::unlink(SupStatePath(c).c_str());
 }
 
 // ============================================================== 진단
@@ -590,57 +585,61 @@ static const char* SBName(int k)
    return k == SB_CONFIG ? "config" : k == SB_HARDWARE ? "hardware" : k == SB_RATE ? "rate" : "none";
 }
 
-//  0 = SIGTERM 으로 끝남 / 1 = 재개 / 2 = 재개 (복구 스크립트가 이미 recovered 를 알렸다)
-static int Standby(const Sup& c, int kind, const std::string& run, int runProbe)
+//  0 = SIGTERM 으로 끝남
+//  1 = 재개 (확인 런, recover 를 부르지 않았다)
+//  2 = 재개 (recover 0 : 복구 스크립트가 recovered 를 이미 알렸다)
+//  3 = 재개 (recover 1 : 확인 런. recover 를 막 불렀으므로 그 런이 실패해도 또 부르지 않는다)
+//  what 에는 무엇으로 재개했는지가 담긴다 (확인 런이 통과한 뒤의 recovered 본문)
+static int Standby(const Sup& c, int kind, const std::string& run, int runProbe,
+                   std::string& whatOut)
 {
    const double retrySec = c.standbyRetryMin * 60.0;
+   const time_t since = time(0);
    char b[256];
    snprintf(b, sizeof(b), "STANDBY (%s) : retry every %.1f min; SIGTERM to stop",
             SBName(kind), c.standbyRetryMin);
    Log(b);
-   WriteStandbyHB(c, SBName(kind));
+   WriteSupState(c, SBName(kind), run, since);
    time_t next = time(0) + (time_t)retrySec;
    int nTry = 0;
    while (!gStop) {
       const double left = (double)(next - time(0));
       SleepFor(left < 60 ? (left > 0 ? left : 0.2) : 60);
       if (gStop) break;
-      WriteStandbyHB(c, SBName(kind));
+      WriteSupState(c, SBName(kind), run, since);
       if (gUsr1) { gUsr1 = 0; Log("SIGUSR1 ignored while in standby"); }
       if (time(0) < next) continue;
       next = time(0) + (time_t)retrySec;
       ++nTry;
 
-      bool resume = false, viaRecover = false;
+      int how = 0;
       std::string what;
       if (kind == SB_CONFIG) {
          int rc = -1;
-         resume = ConfigDryRunOK(c, runProbe, rc);
+         if (ConfigDryRunOK(c, runProbe, rc)) how = 1;
          what = "rcterm --dry-run returned " + std::to_string(rc);
       } else if (kind == SB_HARDWARE && c.autoRecover && !c.recoverCmd.empty()) {
          const int rrc = RunRecover(c);
          what = "recover returned " + std::to_string(rrc);
-         if (rrc == 0) { resume = true; viaRecover = true; }
-         else if (rrc == 1) { resume = true; what += " (not usb : one probe run)"; }
+         if (rrc == 0) how = 2;
+         else if (rrc == 1) { how = 3; what += " (not usb : one probe run)"; }
       } else {
-         resume = true;
+         how = 1;
          what = "probe run";
       }
       snprintf(b, sizeof(b), "standby retry #%d (%s) : %s -> %s",
-               nTry, SBName(kind), what.c_str(), resume ? "resume" : "stay");
+               nTry, SBName(kind), what.c_str(), how ? "resume" : "stay");
       Log(b);
       Notify(c, "standby_retry", run, b);
-      if (resume) {
-         if (!viaRecover) {
-            snprintf(b, sizeof(b), "대기-재시도 모드(%s)를 벗어나 수집을 다시 시도한다 (%s)",
-                     SBName(kind), what.c_str());
-            Notify(c, "recovered", run, b);
-         }
+      if (how) {
+         whatOut = what;
          Log(std::string("leaving standby (") + SBName(kind) + ")");
-         return viaRecover ? 2 : 1;
+         ClearSupState(c);
+         return how;
       }
-      WriteStandbyHB(c, SBName(kind));
+      WriteSupState(c, SBName(kind), run, since);
    }
+   ClearSupState(c);
    return 0;
 }
 
@@ -857,6 +856,9 @@ int main(int argc, char** argv)
          std::cerr << "[WARN] cannot open log : " << c.logFile << std::endl;
    }
 
+   // 지난 감시자가 죽으며 남긴 대기 상태 파일을 지운다 (지금은 대기가 아니다)
+   ClearSupState(c);
+
    ::signal(SIGINT,  OnSig);
    ::signal(SIGTERM, OnSig);
    ::signal(SIGUSR1, OnUsr1);
@@ -910,19 +912,46 @@ int main(int argc, char** argv)
    int cycle = 0, consecFail = 0, nRestart = 0;
    int  standby      = SB_NONE;          // 지금 대기 중인가, 무슨 까닭인가
    bool earlyTried   = false;            // 이번 실패 연쇄에서 조기 복구를 이미 불렀나
-   std::deque<time_t> rateStops;         // 계수율 때문에 마감한 시각
+   std::deque<time_t> rateStops;         // 계수율 때문에 마감한 시각 (SIGUSR1 은 넣지 않는다)
    std::string lastRun;                  // 마지막으로 본 run 번호 (알림용)
+   bool fatalSent     = false;           // 한 사건 연쇄에 fatal 은 한 번 (건강한 런이 나오면 풀린다)
+   bool pendingRecov  = false;           // 대기에서 재개한 확인 런이 부팅을 통과하면 recovered
+   std::string pendingWhat;
+   bool skipNextLimitRecover = false;    // 대기에서 막 recover 를 불렀다 -> 확인 런 실패에 또 부르지 않는다
+
+   //  fatal 을 한 연쇄에 한 번만 낸다 (전문가 목록이 받는 메일이다)
+   auto FatalOnce = [&](const std::string& run, const std::string& msg) {
+      if (fatalSent) { Log("fatal already reported in this incident; not repeated"); return; }
+      fatalSent = true;
+      Notify(c, "fatal", run, msg);
+   };
 
    while (!gStop) {
       // ---- 대기-재시도 모드 ----------------------------------------------
       if (standby != SB_NONE) {
          const int runProbe = c.startRun + cycle;      // --no-db 일 때 dry-run 에 쓸 번호
-         const int how = Standby(c, standby, lastRun, runProbe);
+         std::string what;
+         const int how = Standby(c, standby, lastRun, runProbe, what);
          if (how == 0) break;                          // SIGTERM
          if (standby == SB_CONFIG || how == 2) consecFail = 0;   // 고쳐졌다고 본다
          else consecFail = (c.maxConsecFail > 0) ? c.maxConsecFail - 1 : 0;   // 한 번만 시험
-         earlyTried = false;
-         if (standby == SB_RATE) rateStops.clear();
+         // 확인 런 : 실패하면 곧바로 대기로 돌아간다. 조기 recover 도 다시 부르지 않는다
+         earlyTried = (standby == SB_HARDWARE && how != 2);
+         skipNextLimitRecover = (how == 3);
+         if (standby == SB_RATE) {
+            // 확인 런이 다시 폭주하면 첫 마감에서 바로 대기로 (limit-1 개를 남긴다)
+            rateStops.clear();
+            const time_t t = time(0);
+            for (int k = 0; k < c.rateStopLimit - 1; ++k) rateStops.push_back(t);
+         }
+         // recover 0 이면 복구 스크립트가 이미 recovered 를 알렸다
+         if (how != 2) {
+            pendingRecov = true;
+            char pb[256];
+            snprintf(pb, sizeof(pb), "대기-재시도 모드(%s)를 벗어난 확인 런이 부팅·DRAM 점검을 통과했다 (%s)",
+                     SBName(standby), what.c_str());
+            pendingWhat = pb;
+         }
          standby = SB_NONE;
       }
 
@@ -936,8 +965,11 @@ int main(int argc, char** argv)
       //             --no-db 면 감시자가 직접 증가시킨다.
       const int runNoDB = c.startRun + (cycle - 1);
 
+      gUsr1 = 0;                       // cooldown 중에 온 SIGUSR1 이 새 런을 곧바로 죽이지 않게
       const time_t launch = time(0);
       const pid_t  pid    = SpawnRcterm(c, cycle, runNoDB);
+      const bool   limitRecoverDone = skipNextLimitRecover;
+      skipNextLimitRecover = false;
       if (c.dryRun) {
          Log("dry-run: stopping after showing the first launch");
          break;
@@ -952,7 +984,7 @@ int main(int argc, char** argv)
                return 2;
             }
             Log("too many consecutive spawn failures; entering standby");
-            Notify(c, "fatal", lastRun, "rcterm 을 띄우지 못한다 - 대기-재시도 모드로 간다");
+            FatalOnce(lastRun, "rcterm 을 띄우지 못한다 - 대기-재시도 모드로 간다");
             standby = SB_HARDWARE;
          }
          continue;
@@ -1018,9 +1050,12 @@ int main(int argc, char** argv)
          if ((double)(now - lastPoll) >= c.ratePollSec) {
             lastPoll = now;
             std::map<std::string, std::string> hb;
-            if (ReadHB(c.heartbeat, hb)
+            const bool trusted = ReadHB(c.heartbeat, hb)
                 && atoll(HBGet(hb, "pid", "0").c_str()) == (long long)pid
-                && atoll(HBGet(hb, "time", "0").c_str()) >= (long long)launch) {
+                && atoll(HBGet(hb, "time", "0").c_str()) >= (long long)launch
+                && (double)(now - (time_t)atoll(HBGet(hb, "time", "0").c_str())) < c.staleLimitSec;
+            if (!trusted) rateHits = 0;          // 못 읽은 회차는 '연속' 을 끊는다
+            if (trusted) {
                const std::string hr = HBGet(hb, "run", "");
                if (!hr.empty()) cycRun = hr;
                const bool running = HBGet(hb, "phase", "") == "running";
@@ -1074,6 +1109,16 @@ int main(int argc, char** argv)
                   } else {
                      rateHits = 0;
                   }
+               }
+
+               // 부팅·DRAM 점검을 통과했고 계수율도 상한 아래 -> 사건 연쇄가 끝났다고 본다
+               if (running && dramDone && rateHits == 0
+                   && (double)(now - launch) >= c.bootGraceSec) {
+                  if (pendingRecov) {
+                     pendingRecov = false;
+                     Notify(c, "recovered", cycRun, pendingWhat);
+                  }
+                  fatalSent = false;
                }
             }
          }
@@ -1152,7 +1197,7 @@ int main(int argc, char** argv)
             }
          }
          const time_t now = time(0);
-         rateStops.push_back(now);
+         if (rateStop) rateStops.push_back(now);      // SIGUSR1 은 세지 않는다
          while (!rateStops.empty() && (double)(now - rateStops.front()) > c.rateWindowSec)
             rateStops.pop_front();
          if ((int)rateStops.size() >= c.rateStopLimit) {
@@ -1162,7 +1207,7 @@ int main(int argc, char** argv)
             if (!c.standbyEnable) { Log("FATAL rate stops limit (no standby); giving up"); return 2; }
             snprintf(b, sizeof(b), "계수율 때문에 %.0f 분 안에 %d 번 마감 - 대기-재시도 모드로 간다",
                      c.rateWindowSec / 60.0, (int)rateStops.size());
-            Notify(c, "fatal", cycRun, b);
+            FatalOnce(cycRun, b);
             standby = SB_RATE;
             continue;
          }
@@ -1177,7 +1222,7 @@ int main(int argc, char** argv)
       // ---- S-1 : 설정 오류는 재시작해도 소용없다 ------------------------------
       if (selfExit && exitCode == 1) {
          Log("rcterm exit 1 = configuration error; restart is pointless");
-         Notify(c, "fatal", cycRun, "config error, restart pointless (rcterm exit 1)");
+         FatalOnce(cycRun, "config error, restart pointless (rcterm exit 1)");
          if (!c.standbyEnable) {
             Log("FATAL configuration error (no standby); giving up");
             return 1;
@@ -1206,6 +1251,7 @@ int main(int argc, char** argv)
 
          // ---- S-2 / S-3 : 근거가 있으면 한도를 기다리지 않고 바로 복구 ----
          //  실측 : USB 서명이 첫 실패부터 분명한데 런 4 개를 더 태웠다 (4424~4427, 4335~4339)
+         int earlyRrc = -1000;                  // 이 실패에서 조기 recover 를 불렀으면 그 값
          if (c.autoRecover && !c.recoverCmd.empty() && c.earlyRecover && !earlyTried) {
             std::string where;
             const int nSig = dramFail ? 0 : ScanRunLogs(c, cycRun, IsUsbSig, where);
@@ -1216,6 +1262,7 @@ int main(int argc, char** argv)
                                  : ("USB signature in run " + cycRun + " logs (" + where + ")").c_str());
                Log(b);
                const int rrc = RunRecover(c);
+               earlyRrc = rrc;
                snprintf(b, sizeof(b), "automatic recovery returned %d "
                         "(0=recovered 1=not-usb 2=failed 3=unsafe)", rrc);
                Log(b);
@@ -1237,7 +1284,15 @@ int main(int argc, char** argv)
             //  ★ 복구 판단과 실행은 전부 바깥 스크립트에 있다. 감시자는
             //    종료코드만 보고 이어갈지 대기할지 정한다.
             int rrc = -1;
-            if (c.autoRecover && !c.recoverCmd.empty()) {
+            //  같은 실패에서 조기 recover 를 이미 불렀거나, 대기에서 막 recover 를 부르고
+            //  띄운 확인 런이면 또 부르지 않는다 (recover 가 3 번 연달아 도는 것을 막는다)
+            if (earlyRrc != -1000) {
+               rrc = earlyRrc;
+               Log("limit reached; recovery already tried for this failure - not repeated");
+            } else if (limitRecoverDone) {
+               rrc = 1;
+               Log("limit reached on a probe run right after standby recovery - not repeated");
+            } else if (c.autoRecover && !c.recoverCmd.empty()) {
                Log("consecutive failure limit reached; trying automatic USB recovery");
                rrc = RunRecover(c);
                snprintf(b, sizeof(b), "automatic recovery returned %d "
@@ -1265,8 +1320,9 @@ int main(int argc, char** argv)
             Log("too many consecutive failures; entering standby (retry later). "
                 "please inspect the DAQ logs");
             if (rrc != 1 && rrc != 2)
-               Notify(c, "fatal", cycRun,
-                      "연속 실패 한계 도달 - 대기-재시도 모드로 간다");
+               FatalOnce(cycRun, "연속 실패 한계 도달 - 대기-재시도 모드로 간다");
+            else
+               fatalSent = true;                // recover 가 recovery_failed 로 이미 알렸다
             standby = SB_HARDWARE;
             continue;
          }
