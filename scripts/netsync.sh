@@ -15,9 +15,10 @@
 #
 #  점검 (각 5 초 안팎)
 #     dns     getent hosts smtp.gmail.com
-#     smtp    smtp.gmail.com:587 에 TCP 연결 (보내지는 않는다)
+#     smtp    notify.params 의 smtp_host:smtp_port (기본 smtp.gmail.com:587) 에 TCP 연결 (보내지는 않는다)
 #     sheets  sheets.googleapis.com:443 에 TCP 연결
-#     khu     ssh -o BatchMode=yes -o ConnectTimeout=10 khu true   (기록만. net 판정에는 안 쓴다)
+#     khu     ssh -o BatchMode=yes -o ConnectTimeout=10 khu true   (기록만. net 판정에는 안 쓴다.
+#             남의 서버라 30 분에 한 번만 붙는다 -- 그 사이는 지난 값을 쓴다, NETSYNC_KHU_EVERY)
 #     net=up  <=  dns 와 (smtp 또는 sheets)
 #
 #  전환
@@ -38,7 +39,7 @@ STATE=$NETSYNC_STATE
 LOG=${NETSYNC_LOG:-/Data_ssd/LOG/netsync.log}
 LOCK=${NETSYNC_LOCK:-/Data_ssd/LOG/.netsync.lock}
 DOWN_CONSEC=${NETSYNC_DOWN_CONSEC:-2}
-PARAMS=$DIR/config/notify.params
+PARAMS=${NETSYNC_PARAMS:-$DIR/config/notify.params}
 NOTIFY=${NETSYNC_NOTIFY:-$DIR/scripts/daq-notify.sh}
 MAILQ_CMD=${NETSYNC_MAILQ_CMD:-$DIR/scripts/mailq-send.sh}
 SHEETLOG_CMD=${NETSYNC_SHEETLOG_CMD:-$DIR/scripts/sheetlog-auto.sh}
@@ -48,6 +49,11 @@ WEBSUMMARY_CMD=${NETSYNC_WEBSUMMARY_CMD:-$DIR/tools/monitor/websummary.sh}
 QUEUES=${NETSYNC_QUEUES:-/scratch/MAILQ /Data_ssd/LOG/MAILQ}
 PROBE=${NETSYNC_PROBE:-}            # 시험용 : '<스크립트> <검사이름>' 의 종료코드를 결과로 쓴다
 BG=${NETSYNC_BG:-1}                 # 1 이면 websummary 를 뒤에서 (시험은 0)
+KHU_EVERY=${NETSYNC_KHU_EVERY:-1800}
+#  메일 서버는 daq-notify / send_mail.py 가 실제로 쓰는 곳을 잰다 (notify.params). 없으면 Gmail 기본값
+pget() { [ -r "$PARAMS" ] && sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$PARAMS" 2>/dev/null | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//' | head -1; }
+SMTP_HOST=$(pget smtp_host); SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+SMTP_PORT=$(pget smtp_port); case "$SMTP_PORT" in ''|*[!0-9]*) SMTP_PORT=587 ;; esac
 
 MODE=run
 case "${1:-}" in
@@ -76,7 +82,7 @@ if [ "$MODE" = status ]; then
    c=$(st_get checked); n=$(st_get net); since=$(st_get since)
    echo "  망        : ${n:-?}  ($( [ -n "$since" ] && date -d @"$since" '+%F %T' ) 부터, $( [ -n "$since" ] && dur $(( $(date +%s) - since )) ))"
    echo "  마지막 점검 : $( [ -n "$c" ] && date -d @"$c" '+%F %T' )  · 연속 실패 $(st_get fails)/$DOWN_CONSEC"
-   echo "  검사      : dns=$(st_get dns) smtp=$(st_get smtp) sheets=$(st_get sheets) khu=$(st_get khu)"
+   echo "  검사      : dns=$(st_get dns) smtp=$(st_get smtp) ($(st_get smtp_target)) sheets=$(st_get sheets) khu=$(st_get khu) (khu 는 ${KHU_EVERY}s 에 한 번)"
    netsync_is_down && echo "  ★ 다른 스크립트는 지금 메일·시트를 미루고 있다 (netsync_is_down)"
    [ -n "$c" ] && [ $(( $(date +%s) - c )) -gt "$NETSYNC_FRESH_SEC" ] && echo "  ★ 상태가 오래됐다 -- cron 이 사는지 볼 것 (crontab -l)"
    for q in $QUEUES; do [ -d "$q" ] && echo "  메일 큐   : $q  대기 $(find "$q" -maxdepth 1 -name '*.mail' 2>/dev/null | wc -l) 통"; done
@@ -89,10 +95,10 @@ flock -n 9 2>/dev/null || { log "이미 실행 중. 건너뛴다"; exit 0; }
 
 # ---- 검사 -------------------------------------------------------------
 probe() {
-   if [ -n "$PROBE" ]; then "$PROBE" "$1" >/dev/null 2>&1; return; fi
+   if [ -n "$PROBE" ]; then "$PROBE" "$1" "$SMTP_HOST" "$SMTP_PORT" >/dev/null 2>&1; return; fi
    case "$1" in
-      dns)    timeout 5 getent hosts smtp.gmail.com >/dev/null 2>&1 ;;
-      smtp)   timeout 5 bash -c 'exec 3<>/dev/tcp/smtp.gmail.com/587' >/dev/null 2>&1 ;;
+      dns)    timeout 5 getent hosts "$SMTP_HOST" >/dev/null 2>&1 ;;
+      smtp)   timeout 5 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$SMTP_HOST" "$SMTP_PORT" >/dev/null 2>&1 ;;
       sheets) timeout 5 bash -c 'exec 3<>/dev/tcp/sheets.googleapis.com/443' >/dev/null 2>&1 ;;
       khu)    timeout 15 ssh -o BatchMode=yes -o ConnectTimeout=10 khu true >/dev/null 2>&1 ;;
    esac
@@ -100,10 +106,12 @@ probe() {
 r() { probe "$1" && echo ok || echo fail; }
 DNS=$(r dns); SMTP=fail; SHEETS=fail
 if [ "$DNS" = ok ]; then SMTP=$(r smtp); SHEETS=$(r sheets); fi
-KHU=$(r khu)
+now=$(date +%s)
+khu_at=$(st_get khu_checked); case "$khu_at" in ''|*[!0-9]*) khu_at=0 ;; esac
+if [ $(( now - khu_at )) -ge "$KHU_EVERY" ]; then KHU=$(r khu); khu_at=$now
+else KHU=$(st_get khu); KHU=${KHU:-?}; fi
 NOW_OK=0; [ "$DNS" = ok ] && { [ "$SMTP" = ok ] || [ "$SHEETS" = ok ]; } && NOW_OK=1
 
-now=$(date +%s)
 prev=$(st_get net); prev=${prev:-up}
 since=$(st_get since); since=${since:-$now}
 fails=$(st_get fails); case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
@@ -113,8 +121,8 @@ write_state() {          # $1=net $2=since $3=fails $4=first_fail
    local tmp
    [ "$MODE" = dry ] && return 0
    tmp=$(mktemp "${STATE}.XXXXXX" 2>/dev/null) || return 0
-   printf 'net=%s\nsince=%s\nfails=%s\nfirst_fail=%s\nchecked=%s\ndns=%s\nsmtp=%s\nsheets=%s\nkhu=%s\n' \
-      "$1" "$2" "$3" "$4" "$now" "$DNS" "$SMTP" "$SHEETS" "$KHU" > "$tmp" 2>/dev/null
+   printf 'net=%s\nsince=%s\nfails=%s\nfirst_fail=%s\nchecked=%s\ndns=%s\nsmtp=%s\nsheets=%s\nkhu=%s\nkhu_checked=%s\nsmtp_target=%s:%s\n' \
+      "$1" "$2" "$3" "$4" "$now" "$DNS" "$SMTP" "$SHEETS" "$KHU" "$khu_at" "$SMTP_HOST" "$SMTP_PORT" > "$tmp" 2>/dev/null
    mv -f "$tmp" "$STATE" 2>/dev/null || rm -f "$tmp"
 }
 say() { [ "$MODE" = dry ] && printf '%s\n' "$*"; return 0; }

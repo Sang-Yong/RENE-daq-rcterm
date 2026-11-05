@@ -105,5 +105,23 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" NETSYNC_PROBE=$T/probe NETSYN
 check "rc 0"                     '[ "$rc" = 0 ]'
 check "점검 시각이 갱신됐다"     '[ "$(sed -n s/^checked=//p "$T/state")" -ge "$(( $(date +%s) - 10 ))" ]'
 
+echo "[10] 메일 서버는 notify.params 의 smtp_host:smtp_port 를 잰다 · khu 는 30 분에 한 번"
+cat > "$T/probe3" <<P
+#!/bin/bash
+echo "\$*" >> "$T/probe3.calls"; exit 0
+P
+chmod +x "$T/probe3"; printf 'smtp_host       = mail.example.org   # 주석\nsmtp_port = 465\n' > "$T/np"
+rm -f "$T/state"
+NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np run
+check "smtp 검사 대상 = mail.example.org 465"  'grep -qx "smtp mail.example.org 465" "$T/probe3.calls"'
+check "dns 도 그 호스트"                       'grep -qx "dns mail.example.org 465" "$T/probe3.calls"'
+NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np run
+check "khu 는 두 번 돌아도 한 번만 붙었다"     '[ "$(grep -c "^khu" "$T/probe3.calls")" = 1 ]'
+check "그 사이 khu 값은 지난 것"               'grep -q "^khu=ok" "$T/state"'
+NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np NETSYNC_KHU_EVERY=0 run
+check "주기가 지나면 다시 붙는다"              '[ "$(grep -c "^khu" "$T/probe3.calls")" = 2 ]'
+rm -f "$T/np"; NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np run
+check "params 가 없으면 smtp.gmail.com 587"    'grep -qx "smtp smtp.gmail.com 587" "$T/probe3.calls"'
+
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]
