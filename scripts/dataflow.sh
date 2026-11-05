@@ -65,6 +65,7 @@ QUIET_MIN=${DATAFLOW_QUIET_MIN:-10}
 #    기다리지 않고 옮긴다 (지우지 않는다). 영영 PRD==FADC 가 될 수 없어 /Data_ssd 에
 #    붙박이로 남기 때문이다 (실측 2026-11-05 : 4324 4342 4389 4424 4425 4428).
 MIN_SUBRUNS=${DATAFLOW_MIN_SUBRUNS:-2}
+RESIDUE_QUIET_MIN=${DATAFLOW_RESIDUE_QUIET_MIN:-2}   # 잔재 경로의 조용함 하한 [분] (quiet_min 이 0 이어도)
 DROP_MERGED=${DATAFLOW_DROP_MERGED:-0}   # 3단계에서 Merged 를 버린다 (기본 아니오)
 #  ★ Merged 보관 창 — 최근 이 개수의 런만 Merged 를 남기고 나머지는 지운다.
 #    0 이면 청소하지 않는다 (기본).  --merged-keep N 또는 params 로 켠다.
@@ -521,17 +522,17 @@ stage1() {
             log "${C_Y}[1] run $rp : 후처리 미완료. 대기${C_0}"; continue
          fi
       fi
-      if recently_modified "$src"; then
-         log "${C_Y}[1] run $rp : 최근 ${QUIET_MIN}분 안에 바뀐 파일이 있다. 다음 주기에${C_0}"; continue
+      local qm=$QUIET_MIN
+      #  ★ 잔재 경로는 quiet 하한을 둔다. 런이 바뀌는 순간에는 새 디렉터리가 생겼는데
+      #    heartbeat 는 아직 옛 런이라 is_acquiring 이 지켜 주지 못한다.
+      if is_residue "$src" && [ "${qm:-0}" -lt "$RESIDUE_QUIET_MIN" ]; then qm=$RESIDUE_QUIET_MIN; fi
+      if QUIET_MIN=$qm recently_modified "$src"; then
+         log "${C_Y}[1] run $rp : 최근 ${qm}분 안에 바뀐 파일이 있다. 다음 주기에${C_0}"; continue
       fi
       if backup_reading "$rp"; then
          log "${C_Y}[1] run $rp : 백업이 읽는 중이다. 끝난 뒤에 옮긴다${C_0}"; continue
       fi
-      #  ★ 뒤에 도는 2단계가 /data 의 같은 이름 런(예전에 반쯤 옮겨진 잔재)을 읽는 중일
-      #    수 있다. 그 위에 덧쓰지 않는다.
-      if bk_running && [ -e "$MID/RAW/$rp" ]; then
-         log "${C_Y}[1] run $rp : $MID 에 같은 런이 이미 있고 2단계가 돌고 있다. 끝난 뒤에${C_0}"; continue
-      fi
+      #  (옮기는 중인 런은 backup-khu --all 이 집지 않는다 : 원본이 $SSD 에 남아 있으면 뺀다)
       log "${C_C}[1] run $rp : $SSD -> $MID${C_0} ($why$([ "$in_keep" = 1 ] && echo ', ★압박 모드로 보관 창 무시'))"
       if move_dir "$src" "$MID/RAW/$rp" "run $rp"; then
          move_side_files "$rp" "$SSD" "$MID"

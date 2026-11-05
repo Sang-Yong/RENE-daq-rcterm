@@ -51,6 +51,7 @@ mkrun() {
 	for i in $(seq 1 "$np"); do echo x > "$d/PRD/PRD_$rp.$(printf '%05d' "$i").root"; done
 	return 0
 }
+age() { find "$1" -exec touch -d '1 hour ago' {} +; }   # 잔재 경로의 조용함 하한(2 분)을 넘긴다
 on_ssd() { [ -d "$SSD/RAW/$1" ] && echo ssd || { [ -d "$MID/RAW/$1" ] && echo mid || echo none; }; }
 
 #  run_sut [옵션...]   — 기본 : 백업 끔, 조용함 관문 끔, 여유 $FREE
@@ -141,6 +142,7 @@ echo x > "$SSD/RAW/993890/badrun/FADC_993890.root.00000"
 echo x > "$SSD/RAW/993890/badrun/README.txt"
 mkrun "$SSD" 994300 5 3                         # 진짜 미완료
 mkrun "$SSD" 994310 3 3; mkrun "$SSD" 994320 3 3
+age "$SSD/RAW/994240"; age "$SSD/RAW/993890"
 run_sut --keep-ssd 2
 chk "994240 (FADC 1) 는 /data 로" "$(on_ssd 994240)" "mid"
 chk "★ 994240 의 파일 2 개 그대로" "$(find "$MID/RAW/994240" -type f | wc -l)" "2"
@@ -256,11 +258,75 @@ echo ""; echo "[12] params 파일의 quiet_min · min_subruns 를 읽는다"
 setup
 mkrun "$SSD" 000001 2 0                          # FADC 2, min_subruns 3 이면 잔재
 mkrun "$SSD" 000002 3 3
+age "$SSD/RAW/000001"
 printf 'quiet_min = 0\nmin_subruns = 3\nkeep_ssd = 1\nbackup_enable = 0\n' > "$T/p.params"
 DATAFLOW_ALLOW_UNMOUNTED=1 DATAFLOW_LOCK="$T/.lock" DATAFLOW_TEST_SSD_FREE_CMD="echo 5000" \
 	"$SUT" --params "$T/p.params" --ssd "$SSD" --mid "$MID" --nfs "$NFS" --heartbeat "$HB" \
 	       --once --stage 1 > "$T/out.txt" 2>&1
 chk "min_subruns 3 이라 FADC 2 런도 잔재로 옮겼다" "$(on_ssd 000001)" "mid"
+teardown
+
+# ---------------------------------------------------------------------
+echo ""; echo "[13] 보통 모드에도 조용함 관문 기본값(10 분)이 걸린다"
+setup
+for r in 000001 000002 000003; do mkrun "$SSD" $r 3 3; done
+find "$SSD/RAW/000001" -exec touch -d '1 hour ago' {} +
+DATAFLOW_ALLOW_UNMOUNTED=1 DATAFLOW_LOCK="$T/.lock" DATAFLOW_TEST_SSD_FREE_CMD="echo 5000" \
+	"$SUT" --ssd "$SSD" --mid "$MID" --nfs "$NFS" --heartbeat "$HB" \
+	       --once --stage 1 --keep-ssd 1 > "$T/out.txt" 2>&1
+chk "묵은 000001 은 옮긴다" "$(on_ssd 000001)" "mid"
+chk "방금 쓴 000002 는 남긴다" "$(on_ssd 000002)" "ssd"
+has "사유를 밝힌다" "최근 10분 안에 바뀐 파일"
+teardown
+
+echo ""; echo "[14] ★ 잔재 경로는 --quiet-min 0 이어도 하한 2 분 (런 교체 순간 보호)"
+setup
+mkdir -p "$SSD/RAW/994340"                       # 방금 생긴 빈 런. heartbeat 는 아직 옛 런
+mkrun "$SSD" 994350 3 3
+run_sut --keep-ssd 0
+chk "방금 생긴 잔재 994340 은 남긴다" "$(on_ssd 994340)" "ssd"
+has "하한 2 분을 밝힌다" "최근 2분 안에 바뀐 파일"
+touch -d '1 hour ago' "$SSD/RAW/994340"
+echo x > "$SSD/RAW/994340/FADC_994340.root.00000"; touch -d '1 hour ago' "$SSD/RAW/994340"/* "$SSD/RAW/994340"
+run_sut --keep-ssd 0
+chk "묵은 뒤에는 옮긴다" "$(on_ssd 994340)" "mid"
+teardown
+
+echo ""; echo "[15] --follow : 끝난 뒤 백업의 rc 를 거두고 다음 주기에 다시 띄운다"
+setup
+FAKE_SLEEP=0 DATAFLOW_ALLOW_UNMOUNTED=1 DATAFLOW_LOCK="$T/.lock" \
+DATAFLOW_BACKUP_SH="$T/fake-backup.sh" DATAFLOW_TEST_SSD_FREE_CMD="echo 5000" \
+	"$SUT" --ssd "$SSD" --mid "$MID" --nfs "$NFS" --heartbeat "$HB" \
+	       --follow --poll 1 --quiet-min 0 > "$T/out.txt" 2>&1 &
+DF=$!
+for i in $(seq 1 30); do [ "$(wc -l < "$T/bk.args" 2>/dev/null || echo 0)" -ge 2 ] && grep -q '지난 외부 백업이 끝났다' "$T/out.txt" && break; sleep 0.5; done
+kill -TERM "$DF"; wait "$DF" 2>/dev/null
+has "rc 0 을 거뒀다" "지난 외부 백업이 끝났다"
+n=$(wc -l < "$T/bk.args" 2>/dev/null || echo 0)
+if [ "$n" -ge 2 ]; then ok "다음 주기에 다시 띄웠다 ($n 회)"; else bad "다시 안 띄웠다" "$n"; fi
+teardown
+
+echo ""; echo "[16] ★ --follow 재기동 : 옛 백업이 돌면 새 dataflow 는 1단계만 하고 2단계는 안 띄운다"
+setup
+FAKE_SLEEP=60 DATAFLOW_ALLOW_UNMOUNTED=1 DATAFLOW_LOCK="$T/.lock" \
+DATAFLOW_BACKUP_SH="$T/fake-backup.sh" DATAFLOW_TEST_SSD_FREE_CMD="echo 5000" \
+	"$SUT" --ssd "$SSD" --mid "$MID" --nfs "$NFS" --heartbeat "$HB" \
+	       --follow --poll 1 --quiet-min 0 > "$T/out1.txt" 2>&1 &
+DF=$!
+for i in $(seq 1 20); do [ -f "$T/bk.pid" ] && break; sleep 0.5; done
+kill -TERM "$DF"; wait "$DF" 2>/dev/null
+for r in 000001 000002; do mkrun "$SSD" $r 3 3; done
+FAKE_SLEEP=60 DATAFLOW_ALLOW_UNMOUNTED=1 DATAFLOW_LOCK="$T/.lock" \
+DATAFLOW_BACKUP_SH="$T/fake-backup.sh" DATAFLOW_TEST_SSD_FREE_CMD="echo 5000" \
+	"$SUT" --ssd "$SSD" --mid "$MID" --nfs "$NFS" --heartbeat "$HB" \
+	       --follow --poll 1 --quiet-min 0 --keep-ssd 1 > "$T/out.txt" 2>&1 &
+DF=$!
+for i in $(seq 1 20); do [ "$(on_ssd 000001)" = mid ] && grep -q '외부 백업이 아직 돈다' "$T/out.txt" && break; sleep 0.5; done
+kill -TERM "$DF"; wait "$DF" 2>/dev/null
+hasnt "본 잠금에 막히지 않았다" "이미 실행 중이다"
+chk "새 dataflow 가 1단계를 했다" "$(on_ssd 000001)" "mid"
+has "옛 백업이 도는 것을 보고 건너뛴다" "외부 백업이 아직 돈다"
+chk "2단계는 여전히 한 번" "$(wc -l < "$T/bk.args")" "1"
 teardown
 
 echo ""
