@@ -83,10 +83,15 @@ on_rotate           = mail      # 정상 런 교체. 책임자에게만 (아래 
 on_resumed          = mail      # 문제 뒤 다시 정상 가동
 on_backup_session   = mail      # 저장소 백업 세션 시작/종료 (새 판인지 포함). 책임자만
 on_websummary       = mail      # 런 서머리 웹 발행이 막혔다 (단계 실패·대조 불일치). 같은 사유로는 한 번만. 책임자만
+on_supervisor_down  = both      # ★ 감시자가 FATAL 로 끝났다 (chainwatch). 알람 + 메일. 아래 목록에 넣어 전문가에게도
+on_disk_low         = mail      # /Data_ssd · /data 여유가 문턱 아래 (chainwatch). 알람 문턱 아래면 알람도 함께 온다
+on_net_down         = mail      # 바깥 망 단절 (netsync). 큐에 들어가 복귀 뒤에 나간다
+on_net_restored     = mail      # 바깥 망 복귀 -- 밀린 메일·시트를 내보낸 결과
+mail_queue          = /Data_ssd/LOG/MAILQ   # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
 
 #  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
 #  나머지는 책임자만.  비워 두면 예전 규칙(recovery_failed · fatal 만 전문가).
-mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed
+mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed supervisor_down disk_low
 
 #  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
 #  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
@@ -126,3 +131,17 @@ chain_warmup_sec    = 180        # 런 시작 후 이 시간[초] 안에는 계�
 chain_realert_min   = 60         # 이상이 이어질 때 다시 알리는 간격 [분]
 chain_hb_max_age    = 120        # heartbeat 가 이보다 오래되면 '수집 중이 아니다'
                                  # 로 보고 계수율을 판정하지 않는다
+                                 # ★ 계수율은 heartbeat 의 순간값 sr= 로 본다 (없으면 평균 ar=). 2026-11-05
+chain_rate_stop     = 1          # rate_high 때 감시자에 SIGUSR1 = 현재 런 정상 마감 뒤 cooldown 재기동. 런당 한 번
+                                 # 감시자가 SIGUSR1 을 처리하는 판일 때만 보낸다 (/proc/<pid>/status 의 SigCgt)
+chain_min_free_gb   = 700        # /Data_ssd 여유가 이보다 적으면 disk_low 메일 (dataflow 의 min_free_gb 와 같은 뜻)
+chain_disk_alarm_gb = 200        # 이보다 적으면 알람 + 메일
+chain_mid_min_free_gb = 3000     # /data 여유 문턱 (메일)
+chain_mid_alarm_gb  = 500        # /data 알람 문턱
+chain_sup_autorestart = 1        # 감시자가 FATAL 로 끝났으면 supervisor pane 에서 다시 띄운다 (시간당 1 회)
+chain_sup_autorestart_daily = 3  # 하루 상한. 보드가 정말 죽었으면 재기동마다 런 번호 5 개를 태운다
+chain_autorestart   = 1          # postrun · dataflow 가 죽었으면 그 pane 에서 다시 띄운다 (시간당 1 회, /scratch 가 있을 때만)
+#  pane 에 넣는 명령은 scripts/daq-tmux.sh --print-cmd supervisor|postrun|dataflow 가 찍는 줄 그대로다
+
+# ---- 바깥 망 감시 (scripts/netsync.sh, cron */5) ----------------------
+#  키는 없다. 환경변수 NETSYNC_DOWN_CONSEC(기본 2) · NETSYNC_FRESH_SEC(기본 900) 로만 바꾼다.

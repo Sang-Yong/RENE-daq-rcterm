@@ -73,6 +73,52 @@ scripts/chainwatch.sh --dry-run     # 알림을 실제로 보내지 않고 판�
 **★ 연속 2회여야 알리고, 이어지는 동안은 1시간에 한 번만 알린다.** 5분마다
 같은 메일이 오면 사람이 필터를 만들고, 그러면 감시가 없는 것과 같아진다.
 
+### 알리기만 하지 않고 손을 쓴다 — 2026-11-05 추가 (감사 D-1~D-4)
+
+Claude 세션도 바깥 망도 없을 때 스스로 버티게 하려고 넣었다. 키는 전부 `config/notify.params`
+(설명은 `config/notify.params.example` 의 '후처리 사슬 감시' 절).
+
+| 사건 | 언제 | 무엇을 하나 | 끄는 키 |
+|---|---|---|---|
+| `rate_high` | ADC 별 **순간 계수율 `sr=`** 최댓값 ≥ 30 kHz (예전엔 누적 평균 `ar=` 이라 11-03 의 41.7 kHz 를 놓쳤다) | 알람 + 메일, 그리고 감시자에 `SIGUSR1` = 현재 런 정상 마감 뒤 cooldown 재기동. **런당 한 번.** `/proc/<pid>/status` 의 `SigCgt` 에 SIGUSR1 이 없으면(옛 감시자) 보내지 않는다 — 옛 판은 받는 즉시 죽는다 | `chain_rate_stop = 0` |
+| `disk_low` | `/Data_ssd` 여유 < 700 GB (메일) · < 200 GB (알람 + 메일). `/data` 는 3000 / 500 GB | 알림. 수준이 오르면 즉시, 같으면 1시간에 한 번 | 문턱 키 |
+| `supervisor_down` | tmux `daq` 는 있는데 감시자가 없고, 감시자 로그의 마지막 `[SUP]` 줄이 `FATAL` | 알람 + 메일(전문가 목록 + 책임자), 그리고 supervisor pane 에 `daq-tmux.sh --print-cmd supervisor` 의 줄을 쳐서 다시 띄운다. **시간당 1 회 · 하루 3 회.** `rcterm.params` 가 없거나 고아 `rcterm/daq/tcb/merger` 가 있거나 pane 에 무언가 돌고 있으면 손대지 않는다. ★ `rcsupervisor stop` 으로 끝난 것(사람이 세움)은 조용하다 | `chain_sup_autorestart = 0` |
+| `chain_down` | postrun · dataflow 가 없다 (연속 2 회) | 그 pane 이 셸만 남아 있으면 `--print-cmd postrun|dataflow` 의 줄로 다시 띄운다. 시간당 1 회. **`/scratch` 가 빠져 있으면 띄우지 않고** 본문에 '저장소 서버의 10.0.0.11 프로파일을 지워 달라' 를 싣는다 (§10) | `chain_autorestart = 0` |
+
+pane 은 번호가 아니라 **제목의 열쇠말**(supervisor · postrun · dataflow)로 찾는다(`daq-layout.sh` 와 같다).
+명령은 `send-keys -l` 로 글자를 넣고 Enter 를 따로 보낸다 — `send-keys "<명령>" Enter` 는 아무것도
+안 칠 때가 있었다(CLAUDE.md §10). pane 이 '놀고 있다' 는 것은 그 셸이 터미널의 전경 그룹이라는 뜻이다
+(`ps -o tpgid= -p <셸>` == 셸 pid).
+
+`chainwatch.sh --status` 가 디스크·감시자 상태·자동 재기동 마지막 시각까지 보여 준다.
+
+### 바깥 망이 끊겼을 때 — `scripts/netsync.sh` (2026-11-05 추가)
+
+이 PC 의 바깥 출구는 `enp0s31f6` 하나다. 끊기면 메일·시트·웹 발행이 실패한다. 수집·후처리·저장소
+링크(10.0.0.x)·PDU/HV(192.168.0.x)는 영향이 없다.
+
+```
+메일    daq-notify.sh 가 못 보낸 메일(망·인증 실패)을 /Data_ssd/LOG/MAILQ 에 쌓는다 (설정 오류 rc 2·3 은 쌓지 않는다)
+        mailq-send.sh (cron 5분) 가 /scratch/MAILQ 와 함께 비운다.
+        ★ 망 실패(send_mail rc 5)는 시도 횟수에 세지 않는다 -- 예전엔 25분 끊기면 큐가 통째로 failed/ 로 갔다
+        큐 상한 500 통 (넘치면 오래된 것부터 failed/)
+        도배 방지 표식은 보냈거나 쌓은 뒤에만 남긴다
+netsync cron */5 :  dns · smtp:587 · sheets:443 · ssh khu 를 재고 /Data_ssd/LOG/netsync.state 에 net=up|down
+        down 은 연속 2 회 실패에서. 그때 net_down 메일 한 통이 큐에 (복귀 뒤 나간다). 소리는 없다
+        복귀하는 순간 : mailq-send · sheetlog-auto --force · backup-sheetlog · reactor-power-log · websummary(뒤에서)
+                        + net_restored 메일 한 통 (단절 시간 · 밀린 메일 · 등재 런)
+다른 cron  netsync_is_down (scripts/netsync-lib.sh) 이 참이면 daq-notify 는 곧바로 큐에 쌓고, mailq-send 는 보내지 않고,
+        sheetlog-auto 는 건너뛴다. ★ 상태가 15분보다 오래되면 '모른다' 로 보고 그냥 시도한다 (netsync cron 이 죽었을 때)
+sheetlog-auto  등재 실패 메일은 같은 사유로 한 번만 (/Data_ssd/LOG/sheetlog-auto.failstate). 성공하면 지운다
+```
+
+```bash
+scripts/netsync.sh --status       # 읽기 전용. 망에 붙지도 않는다
+scripts/netsync.sh --dry-run      # 재기는 하되 상태를 안 바꾸고 아무것도 안 내보낸다
+scripts/netsync.sh --install-cron # crontab 에 */5 한 줄 (기존은 ~/crontab.bak-<시각>)
+scripts/mailq-send.sh --status    # 두 큐를 다 보인다
+```
+
 ---
 
 ## 2. 구성 요소
