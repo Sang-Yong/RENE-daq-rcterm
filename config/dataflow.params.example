@@ -86,7 +86,9 @@ backup_bwlimit = 0
 
 #  망이 끊긴 채 행에 걸리지 않게 (2026-11-05). ssh 는 ServerAliveInterval=30 x 4 로 고정.
 backup_rsync_timeout  = 600    # 전송 중 이 초 동안 자료가 안 오가면 rsync 를 끊는다. 0 = 끔
-backup_verify_timeout = 3600   # 체크섬 대조는 양쪽이 오래 읽기만 하므로 더 길게. 0 = 끔
+backup_verify_timeout = 0      # 체크섬 대조엔 기본으로 안 건다 : rsync 가 체크섬 계산 중엔
+                               #  keepalive 를 안 보내 큰 런이 매번 code 30 으로 죽는다 (실측).
+                               #  망 단절은 ssh ServerAlive 가 잡는다
 
 #  보내지 않을 카테고리. 전체 = RAW PRD PNG DAQLOG config db Data
 #  Merged 는 목록에 아예 없다 — 원격 트리에 Merged 카테고리가 없고,
