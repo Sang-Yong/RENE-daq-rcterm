@@ -150,6 +150,16 @@ chk "curl 에 --noproxy" 'reset; run status; head -1 "$T/f/args" | grep -q -- "-
 chk "pgrep 는 -x 로만" '[ ! -s "$T/f/pgrep_bad" ]'
 chk "스크립트에 pgrep -f 없음" '! grep -q "pgrep -f\|pkill" "$S"'
 
+echo "[9b] --allow-supervisor : rcsupervisor 만 예외"
+chk "rcsupervisor 만 살아 있으면 cycle 진행" 'reset; FAKE_BUSY=rcsupervisor run cycle --allow-supervisor; [ "$(rc)" = 0 ] && grep -q "REQ setOutputState 2 1" "$T/f/seq"'
+chk "그 사실을 로그에 남긴다" 'grep -q "allow-supervisor" "$T/log"'
+for p in rcterm daq tcb merger; do
+   chk "--allow-supervisor 여도 $p 살아 있으면 거부" "reset; FAKE_BUSY=\"rcsupervisor $p\" run cycle --allow-supervisor; [ \"\$(rc)\" = 1 ] && [ \"\$(nreq)\" = 0 ] && grep -q \"$p\" \"\$T/out\""
+done
+chk "--allow-supervisor 없이는 rcsupervisor 도 거부 (예전 그대로)" 'reset; FAKE_BUSY=rcsupervisor run cycle; [ "$(rc)" = 1 ] && [ "$(nreq)" = 0 ]'
+chk "거부 사유에 rcsupervisor 가 안 섞인다" 'reset; FAKE_BUSY="rcsupervisor tcb" run off 1 --allow-supervisor; ! grep -q "rcsupervisor" "$T/out"'
+chk "--help 에 --allow-supervisor" 'bash "$S" --help | grep -q -- "--allow-supervisor"'
+
 echo "[10] PDU 설정 action 은 부르지 않는다 · cron 환경"
 chk "허용 action 은 4 개뿐" '[ "$(grep -o "\"action\": \"[A-Za-z]*\"" "$T/f/bodies" | sort -u | grep -vcE "login|logout|getOutputStatusList|setOutputState")" = 0 ]'
 chk "스크립트에 다른 action 이름 없음" '! grep -qE "resetOutputState|setOutputBase|setOutputSchedule|toggleOutputTimer" "$S"'

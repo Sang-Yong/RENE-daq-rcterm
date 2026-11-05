@@ -7,6 +7,8 @@
 #         --params FILE  자격증명 (기본 <저장소>/config/pdu.params, 0600. 예시는 config/pdu.params.example)
 #         --wait N       cycle 의 TCB 뒤 대기 [s] (기본 30)      --off-wait N   cycle 의 끈 뒤 대기 [s] (기본 10)
 #         --force        수집 중(rcsupervisor·rcterm·daq·tcb·merger 가 살아 있음)이어도 on/off/cycle 을 한다
+#         --allow-supervisor  rcsupervisor 만 '수집 중' 에서 뺀다 (rcterm·daq·tcb·merger 는 그대로 거부).
+#                        usb-recover.sh 가 감시자 안에서 전원 단계를 부를 때 쓴다 (감시자는 그 결과를 기다리는 중이다)
 #   채널 : 1 FADC · 2 TCB · 3 SADC.  그 밖의 채널과 PDU 설정을 바꾸는 action 은 부르지 않는다
 #   켤 때 순서 : TCB(2) 먼저 -> 30 s -> FADC(1)+SADC(3)  (사용자 지시).  끌 때는 셋을 함께 끈다
 #   ★ 전원을 내렸다 올리면 트리거 설정이 날아간다 -> NOTICE_CODE_RUN.sh -> usbreset 2 회 -> 10 s 더미 런 -> 확인 런 (§11.119 · §11.224)
@@ -18,10 +20,10 @@ DIR=$(cd "$(dirname "$0")/.." && pwd)
 PARAMS=$DIR/config/pdu.params
 LOG=${PDU_LOG:-/Data_ssd/LOG/pdu-power.log}
 CURL=${PDU_CURL:-curl}; SLEEP=${PDU_SLEEP:-sleep}; PGREP=${PDU_PGREP:-pgrep}
-DRY=0; FORCE=0; WAIT=30; OFFWAIT=10; CMD=""; CHS=()
+DRY=0; FORCE=0; ALLOWSUP=0; WAIT=30; OFFWAIT=10; CMD=""; CHS=()
 NAME=([1]=FADC [2]=TCB [3]=SADC)
 
-usage() { sed -n '2,16p' "$0"; }
+usage() { sed -n '2,17p' "$0"; }
 die() { local rc=$1; shift; printf '%s\n' "$*" >&2; [ "$DRY" = 0 ] && [ "$CMD" != status ] && log "ERROR rc=$rc $*"; exit "$rc"; }
 log() { mkdir -p "$(dirname "$LOG")" 2>/dev/null; printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG" 2>/dev/null; return 0; }
 isint() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
@@ -30,6 +32,7 @@ while [ $# -gt 0 ]; do
    case "$1" in
       --dry-run) DRY=1 ;;
       --force) FORCE=1 ;;
+      --allow-supervisor) ALLOWSUP=1 ;;
       --params) [ $# -ge 2 ] || { echo "--params 에 파일이 필요하다" >&2; exit 1; }; PARAMS=$2; shift ;;
       --wait) [ $# -ge 2 ] && isint "$2" || { echo "--wait 에 0 이상의 정수가 필요하다" >&2; exit 1; }; WAIT=$2; shift ;;
       --off-wait) [ $# -ge 2 ] && isint "$2" || { echo "--off-wait 에 0 이상의 정수가 필요하다" >&2; exit 1; }; OFFWAIT=$2; shift ;;
@@ -153,7 +156,10 @@ remind() { echo "★ 전원을 올렸으면 : src/NOTICE_CODE_RUN.sh -> src/usbr
 # ---- 수집 중 가드 (status 는 무관) ----
 if [ "$CMD" != status ]; then
    command -v "$PGREP" >/dev/null 2>&1 || { echo "pgrep($PGREP) 를 찾을 수 없어 수집 여부를 모른다 -- 거부한다" >&2; exit 1; }
-   busy=""; for p in rcsupervisor rcterm daq tcb merger; do "$PGREP" -x "$p" >/dev/null 2>&1 && busy="$busy $p"; done
+   busy=""; for p in rcsupervisor rcterm daq tcb merger; do
+      [ "$p" = rcsupervisor ] && [ "$ALLOWSUP" = 1 ] && continue
+      "$PGREP" -x "$p" >/dev/null 2>&1 && busy="$busy $p"; done
+   [ "$ALLOWSUP" = 1 ] && [ "$DRY" = 0 ] && "$PGREP" -x rcsupervisor >/dev/null 2>&1 && log "allow-supervisor : rcsupervisor 는 살아 있으나 예외로 둔다"
    if [ -n "$busy" ]; then
       msg="수집이 돌고 있다 (살아 있는 것 :$busy). 전원을 내리면 런이 깨진다 -- 감시자를 먼저 세우거나 --force"
       if [ "$FORCE" = 1 ]; then echo "[WARN] $msg -- --force 로 진행한다" >&2; [ "$DRY" = 0 ] && log "WARN forced while busy:$busy"

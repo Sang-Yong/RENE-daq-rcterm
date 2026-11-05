@@ -1,0 +1,22 @@
+2026-11-03 10:31:04 [INFO] ===== cycle 1 : booting run 004424 =====
+2026-11-03 10:31:04 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4424 -n FADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-f -d 4 -c /Data_ssd/CONFIG/004424.config -r 4424"
+2026-11-03 10:31:04 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4424 -n SADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-s -d 3 -c /Data_ssd/CONFIG/004424.config -r 4424"
+2026-11-03 10:31:05 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -t -r 4424 -n TCB --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-d 0 -r 4424 -c /Data_ssd/CONFIG/004424.config -p 60"
+2026-11-03 10:31:06 CMD CONFIGRUN
+2026-11-03 10:31:12 CMD STARTRUN
+2026-11-03 10:31:57 [INFO] ===== cycle 1 : booting run 004425 =====
+2026-11-03 10:31:57 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4425 -n FADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-f -d 4 -c /Data_ssd/CONFIG/004425.config -r 4425"
+2026-11-03 10:31:57 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4425 -n SADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-s -d 3 -c /Data_ssd/CONFIG/004425.config -r 4425"
+2026-11-03 10:31:58 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -t -r 4425 -n TCB --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-d 0 -r 4425 -c /Data_ssd/CONFIG/004425.config -p 60"
+2026-11-03 10:31:59 CMD CONFIGRUN
+2026-11-03 10:32:05 CMD STARTRUN
+2026-11-03 10:32:50 [INFO] ===== cycle 1 : booting run 004426 =====
+2026-11-03 10:32:50 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4426 -n FADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-f -d 4 -c /Data_ssd/CONFIG/004426.config -r 4426"
+2026-11-03 10:32:50 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4426 -n SADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-s -d 3 -c /Data_ssd/CONFIG/004426.config -r 4426"
+2026-11-03 10:32:51 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -t -r 4426 -n TCB --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-d 0 -r 4426 -c /Data_ssd/CONFIG/004426.config -p 60"
+2026-11-03 10:32:52 CMD CONFIGRUN
+2026-11-03 10:33:41 [INFO] ===== cycle 1 : booting run 004427 =====
+2026-11-03 10:33:41 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4427 -n FADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-f -d 4 -c /Data_ssd/CONFIG/004427.config -r 4427"
+2026-11-03 10:33:41 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -d -r 4427 -n SADCDAQ --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-s -d 3 -c /Data_ssd/CONFIG/004427.config -r 4427"
+2026-11-03 10:33:42 EXEC /home/frontend/DAQ/DAQ_cup/install/bin/executedaq.sh -t -r 4427 -n TCB --onldaqdir=/home/frontend/DAQ/DAQ_cup/install --rawdatadir=/Data_ssd -o "-d 0 -r 4427 -c /Data_ssd/CONFIG/004427.config -p 60"
+2026-11-03 10:33:43 CMD CONFIGRUN
