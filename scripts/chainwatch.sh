@@ -564,12 +564,15 @@ check_supervisor() {
    "$PGREP_BIN" -x rcsupervisor >/dev/null 2>&1 && return 0
    in_standby && return 0
    local recent
-   recent=$(tail -n 400 "$SUPLOG" 2>/dev/null | grep -a '\[SUP\]' | tail -5)
+   #  마지막 감시자 세션('rcsupervisor start' 뒤)의 끝 5 줄만 본다 -- 앞 세션의 'stop requested' 가 이번 세션의 FATAL 을 가리면 안 된다 (리뷰 P2)
+   recent=$(tail -n 400 "$SUPLOG" 2>/dev/null | grep -a '\[SUP\]' | awk '/rcsupervisor start/{n=0} {a[n++]=$0} END{for(i=(n>5?n-5:0);i<n;i++) print a[i]}')
    last=$(printf '%s\n' "$recent" | tail -1)
    [ -n "$last" ] || return 0
    #  사람이 TERM 을 보내면 'stop requested' -> … -> 'rcsupervisor stop' 이다. 그 사이에 죽었어도 사람이 세운 것
    if printf '%s\n' "$recent" | grep -q 'stop requested' || printf '%s\n' "$last" | grep -q 'rcsupervisor stop'; then
       [ "$SUP_RESTART_MANUAL" = 1 ] || return 0
+      #  --max-cycles · --dry-run 으로 스스로 끝난 감시자는 일부러 유한하게 띄운 것(시험 런, 11.213·11.217) -- 되살리지 않는다
+      printf '%s\n' "$recent" | grep -qE 'max cycles reached|dry-run: stopping' && return 0
       SUPDOWN=$last; SUPKIND=manual; return 1
    fi
    case "$last" in
@@ -701,7 +704,9 @@ main() {
       local mm="감시자 없음 (사람이 세웠다, chain_sup_restart_manual=1) -- 자동 재기동 : ${RESTART_MSG:-다시 띄웠다 (supervisor pane)}"
       if [ "$(st_get manual_restart_msg)" != "$mm" ]; then log "$mm"; [ "$DRY" -eq 1 ] || st_set manual_restart_msg "$mm"; fi
       say "  supervisor : $mm"
-      handle supervisor_down 0 ""
+      #  하루 상한에 닿아 못 띄우면 조용히 멎은 채 남는다 -- 그때는 한 번 알린다 (리뷰 지적 2)
+      case "$RESTART_MSG" in *'오늘 자동 재기동을 이미'*) handle supervisor_down 1 "감시자가 서 있고 자동 재기동 상한에 닿았다 -- 사람이 볼 것 : $RESTART_MSG" 1 ;;
+                             *) handle supervisor_down 0 "" ;; esac
    elif [ "$sd" -ne 0 ]; then
       sup_autorestart
       if [ "$SUPKIND" = fatal ]; then

@@ -36,7 +36,7 @@ threshold-changes.log 에 한 줄(시각 · 누가 · 적용 런 · 내용 30 �
 
 ## 3. 재시작 (지금 적용할 때)
 
-`daq-incident-playbook` §3 의 1·4·5 단계와 같다 (usbreset 은 필요 없다). 감시자 TERM → 런 정상 마감 확인(exit 0, phase=ended, 고아 0, 포트 0) → 같은 명령으로 재기동 → 45 초 뒤 검증.
+`daq-incident-playbook` §3 의 1·4·5 단계와 같다 (usbreset 은 필요 없다). **먼저 `touch /Data_ssd/LOG/chainwatch.hold`** → 감시자 TERM → 런 정상 마감 확인(exit 0, phase=ended, 고아 0, 포트 0) → 같은 명령으로 재기동 → **`rm` hold** → 45 초 뒤 검증. (hold 없이 30 분을 넘기면 chainwatch 가 옛 rcterm.params 로 감시자를 띄운다, chain_sup_restart_manual=1, 2026-11-05.)
 다음 로테이션에 적용할 때는 재시작 없이 2 까지만 하고 적용 예정 시각을 적는다 — rcterm 이 런 시작 때 파일을 읽는다.
 
 **금지:** 프로세스를 찾을 때 `pgrep -f` / `pgrep -fa` 를 쓰지 않는다 (저장소 경로에 `rcterm` 이 들어 있어 자기 셸·postrun·dataflow 까지 잡힌다). `pgrep -x rcsupervisor|rcterm|daq|tcb|merger` 나 heartbeat 로 본다 (CLAUDE.md §10).

@@ -155,6 +155,17 @@ fresh; hb 4432 10 0 0 ended; : > "$T/alive"; head -9 "$FX/rcsupervisor_stop_2026
 check "'stop requested' 뒤에 죽은 것도 사람이 세운 것 -> 재기동" 'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
 fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run
 check "--status 가 manual 재기동 설명을 보인다"      '"$CW" --params "$P" --status --heartbeat "$HB" --state "$ST" --log "$LOG" 2>&1 | grep -q "chain_sup_restart_manual=1"'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run --dry-run
+check "--dry-run : state 에 manual_restart_msg · autorestart 없음" '! grep -q "manual_restart_msg\|autorestart_supervisor" "$ST" 2>/dev/null'
+fresh; hb 4433 10 0 0 ended; : > "$T/alive"
+{ cat "$FX/rcsupervisor_stop_20261105.txt"; printf '2026-11-05 12:30:00 [SUP] ==================== rcsupervisor start ====================\n2026-11-05 12:30:00 [SUP] cycle 1 launch: x\n2026-11-05 12:40:00 [SUP] FATAL too many consecutive failures\n'; } > "$T/sup.log"; run
+check "앞 세션의 stop 뒤 새 세션이 FATAL : manual 아님 -> supervisor_down" 'grep -q " supervisor_down --" "$T/notify.calls" && grep -q "FATAL" "$T/notify.calls"'
+fresh; hb 4433 10 0 0 ended; : > "$T/alive"
+{ head -8 "$FX/rcsupervisor_stop_20261105.txt"; printf '2026-11-05 12:00:16 [SUP] max cycles reached; stopping\n2026-11-05 12:00:16 [SUP] ==================== rcsupervisor stop =====================\n'; } > "$T/sup.log"; run
+check "--max-cycles 로 스스로 끝난 감시자는 되살리지 않는다" '[ ! -s "$T/tmux.calls" ] && [ ! -s "$T/notify.calls" ]'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; echo "autorestart_supervisor_day=$(date +%Y%m%d):3" > "$ST"; run
+check "하루 상한에 닿으면 supervisor_down 1 통"       'grep " supervisor_down --" "$T/notify.calls" | grep -q "상한"'
+check "그래도 재기동은 안 한다"                      '[ ! -s "$T/tmux.calls" ]'
 sed -i '/chain_sup_restart_manual/d' "$P"
 fresh; hb 4432 10 0 0 ended; : > "$T/alive"; run
 check "키가 없으면 예전처럼 조용"                    '[ ! -s "$T/notify.calls" ] && [ ! -s "$T/tmux.calls" ]'

@@ -35,6 +35,7 @@ pgrep -x rcsupervisor; pgrep -x rcterm; pgrep -x daq | wc -l; pgrep -x tcb; ss -
 ## 2. 하드웨어 조치의 권한 (사용자 결정, 2026-10-10)
 
 - **자동으로 한다**: 감시자 TERM 정상 종료, `killdaq.sh -b <bindir>` 로 고아 정리, `src/usbreset`, 확인 런, 감시자 재기동. 전부 §11.119 에 문서화된 절차다.
+- **★ 감시자를 TERM 하기 전에 `touch /Data_ssd/LOG/chainwatch.hold`, 재기동한 뒤 `rm`** (2026-11-05). chainwatch 는 `chain_sup_restart_manual=1` 이라 사람이 세운 감시자도 30 분 뒤 다시 띄운다 -- usbreset·NOTICE·PDU·확인 런 도중에 끼어들면 안 된다. 세워 둔 채 끝내는 경우도 hold 를 남겨야 되살아나지 않는다(지우면 30 분 뒤 수집이 자동 재개된다).
 - **사용자 확인 뒤에만**: 보드 크레이트 전원 재투입, HV 조작, `NOTICE_CODE_RUN.sh`(보드를 재설정하므로 수집 중이면 런이 깨진다), 설정 파일 변경, 다른 계정 프로세스 종료, root 가 필요한 모든 것.
 
 ## 3. 표준 복구 절차 (usbreset 경로)

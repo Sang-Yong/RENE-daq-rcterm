@@ -45,7 +45,7 @@ crontab_l() { cat "$W/crontab"; }
 df_avail_gb() { cat "$W/df"; }
 is_mounted() { [ -e "$W/mounted" ]; }
 run_chainwatch() { echo chainwatch >> "$W/calls"; [ "$(ns_get net)" = down ] && touch "$DRILL_LOCALQ/cw-$FAKE_NOW.mail"; return 0; }
-run_usbrecover() { echo "usb-recover $*" >> "$W/calls"; return "$(cat "$W/usbrc" 2>/dev/null || echo 3)"; }
+run_usbrecover() { echo "usb-recover $*" >> "$W/calls"; [ -e "$DRILL_HOLD" ] && grep -q 'autonomy-drill pid=' "$DRILL_HOLD" && echo "hold-during-power" >> "$W/calls"; return "$(cat "$W/usbrc" 2>/dev/null || echo 3)"; }
 run_sheetstatus() { printf '밀린 런        : 0 개  [ ]\n완결돼 쓸 수 있는 것 : %s 개\n' "$(cat "$W/sheetleft" 2>/dev/null || echo 0)"; }
 print_cmd() { echo "install/bin/rcsupervisor --params config/rcsupervisor.params"; }
 tmux_c() {
@@ -232,12 +232,15 @@ chk "rc 0" "[ $rc = 0 ]"; chk "8 PASS" "[ \"\$(verdict 8)\" = PASS ]"
 chk "usb-recover 실물 (dry-run 아님)" "grep -qx 'usb-recover --force-power-cycle' $W/calls"
 chk "감시자 TERM 이 전원보다 먼저" "grep -qx 'TERM 1777' $W/sigs"
 chk "pane 에 감시자 명령" "grep -q 'send-keys -t %2 -l install/bin/rcsupervisor' $W/calls"
+chk "전원 작업 동안 자기 표식 hold 가 있다" "grep -qx 'hold-during-power' $W/calls"
+chk "감시자 재기동 전에 hold 를 지웠다" "[ ! -e $DRILL_HOLD ]"
 
 echo "[15] --with-power 실패 (usb-recover rc 2) : 감시자 안 띄움, 중단"
 new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443 SC_SUPDOWN=1 DRILL_PANE_IDLE=1; echo 2 > "$W/usbrc"
 rc=$(drill --plan quick --confirm-test-run --with-power)
 chk "rc 1" "[ $rc = 1 ]"; chk "8 FAIL" "[ \"\$(verdict 8)\" = FAIL ]"; chk "tmux send-keys 0" "! grep -q send-keys $W/calls"
 chk "사람이 볼 것" "grep -q '사람이 볼 것' $T/out/result.tsv"
+chk "실패해도 hold 는 지웠다 (chainwatch 가 30 분 뒤 되살리게)" "[ ! -e $DRILL_HOLD ]"
 unset DRILL_PANE_IDLE
 
 echo "[16] 중간에 INT : STOP 한 rcterm 에 CONT, 표식 지움, report 남김"

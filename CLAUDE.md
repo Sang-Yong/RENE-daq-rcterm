@@ -693,6 +693,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   **2026-11-05 부터 감시자는 포기해도 종료하지 않고 standby(`rcterm.hb.sup`, 60 분마다 재시도)로 남고, 그 전에 USB 서명이 첫 실패부터
   보이면 조기 recover, recover 는 usbreset 2 회·전원 재투입(PDU, 6 h 에 2 회)까지 한다**(§11.228). standby 인지는 `chainwatch.sh --status` 로 본다.
 - **★ 수동 작업 중 자동 재기동을 멈추려면 `touch /Data_ssd/LOG/chainwatch.hold`, 끝나면 rm** (2026-11-05, chainwatch 의 감시자·postrun·dataflow pane 자동 재기동만 멈춘다. 알림은 그대로, §11.228).
+- **★★ 수집은 언제나 돌아야 한다 (2026-11-05 사용자 지시, 영구).** `chain_sup_restart_manual=1` 이라 사람이 TERM 으로 세운 감시자도 chainwatch 가 30 분 뒤 다시 띄운다. **감시자를 TERM 하는 손 작업(usbreset·NOTICE·PDU·문턱 변경·예약 정지)은 먼저 `touch chainwatch.hold`, 재기동 뒤 `rm`.** 세워 둘 때는 hold 를 남긴다. `--max-cycles`·`--dry-run` 으로 스스로 끝난 감시자(시험 런)는 되살리지 않는다. 11-05 12:00 예약 정지 뒤 10 시간을 놀린 것이 계기다 (§11.228 이어서).
 - **감시자 기동 로그에서 `notify=` 줄을 확인할 것.** `(off)` 면 알람·메일이
   꺼진 채로 뜬 것이다. 설정을 안 고쳐 조용히 꺼져 있는 것이 가장 위험하다.
 - **알람이 울리면** `scripts/daq-alarm.sh --status` 로 사유를 보고,

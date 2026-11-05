@@ -34,6 +34,8 @@
 #     - kill 은 PID 로만 (pgrep -x · ps 계보). pgrep -f 는 쓰지 않는다
 #     - 전원은 --with-power 없이는 절대 하지 않는다
 #     - 멈춤 파일(chainwatch.hold)을 만들지 않는다 -- 자동 재기동을 시험하는 것이므로.
+#       ★ 예외 : 8 단계(--with-power)는 감시자 TERM 전에 자기 표식이 든 hold 를 만들고 감시자 재기동 직전에 지운다 --
+#         chainwatch 가 chain_sup_restart_manual=1 로 전원 작업 도중 감시자를 띄우지 않게 (리뷰 2026-11-05)
 #       대신 <루트>/RUNNING 표식으로 두 드릴이 겹치지 않게 한다
 #     - STOP 을 건 프로세스는 끝날 때(정상·중단 모두) CONT 를 보낸다
 #     - --dry-run 은 kill · tmux · chainwatch · usb-recover 를 하나도 부르지 않는다
@@ -175,7 +177,10 @@ sup_timing() {           # 감시자 기동 머리줄의 check · stale 초
    SUP_STALE=$(printf '%s' "$l" | sed -n 's/.*stale=\([0-9]*\) s.*/\1/p'); SUP_STALE=${SUP_STALE:-300}
 }
 
-hold_new() { [ -e "$HOLD" ] && [ "$HOLD_AT_START" = 0 ]; }
+HOLD_MINE=0
+hold_new() { [ -e "$HOLD" ] && [ "$HOLD_AT_START" = 0 ] && ! grep -qs "autonomy-drill pid=$$" "$HOLD"; }
+drill_hold_set() { [ -e "$HOLD" ] && return 0; printf 'autonomy-drill pid=%s %s\n' "$$" "$(date '+%F %T')" > "$HOLD" 2>/dev/null && HOLD_MINE=1; log "멈춤 파일을 만들었다 ($HOLD) -- 전원 단계 동안 chainwatch 가 감시자를 띄우지 않게"; }
+drill_hold_rm()  { [ "$HOLD_MINE" = 1 ] || return 0; rm -f "$HOLD"; HOLD_MINE=0; log "멈춤 파일을 지웠다 ($HOLD)"; }
 #  조건을 기다린다. $1=초  나머지=조건 명령. 참이면 0, 시간이 다 되면 1
 wait_for() {
    local lim=$1 t0; shift; t0=$(now_s)
@@ -194,6 +199,7 @@ cleanup() {
    local p
    for p in $STOPPED; do pid_alive "$p" && { send_sig CONT "$p"; log "정리 : pid $p 에 CONT (STOP 해 둔 것)"; }; done
    STOPPED=""
+   drill_hold_rm
    [ "${POWER_DOWN:-0}" = 1 ] && log "★ 수집 멈춤 (전원 단계 도중 끝났다). 손으로 띄울 것 : tmux daq:1.2 에서 ${POWER_CMD:-bash scripts/daq-tmux.sh --print-cmd supervisor 의 명령}"
    [ "$OWN_MARK" = 1 ] && [ "$REPORTED" = 0 ] && type write_report >/dev/null 2>&1 && write_report
    [ "$OWN_MARK" = 1 ] && rm -f "$MARK"
@@ -434,18 +440,22 @@ s8() {
    [ -n "$cmd" ] || { record 8 전원 - "감시자 재기동 명령" "daq-tmux.sh --print-cmd supervisor 가 없다 -- 전원 단계를 하지 않았다" FAIL "$DAQTMUX"; return; }
    t=$(ts); log "주입 : 감시자 pid $sp 에 TERM (run $R0 정상 마감) -> 전원 단계"
    POWER_CMD=$cmd; POWER_DOWN=1          # 여기부터 감시자 재기동까지 수집이 멎는다. 신호로 끝나도 안내가 남게
+   drill_hold_set                        # 전원 작업 도중 chainwatch(chain_sup_restart_manual=1)가 감시자를 띄우지 않게
    send_sig TERM "$sp"
    all_down() { [ -z "$(first_pid rcsupervisor)$(first_pid rcterm)$(first_pid daq)$(first_pid tcb)$(first_pid merger)" ]; }
    if ! wait_for 600 all_down; then
+      drill_hold_rm
       record 8 전원 "$t" "감시자·DAQ 정상 마감" "${ABORTED:-아직 살아 있다} -- 전원 단계를 하지 않았다. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$(sup_has 'stop|finished')"
       ABORTED="전원 단계 도중 중단 (수집이 멎어 있다)"; return
    fi
    if hold_new; then
+      drill_hold_rm
       record 8 전원 "$t" "전원 단계" "멈춤 파일이 생겨 전원을 건드리지 않았다. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$HOLD"
       ABORTED="멈춤 파일 (수집이 멎어 있다)"; return
    fi
    run_usbrecover --force-power-cycle > "$LOGDIR/usb-recover-power.txt" 2>&1; rc=$?
    log "usb-recover --force-power-cycle rc=$rc"
+   drill_hold_rm                         # 여기서부터는 chainwatch 가 감시자를 띄워도 된다 (실패해도 30 분 뒤 되살리는 쪽이 낫다)
    if [ "$rc" != 0 ]; then
       record 8 전원 "$t" "usb-recover rc=0 (확인 런 합격)" "rc=$rc -- 감시자를 다시 띄우지 않았다. ★ 사람이 볼 것. ★ 수집 멈춤, 손으로 띄울 것 : $cmd" FAIL "$LOGDIR/usb-recover-power.txt"
       ABORTED="전원 단계 실패 (수집이 멎어 있다)"; return
