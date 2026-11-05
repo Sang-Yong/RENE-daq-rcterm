@@ -66,6 +66,12 @@ SUPLOG=${CHAINWATCH_SUPLOG:-/Data/LOG/rcsupervisor.log}
 DAQTMUX=${CHAINWATCH_DAQTMUX:-$DIR/scripts/daq-tmux.sh}
 RCTERM_PARAMS=${CHAINWATCH_RCTERM_PARAMS:-$DIR/config/rcterm.params}
 SESSION=${CHAINWATCH_SESSION:-daq}
+#  ★ 멈춤 파일. 사람이 손으로 작업하는 동안 이것을 만들어 두면 pane 자동 재기동(D-3 · D-4)을 하지 않는다.
+#    알림은 그대로 나간다.   touch /Data_ssd/LOG/chainwatch.hold   ...   rm /Data_ssd/LOG/chainwatch.hold
+HOLD=${CHAINWATCH_HOLD:-/Data_ssd/LOG/chainwatch.hold}
+SUP_HB=${CHAINWATCH_SUP_HB:-}         # 감시자 대기 상태 파일. 비면 <heartbeat>.sup
+#  pane 의 마지막 줄이 '맨 프롬프트' 인가 (끝이 $ # > 이고 그 뒤에 친 글자가 없다)
+PROMPT_RE=${CHAINWATCH_PROMPT_RE:-'[$#>]$'}
 
 HB=/Data/LOG/rcterm.hb
 NFS_ROOT=/scratch
@@ -87,6 +93,8 @@ MID_ALARM_GB=500     # /data 알람 문턱
 SUP_AUTORESTART=1    # 감시자가 FATAL 로 끝났으면 pane 에서 다시 띄운다 (시간당 1 회, 하루 상한)
 SUP_RESTART_DAILY=3  # 하루 상한 -- 보드가 정말 죽었으면 매시 런 번호 5 개씩 태운다
 AUTORESTART=1        # postrun · dataflow 가 죽었으면 pane 에서 다시 띄운다 (시간당 1 회)
+SUP_RESTART_AFTER_MIN=30   # 감시자가 끝난 뒤(마지막 [SUP] 줄) 이만큼 지나야 다시 띄운다 -- 사람이 손대는 중일 수 있다
+SUP_MAX_AGE=900      # 감시자 대기 상태 파일(time=)이 이보다 오래되면 믿지 않는다
 STATUS=0; DRY=0; NONOTIFY=0
 GATE=auto            # auto | on | off   (off/on 은 시험용 강제)
 
@@ -121,6 +129,9 @@ load_params() {
          chain_sup_autorestart) SUP_AUTORESTART=$v ;;
          chain_sup_autorestart_daily) SUP_RESTART_DAILY=$v ;;
          chain_autorestart)  AUTORESTART=$v ;;
+         chain_sup_restart_after_min) SUP_RESTART_AFTER_MIN=$v ;;
+         chain_sup_standby_max_age) SUP_MAX_AGE=$v ;;
+         chain_hold_file)    HOLD=$v ;;
       esac
    done < "$f"
 }
@@ -233,6 +244,7 @@ check_chain() {
 
 check_rate() {
    local age phase daqtime minrate
+   in_standby && { RATE_MSG=""; return 0; }          # 감시자 대기 중 -- 수집 중이 아니다
    age=$(hb_age) || { RATE_MSG=""; return 0; }          # heartbeat 없음 -> 판정 안 함
    [ "$age" -le "$HB_MAX_AGE" ] || { RATE_MSG=""; return 0; }   # 수집 중이 아니다
    phase=$(hb_field phase)
@@ -255,6 +267,7 @@ check_rate() {
 check_rate_high() {
    local age phase daqtime maxrate run sub
    HIGH_MSG=""; WARN_MSG=""
+   in_standby && return 0
    age=$(hb_age) || return 0
    [ "$age" -le "$HB_MAX_AGE" ] || return 0
    phase=$(hb_field phase); [ "$phase" = "running" ] || return 0
@@ -289,6 +302,7 @@ to_epoch() {
 
 check_runchange() {
    local age phase daqtime cur prev ev gap detail msg p_onl p_st p_et p_n p_t c_st c_desc p_desc rate between
+   in_standby && return 0
    age=$(hb_age) || return 0
    [ "$age" -le "$HB_MAX_AGE" ] || return 0
    phase=$(hb_field phase); [ "$phase" = "running" ] || return 0
@@ -402,7 +416,16 @@ pane_idle() {
 }
 #  pane 에 명령 한 줄을 친다. ★ send-keys "<명령>" Enter 는 'not in a mode' 만 내고
 #    아무것도 안 칠 때가 있어 -l 로 글자를 넣고 Enter 를 따로 보낸다 (CLAUDE.md 10)
+#  ★ 먼저 C-a C-k 로 줄을 비운다. 사람이 쳐 두고 Enter 를 안 친 글자가 있으면 그 뒤에 명령이
+#    이어 붙는다 (리뷰 재현 : 'ran.txtecho RUN-supervisor'). 그래서 그런 글자가 보이면 아예 손대지 않는다
+#    (pane_bare_prompt), 보이지 않아도 한 번 더 비운다.
+PANE_LAST=""
+pane_bare_prompt() {     # $1 = pane_id.  마지막 내용 줄이 맨 프롬프트면 0
+   PANE_LAST=$("$TMUX_BIN" capture-pane -p -t "$1" 2>/dev/null | sed 's/[[:space:]]*$//' | grep -v '^$' | tail -1)
+   [ -n "$PANE_LAST" ] && printf '%s\n' "$PANE_LAST" | grep -Eq "$PROMPT_RE"
+}
 pane_type() {            # $1 = pane_id  $2 = 명령
+   "$TMUX_BIN" send-keys -t "$1" C-a C-k 2>/dev/null || return 1
    "$TMUX_BIN" send-keys -t "$1" -l "$2" 2>/dev/null && "$TMUX_BIN" send-keys -t "$1" Enter 2>/dev/null
 }
 #  pane 하나를 다시 띄운다. 결과 문구를 RESTART_MSG 에 남긴다.  $1=열쇠말(postrun|dataflow|supervisor)
@@ -413,6 +436,7 @@ revive_pane() {
    [ -n "$pp" ] || { RESTART_MSG="$key pane 을 tmux 세션 $SESSION 에서 못 찾았다 -- 다시 띄우지 않았다"; return 1; }
    id=${pp% *}; pid=${pp#* }
    pane_idle "$pid" || { RESTART_MSG="$key pane($id) 에 무언가 돌고 있다 -- 손대지 않았다"; return 1; }
+   pane_bare_prompt "$id" || { RESTART_MSG="$key pane($id) 의 마지막 줄이 맨 프롬프트가 아니다 (사람이 친 글자? '$(printf '%s' "$PANE_LAST" | tail -c 60)') -- 손대지 않았다"; return 1; }
    cmd=$(bash "$DAQTMUX" --print-cmd "$key" 2>/dev/null)
    [ -n "$cmd" ] || { RESTART_MSG="$key 명령 줄을 daq-tmux.sh --print-cmd 로 못 얻었다 -- 다시 띄우지 않았다"; return 1; }
    if [ "$DRY" -eq 1 ]; then RESTART_MSG="[DRY] $key pane($id) 에 쳤을 것 : $cmd"; return 0; fi
@@ -463,8 +487,10 @@ df_avail_gb() {
    df -BG --output=avail "$1" 2>/dev/null | awk 'NR == 2 { gsub(/G/, ""); print $1 + 0 }'
 }
 #  수준 0 정상 · 1 메일 문턱 아래 · 2 알람 문턱 아래.  수준이 오르면 즉시, 같으면 재알림 간격으로.
-check_disk_one() {       # $1=키 $2=경로 $3=메일 문턱 GB $4=알람 문턱 GB
-   local key=$1 root=$2 min=$3 alarm=$4 av lvl prev last now msg
+#  ★ 사건명을 경로마다 나눈다 (/Data_ssd = disk_low, /data = mid_disk_low). 같은 이름이면 둘째가
+#    daq-notify 의 300 초 도배 방지에 먹힌다.
+check_disk_one() {       # $1=키 $2=경로 $3=메일 문턱 GB $4=알람 문턱 GB $5=사건명
+   local key=$1 root=$2 min=$3 alarm=$4 ev=$5 av lvl prev last now msg
    [ -d "$root" ] || return 0
    av=$(df_avail_gb "$root"); case "$av" in ''|*[!0-9]*) return 0 ;; esac
    lvl=0; [ "$av" -lt "$min" ] && lvl=1; [ "$av" -lt "$alarm" ] && lvl=2
@@ -483,35 +509,76 @@ check_disk_one() {       # $1=키 $2=경로 $3=메일 문턱 GB $4=알람 문턱
       return 0
    fi
    log "disk_low 알림 (수준 $lvl) : $msg"
-   if [ "$lvl" -eq 2 ]; then notify_ev disk_low "$msg" --force-alarm; else notify_ev disk_low "$msg"; fi
+   if [ "$lvl" -eq 2 ]; then notify_ev "$ev" "$msg" --force-alarm; else notify_ev "$ev" "$msg"; fi
    [ "$DRY" -eq 1 ] || { st_set "disk_level_$key" "$lvl"; st_set "disk_alert_$key" "$now"; }
    return 0
 }
 check_disk() {
-   check_disk_one ssd "$SSD_ROOT" "$SSD_MIN_GB" "$SSD_ALARM_GB"
-   check_disk_one mid "$MID_ROOT" "$MID_MIN_GB" "$MID_ALARM_GB"
+   check_disk_one ssd "$SSD_ROOT" "$SSD_MIN_GB" "$SSD_ALARM_GB" disk_low
+   check_disk_one mid "$MID_ROOT" "$MID_MIN_GB" "$MID_ALARM_GB" mid_disk_low
 }
 
-# ---- D-3 : 감시자가 FATAL 로 끝났다 ----------------------------------------
-#  tmux 세션은 있는데 감시자가 없고, 감시자 로그의 마지막 [SUP] 줄이 FATAL 이면.
-#  ★ 사람이 세운 것('rcsupervisor stop' 으로 끝남)은 알리지 않는다.
-SUPDOWN=""; SUPGONE=""
+# ---- 감시자 대기(standby) 상태 ------------------------------------------
+#  새 감시자는 대기 상태를 rcterm.hb 가 아니라 <heartbeat>.sup 에 쓴다 (time= pid= phase=standby
+#  standby=<config|hardware|rate> run=…). rcterm.hb 는 직전 런 그대로라 소비자들이 붙잡지 않는다.
+#  그 파일이 없으면(옛 판·과도기) rcterm.hb 의 phase=standby 도 받아들인다.
+STANDBY_REASON=""; STANDBY_RUN=""; STANDBY_FROM=""
+in_standby() {
+   local f t ph now
+   STANDBY_REASON=""; STANDBY_RUN=""; STANDBY_FROM=""
+   f=${SUP_HB:-$HB.sup}; now=$(date +%s)
+   if [ -e "$f" ]; then
+      ph=$(sed -n 's/^phase=//p' "$f" 2>/dev/null | head -1)
+      [ "$ph" = standby ] || return 1
+      t=$(sed -n 's/^time=//p' "$f" 2>/dev/null | head -1)
+      case "$t" in ''|*[!0-9]*) t=$(stat -c %Y "$f" 2>/dev/null || echo 0) ;; esac
+      [ $(( now - t )) -le "$SUP_MAX_AGE" ] || return 1
+      STANDBY_REASON=$(sed -n 's/^standby=//p' "$f" 2>/dev/null | head -1)
+      STANDBY_RUN=$(sed -n 's/^run=//p' "$f" 2>/dev/null | head -1); STANDBY_FROM=$f
+      return 0
+   fi
+   [ "$(hb_field phase)" = standby ] || return 1
+   t=$(hb_age) || return 1
+   [ "$t" -le "$SUP_MAX_AGE" ] || return 1
+   STANDBY_REASON=$(hb_field standby); STANDBY_RUN=$(hb_field run); STANDBY_FROM=$HB
+   return 0
+}
+
+# ---- D-3 : 감시자가 끝나 수집이 멎었다 ------------------------------------
+#  tmux 세션은 있는데 감시자가 없고, 감시자 로그의 마지막 [SUP] 줄이
+#     FATAL                      -> 감시자가 포기했다          (SUPKIND=fatal)
+#     'rcsupervisor stop' 이 아님 -> stop 줄 없이 사라졌다      (SUPKIND=gone : kill -9 · OOM, §11.208)
+#  ★ 사람이 세운 것('rcsupervisor stop' 으로 끝남)은 알리지 않는다. 대기(standby) 중이면 멎은 것이 아니다.
+SUPDOWN=""; SUPKIND=""; SUPGONE=""
 check_supervisor() {
    local last
-   SUPDOWN=""; SUPGONE=""
+   SUPDOWN=""; SUPKIND=""; SUPGONE=""
    "$TMUX_BIN" has-session -t "$SESSION" 2>/dev/null || return 0
    "$PGREP_BIN" -x rcsupervisor >/dev/null 2>&1 && return 0
-   last=$(tail -n 400 "$SUPLOG" 2>/dev/null | grep -a '\[SUP\]' | tail -1)
+   in_standby && return 0
+   local recent
+   recent=$(tail -n 400 "$SUPLOG" 2>/dev/null | grep -a '\[SUP\]' | tail -5)
+   last=$(printf '%s\n' "$recent" | tail -1)
+   #  사람이 TERM 을 보내면 'stop requested' -> … -> 'rcsupervisor stop' 이다. 그 사이에 죽었어도 사람이 세운 것
+   printf '%s\n' "$recent" | grep -q 'stop requested' && return 0
    case "$last" in
-      *FATAL*) SUPDOWN=$last; return 1 ;;
       *'rcsupervisor stop'*|'') return 0 ;;
-      *) SUPGONE=$last; return 0 ;;       # stop 줄 없이 사라졌다 (kill -9 · OOM). 알리지는 않고 --status 에만
+      *FATAL*) SUPDOWN=$last; SUPKIND=fatal; return 1 ;;
+      *)       SUPDOWN=$last; SUPKIND=gone; SUPGONE=$last; return 1 ;;
    esac
 }
+#  마지막 [SUP] 줄의 시각 (줄 머리 'YYYY-MM-DD HH:MM:SS') -> epoch. 못 읽으면 빈 문자열
+supline_epoch() { date -d "$(printf '%s' "$1" | cut -c1-19)" +%s 2>/dev/null; }
 sup_autorestart() {
-   local day cnt n
+   local day cnt n t age
    RESTART_MSG=""
    [ "$SUP_AUTORESTART" = 1 ] || { RESTART_MSG="자동 재기동 꺼짐 (chain_sup_autorestart=0)"; return 0; }
+   [ -e "$HOLD" ] && { RESTART_MSG="멈춤 파일이 있다 ($HOLD) -- 사람이 작업 중. 다시 띄우지 않았다"; return 0; }
+   t=$(supline_epoch "$SUPDOWN")
+   if [ -n "$t" ]; then
+      age=$(( $(date +%s) - t ))
+      [ "$age" -ge $(( SUP_RESTART_AFTER_MIN * 60 )) ] || { RESTART_MSG="감시자가 끝난 지 $(( age / 60 ))분 -- ${SUP_RESTART_AFTER_MIN}분이 지나야 다시 띄운다 (사람이 손대는 중일 수 있다)"; return 0; }
+   fi
    restart_allowed autorestart_supervisor || { RESTART_MSG="자동 재기동은 시간당 1 회 -- 이번에는 하지 않았다"; return 0; }
    day=$(date +%Y%m%d); cnt=$(st_get autorestart_supervisor_day)
    case "$cnt" in "$day":*) n=${cnt#*:} ;; *) n=0 ;; esac
@@ -528,7 +595,8 @@ sup_autorestart() {
 }
 
 # ---- D-4 : 죽은 postrun · dataflow 를 다시 띄운다 ---------------------------
-#  ★ /scratch 가 빠져 있으면 띄우지 않는다 (postrun 의 로그가 그 밑이다). 그때는 사람 몫.
+#  ★ postrun 은 /scratch 가 빠져 있으면 띄우지 않는다 (그 로그가 /scratch 밑이다).
+#    dataflow 는 /scratch 와 무관하게 띄운다 -- 자체 마운트 가드(1·3 단계)가 있고 SSD 를 비우는 유일한 길이다.
 NFS_HINT="★ /scratch 가 안 붙으면 저장소 서버에서 10.0.0.11 로 잘못 설정된 이더넷(카드) 프로파일을 지워 달라고 요청할 것 (CLAUDE.md 10, 11.225)"
 CHAIN_RESTART=""
 chain_autorestart() {
@@ -537,7 +605,8 @@ chain_autorestart() {
    [ "$AUTORESTART" = 1 ] || return 0
    for comp in postrun dataflow; do
       case " $DOWN " in *" $comp(없음)"*) ;; *) continue ;; esac
-      if ! is_mounted "$NFS_ROOT"; then out="$out; $comp 는 $NFS_ROOT 가 빠져 있어 다시 띄우지 않았다"; continue; fi
+      [ -e "$HOLD" ] && { out="$out; $comp 는 멈춤 파일($HOLD)이 있어 다시 띄우지 않았다"; continue; }
+      if [ "$comp" = postrun ] && ! is_mounted "$NFS_ROOT"; then out="$out; $comp 는 $NFS_ROOT 가 빠져 있어 다시 띄우지 않았다"; continue; fi
       restart_allowed "autorestart_$comp" || { out="$out; $comp 자동 재기동은 시간당 1 회"; continue; }
       if revive_pane "$comp"; then
          [ "$DRY" -eq 1 ] || st_set "autorestart_$comp" "$(date +%s)"
@@ -610,7 +679,11 @@ main() {
    check_supervisor; local sd=$?
    if [ "$sd" -ne 0 ]; then
       sup_autorestart
-      handle supervisor_down 1 "감시자가 FATAL 로 끝나 수집이 멎었다 : ${SUPDOWN#* \[SUP\] } ; 자동 재기동 : ${RESTART_MSG:-없음}" 1
+      if [ "$SUPKIND" = fatal ]; then
+         handle supervisor_down 1 "감시자가 FATAL 로 끝나 수집이 멎었다 : ${SUPDOWN#* \[SUP\] } ; 자동 재기동 : ${RESTART_MSG:-없음}" 1
+      else
+         handle supervisor_down 1 "★ 감시자가 'stop' 줄 없이 사라졌다 (kill -9 · OOM?) -- 마지막 줄 : ${SUPDOWN} ; 자동 재기동 : ${RESTART_MSG:-없음}" 1
+      fi
    else
       handle supervisor_down 0 ""
    fi
@@ -652,14 +725,16 @@ if [ "$STATUS" -eq 1 ]; then
       IFS=: read -r dr dm da <<< "$d"
       [ -d "$dr" ] && echo "  디스크      : $dr 여유 $(df_avail_gb "$dr") GB  (메일 < $dm · 알람 < $da)"
    done
-   if "$PGREP_BIN" -x rcsupervisor >/dev/null 2>&1; then echo "  감시자      : 살아 있음  (rate_high 마감 요청 chain_rate_stop=$RATE_STOP)"
+   if in_standby; then echo "  감시자      : 대기 (standby=${STANDBY_REASON:-?} run=${STANDBY_RUN:-?}, $STANDBY_FROM) -- 계수율·런 교체 판정 안 함"
+   elif "$PGREP_BIN" -x rcsupervisor >/dev/null 2>&1; then echo "  감시자      : 살아 있음  (rate_high 마감 요청 chain_rate_stop=$RATE_STOP)"
    else
       check_supervisor
-      if [ -n "$SUPDOWN" ]; then echo "  감시자      : ★ FATAL 로 끝났다 -- $SUPDOWN"
-      elif [ -n "$SUPGONE" ]; then echo "  감시자      : ★ 'stop' 줄 없이 사라졌다 (kill -9 · OOM?) -- 마지막 줄 : $SUPGONE"
+      if [ "$SUPKIND" = fatal ]; then echo "  감시자      : ★ FATAL 로 끝났다 -- $SUPDOWN"
+      elif [ "$SUPKIND" = gone ]; then echo "  감시자      : ★ 'stop' 줄 없이 사라졌다 (kill -9 · OOM?) -- 마지막 줄 : $SUPGONE"
       else echo "  감시자      : 없음 (사람이 세웠다)"; fi
    fi
-   echo "  자동 재기동 : postrun/dataflow chain_autorestart=$AUTORESTART · 감시자 chain_sup_autorestart=$SUP_AUTORESTART (하루 ${SUP_RESTART_DAILY} 회) · 마지막 $(for k in postrun dataflow supervisor; do t=$(st_get autorestart_$k); printf '%s=%s ' $k "$( [ -n "$t" ] && date -d @"$t" '+%m-%d %H:%M' || echo -)"; done)"
+   [ -e "$HOLD" ] && echo "  ★ 멈춤 파일 : $HOLD -- pane 자동 재기동을 하지 않는다 (알림은 나간다)"
+   echo "  자동 재기동 : postrun/dataflow chain_autorestart=$AUTORESTART · 감시자 chain_sup_autorestart=$SUP_AUTORESTART (하루 ${SUP_RESTART_DAILY} 회, 끝난 뒤 ${SUP_RESTART_AFTER_MIN}분) · 마지막 $(for k in postrun dataflow supervisor; do t=$(st_get autorestart_$k); printf '%s=%s ' $k "$( [ -n "$t" ] && date -d @"$t" '+%m-%d %H:%M' || echo -)"; done)"
    exit 0
 fi
 

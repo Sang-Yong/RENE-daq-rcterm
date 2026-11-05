@@ -28,7 +28,8 @@ cat > "$T/bin/tmux" <<TM
 case "\$1" in
   has-session) [ -e "$T/tmux_has" ] ;;
   list-panes)  cat "$T/panes.txt" ;;
-  send-keys)   shift; printf '%s\n' "\$*" >> "$T/tmux.calls" ;;
+  send-keys)   shift; case "\$*" in *" C-a C-k") ;; *) printf '%s\n' "\$*" >> "$T/tmux.calls" ;; esac ;;
+  capture-pane) cat "$T/capture" 2>/dev/null ;;
   *) exit 1 ;;
 esac
 TM
@@ -43,6 +44,8 @@ printf '#!/bin/bash\n[ -e "%s/mounted" ]\n' "$T" > "$T/bin/mountpoint"
 printf '#!/bin/bash\necho "CMD-$2 --follow"\n' > "$T/bin/daqtmux"
 chmod +x "$T"/bin/*
 : > "$T/rcterm.params"
+#  pane 화면의 마지막 줄 (실물 프롬프트 모양). 사람이 친 글자가 있으면 손대지 않는다
+printf 'some output\n[frontend@rocky9 RENE-daq-rcterm]$ \n\n' > "$T/capture"
 cat > "$T/panes.txt" <<'PN'
 %0 101 DAQ Run Status(monitor)
 %2 102 supervisor
@@ -54,7 +57,7 @@ export CHAINWATCH_LOCK=$T/.lock CHAINWATCH_TMUX=$T/bin/tmux CHAINWATCH_PGREP=$T/
        CHAINWATCH_KILL=$T/bin/kill CHAINWATCH_MOUNTPOINT=$T/bin/mountpoint CHAINWATCH_PS=$T/ps.txt \
        CHAINWATCH_DF_FILE=$T/df.txt CHAINWATCH_SUPLOG=$T/sup.log CHAINWATCH_PROC=$T/proc \
        CHAINWATCH_DAQTMUX=$T/bin/daqtmux CHAINWATCH_RCTERM_PARAMS=$T/rcterm.params \
-       CHAINWATCH_IDLE_PIDS="101 102 103 104 105" NETSYNC_STATE=$T/netsync.state NOTIFY_LOG=$T/notify.log
+       CHAINWATCH_IDLE_PIDS="101 102 103 104 105" CHAINWATCH_HOLD=$T/hold NETSYNC_STATE=$T/netsync.state NOTIFY_LOG=$T/notify.log
 P=$T/cw.params
 printf 'chain_ssd_root = %s\nchain_mid_root = %s\nchain_min_rate = 100\n' "$T/ssd" "$T/mid" > "$P"
 HB=$T/rcterm.hb; ST=$T/state; LOG=$T/cw.log
@@ -119,6 +122,9 @@ check "사유에 경로·여유"                           'grep -q "$T/ssd 여�
 printf '%s 3000\n%s 2000\n' "$T/ssd" "$T/mid" > "$T/df.txt"; run
 check "/Data_ssd 해소 로그"                        'grep -q "disk_low $T/ssd 해소됨" "$LOG"'
 check "/data 2000 GB (문턱 3000) -> 메일"          'grep -q "$T/mid 여유 2000 GB" "$T/notify.calls"'
+check "/data 는 사건명 mid_disk_low"                'grep " mid_disk_low --" "$T/notify.calls" | grep -q "$T/mid"'
+fresh; hb 4432 600 6000 6000; printf '%s 100\n%s 100\n' "$T/ssd" "$T/mid" > "$T/df.txt"; run
+check "둘 다 모자라면 두 사건 (disk_low · mid_disk_low)" 'grep -q " disk_low --" "$T/notify.calls" && grep -q " mid_disk_low --" "$T/notify.calls"'
 
 echo "[D3] supervisor_down : 감시자 FATAL -> 알림 + supervisor pane 재기동"
 fresh; hb 4427 10 0 0 ended; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"; run
@@ -161,7 +167,7 @@ check "알림에 재기동 결과"                         'grep " chain_down --
 "$CW" --params "$P" --gate on --heartbeat "$HB" --state "$ST" --log "$LOG" --dbfile /nonexistent.db --notify "$T/bin/notify" --realert-min 0 >/dev/null 2>&1
 check "한 시간 안에는 다시 띄우지 않는다"          '[ ! -s "$T/tmux.calls" ] && grep -q "시간당 1 회" "$T/notify.calls"'
 fresh; hb 4432 600 6000 6000; : > "$T/ps.txt"; rm -f "$T/mounted"; run; run
-check "/scratch 가 빠지면 띄우지 않는다"           '[ ! -s "$T/tmux.calls" ]'
+check "/scratch 가 빠지면 postrun 은 띄우지 않는다" '! grep -q -- "-t %3" "$T/tmux.calls"'
 check "사유에 10.0.0.11 프로파일 요청 문구"        'grep " chain_down --" "$T/notify.calls" | grep -q "10.0.0.11 로 잘못 설정된 이더넷"'
 fresh; hb 4432 600 6000 6000; echo "90211 bash /x/scripts/postrun.sh --follow" > "$T/ps.txt"; run; run
 check "postrun 은 살아 있으면 dataflow 만"         'grep -q -- "-t %4 -l" "$T/tmux.calls" && ! grep -q -- "-t %3" "$T/tmux.calls"'
@@ -188,6 +194,56 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" CHAINWATCH_LOCK=$T/.lock CHAI
    --notify "$T/bin/notify" >/dev/null 2>&1; rc=$?
 check "rc 0"                                       '[ "$rc" = 0 ]'
 check "env -i 에서도 재기동"                       'grep -q -- "-t %3 -l CMD-postrun" "$T/tmux.calls"'
+
+echo "[R1] 사람이 프롬프트에 쳐 둔 글자가 있으면 손대지 않는다 (가짜 화면)"
+fresh; hb 4432 600 6000 6000; : > "$T/ps.txt"; printf '[frontend@rocky9 RENE-daq-rcterm]$ ran.txt\n' > "$T/capture"; run; run
+check "send-keys 없음"                             '[ ! -s "$T/tmux.calls" ]'
+check "사유에 친 글자"                             'grep " chain_down --" "$T/notify.calls" | grep -q "ran.txt"'
+printf '[frontend@rocky9 RENE-daq-rcterm]$ \n' > "$T/capture"
+
+echo "[R3a] 멈춤 파일이 있으면 D-3 · D-4 재기동 안 함 (알림은 그대로)"
+fresh; hb 4427 10 0 0 ended; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"; touch "$T/hold"; run
+check "D-3 : 재기동 없음 · 알림 있음"              '[ ! -s "$T/tmux.calls" ] && grep -q " supervisor_down --" "$T/notify.calls"'
+check "사유에 멈춤 파일"                           'grep -q "멈춤 파일이 있다" "$T/notify.calls"'
+fresh; hb 4432 600 6000 6000; : > "$T/ps.txt"; touch "$T/hold"; run; run
+check "D-4 : 재기동 없음 · chain_down 알림"         '[ ! -s "$T/tmux.calls" ] && grep -q " chain_down --" "$T/notify.calls"'
+out=$("$CW" --params "$P" --status --heartbeat "$HB" --state "$ST" --log "$LOG" 2>&1)
+check "--status 에 멈춤 파일"                      'printf "%s" "$out" | grep -q "멈춤 파일"'
+rm -f "$T/hold"
+
+echo "[R3b] FATAL 30 분 안에는 다시 띄우지 않는다"
+fresh; hb 4427 10 0 0 ended; : > "$T/alive"
+printf '%s [SUP] FATAL too many consecutive failures; giving up. please inspect the DAQ logs\n' "$(date -d '-10 min' '+%F %T')" > "$T/sup.log"; run
+check "알림은 즉시"                                'grep -q " supervisor_down --" "$T/notify.calls"'
+check "재기동 없음 (10 분)"                        '[ ! -s "$T/tmux.calls" ] && grep -q "30분이 지나야" "$T/notify.calls"'
+printf '%s [SUP] FATAL too many consecutive failures; giving up. please inspect the DAQ logs\n' "$(date -d '-31 min' '+%F %T')" > "$T/sup.log"; run
+check "31 분이면 재기동"                           'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
+
+echo "[R3c] stop 줄 없이 사라진 감시자 (OOM · kill -9) 도 같은 규칙으로"
+fresh; hb 4372 10 0 0 ended; : > "$T/alive"; head -8 "$FX/rcsupervisor_stop_20261105.txt" > "$T/sup.log"; run
+check "supervisor_down 알림 (사라짐)"              'grep " supervisor_down --" "$T/notify.calls" | grep -q "stop. 줄 없이 사라졌다"'
+check "재기동 (마지막 줄이 30 분 넘게 지났다)"      'grep -qx -- "-t %2 -l CMD-supervisor --follow" "$T/tmux.calls"'
+fresh; hb 4372 10 0 0 ended; : > "$T/alive"; printf '%s [SUP] health OK  run=4372 sub=512 state=Running\n' "$(date -d '-5 min' '+%F %T')" > "$T/sup.log"; run
+check "사라진 지 5 분이면 재기동 안 함"            '[ ! -s "$T/tmux.calls" ]'
+fresh; hb 4432 10 0 0 ended; : > "$T/alive"; head -9 "$FX/rcsupervisor_stop_20261105.txt" > "$T/sup.log"; run
+check "'stop requested' 뒤에 죽었으면 사람이 세운 것 (조용)" '[ ! -s "$T/notify.calls" ] && [ ! -s "$T/tmux.calls" ]'
+
+echo "[R4] 감시자 대기(standby) : <heartbeat>.sup 기준, 없으면 rcterm.hb 의 phase=standby"
+fresh; hb 4433 6000 40000 40000; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"
+printf 'time=%s\npid=4242\nphase=standby\nstandby=hardware\nrun=4433\n' "$(date +%s)" > "$HB.sup"; run
+check ".sup standby : supervisor_down 아님"        '! grep -q " supervisor_down --" "$T/notify.calls" && [ ! -s "$T/tmux.calls" ]'
+check ".sup standby : 계수율 판정 안 함 (sr 40 k 인데 rate_high 없음)" '! grep -q " rate_high --" "$T/notify.calls"'
+out=$("$CW" --params "$P" --status --heartbeat "$HB" --state "$ST" --log "$LOG" 2>&1)
+check "--status 에 대기 · 사유"                    'printf "%s" "$out" | grep -q "대기 (standby=hardware run=4433"'
+printf 'time=%s\npid=4242\nphase=standby\nstandby=rate\nrun=4433\n' "$(( $(date +%s) - 3600 ))" > "$HB.sup"; run
+check "오래된 .sup 는 믿지 않는다 -> supervisor_down" 'grep -q " supervisor_down --" "$T/notify.calls"'
+rm -f "$HB.sup"; fresh; hb 4433 6000 40000 40000 standby; : > "$T/alive"; cp "$FX/rcsupervisor_fatal_20261103.txt" "$T/sup.log"; run
+check ".sup 가 없으면 rcterm.hb phase=standby 를 받는다" '! grep -q " supervisor_down --" "$T/notify.calls" && ! grep -q " rate_high --" "$T/notify.calls"'
+
+echo "[R6] /scratch 가 빠져도 dataflow 는 띄운다 (postrun 은 안 띄운다)"
+fresh; hb 4432 600 6000 6000; : > "$T/ps.txt"; rm -f "$T/mounted"; run; run
+check "dataflow 재기동"                           'grep -qx -- "-t %4 -l CMD-dataflow --follow" "$T/tmux.calls"'
+check "postrun 은 없음"                           '! grep -q -- "-t %3" "$T/tmux.calls"'
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

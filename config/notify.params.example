@@ -84,14 +84,15 @@ on_resumed          = mail      # 문제 뒤 다시 정상 가동
 on_backup_session   = mail      # 저장소 백업 세션 시작/종료 (새 판인지 포함). 책임자만
 on_websummary       = mail      # 런 서머리 웹 발행이 막혔다 (단계 실패·대조 불일치). 같은 사유로는 한 번만. 책임자만
 on_supervisor_down  = both      # ★ 감시자가 FATAL 로 끝났다 (chainwatch). 알람 + 메일. 아래 목록에 넣어 전문가에게도
-on_disk_low         = mail      # /Data_ssd · /data 여유가 문턱 아래 (chainwatch). 알람 문턱 아래면 알람도 함께 온다
+on_disk_low         = mail      # /Data_ssd 여유가 문턱 아래 (chainwatch). 알람 문턱 아래면 알람도 함께 온다
+on_mid_disk_low     = mail      # /data 여유가 문턱 아래 (같은 규칙, 사건명만 따로 -- 도배 방지에 서로 먹히지 않게)
 on_net_down         = mail      # 바깥 망 단절 (netsync). 큐에 들어가 복귀 뒤에 나간다
 on_net_restored     = mail      # 바깥 망 복귀 -- 밀린 메일·시트를 내보낸 결과
 mail_queue          = /Data_ssd/LOG/MAILQ   # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
 
 #  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
 #  나머지는 책임자만.  비워 두면 예전 규칙(recovery_failed · fatal 만 전문가).
-mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed supervisor_down disk_low
+mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed supervisor_down disk_low mid_disk_low
 
 #  같은 이벤트를 이 간격 안에 여러 번 보내지 않는다 [초]. 도배 방지.
 #  recovery_failed 와 fatal 은 이 제한을 받지 않는다 (놓치면 안 되는 것들이다).
@@ -140,7 +141,12 @@ chain_mid_min_free_gb = 3000     # /data 여유 문턱 (메일)
 chain_mid_alarm_gb  = 500        # /data 알람 문턱
 chain_sup_autorestart = 1        # 감시자가 FATAL 로 끝났으면 supervisor pane 에서 다시 띄운다 (시간당 1 회)
 chain_sup_autorestart_daily = 3  # 하루 상한. 보드가 정말 죽었으면 재기동마다 런 번호 5 개를 태운다
-chain_autorestart   = 1          # postrun · dataflow 가 죽었으면 그 pane 에서 다시 띄운다 (시간당 1 회, /scratch 가 있을 때만)
+chain_autorestart   = 1          # postrun · dataflow 가 죽었으면 그 pane 에서 다시 띄운다 (시간당 1 회)
+                                 # postrun 은 /scratch 가 있을 때만. dataflow 는 자체 마운트 가드가 있어 늘
+chain_sup_restart_after_min = 30 # 감시자가 끝난 뒤(FATAL 또는 stop 줄 없이 사라짐) 이만큼 지나야 다시 띄운다
+chain_sup_standby_max_age = 900  # 감시자 대기 상태 파일(<heartbeat>.sup 의 time=)이 이보다 오래되면 믿지 않는다
+chain_hold_file     = /Data_ssd/LOG/chainwatch.hold   # ★ 이 파일이 있으면 pane 자동 재기동 안 함 (알림은 나감)
+                                 # 사람이 손으로 작업할 때 :  touch … 하고, 끝나면 rm …
 #  pane 에 넣는 명령은 scripts/daq-tmux.sh --print-cmd supervisor|postrun|dataflow 가 찍는 줄 그대로다
 
 # ---- 바깥 망 감시 (scripts/netsync.sh, cron */5) ----------------------

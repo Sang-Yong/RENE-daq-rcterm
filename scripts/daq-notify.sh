@@ -23,7 +23,8 @@
 #     backup_session   저장소 서버의 외장하드 백업 세션이 시작/종료됐다 (새 판인지 포함). scripts/backup-sheetlog.sh
 #     websummary       런 서머리 웹 발행이 막혔다 (단계 실패·대조 불일치). tools/monitor/websummary.sh. 같은 사유로는 한 번만
 #     supervisor_down  ★ 감시자가 FATAL 로 끝나 수집이 멎었다 (chainwatch). 알람 + 메일. 자동 재기동 결과를 함께 싣는다
-#     disk_low         /Data_ssd · /data 여유가 문턱 아래다 (chainwatch). 알람 문턱 아래면 --force-alarm 으로 온다
+#     disk_low         /Data_ssd 여유가 문턱 아래다 (chainwatch). 알람 문턱 아래면 --force-alarm 으로 온다
+#     mid_disk_low     /data 여유가 문턱 아래다 (같은 규칙). 사건명을 나눈 것은 도배 방지(300 초)에 서로 먹히지 않게
 #     net_down         바깥 망(메일·시트)이 끊겼다 (scripts/netsync.sh). 큐에 들어가 망이 돌아올 때 나간다
 #     net_restored     바깥 망이 돌아왔다 -- 밀린 메일·시트를 내보낸 결과
 #
@@ -71,7 +72,7 @@ declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
-                [supervisor_down]=both [disk_low]=mail [net_down]=mail [net_restored]=mail )
+                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [net_down]=mail [net_restored]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
@@ -105,6 +106,7 @@ load_params() {
          on_websummary)      ON[websummary]=$v ;;
          on_supervisor_down) ON[supervisor_down]=$v ;;
          on_disk_low)        ON[disk_low]=$v ;;
+         on_mid_disk_low)    ON[mid_disk_low]=$v ;;
          on_net_down)        ON[net_down]=$v ;;
          on_net_restored)    ON[net_restored]=$v ;;
          mail_queue)         NOTIFY_MAILQ=$v ;;
@@ -276,7 +278,7 @@ build_body() {
             echo "  2) 고아 daq/tcb 가 있으면 :  scripts/killdaq.sh -b /home/frontend/DAQ/DAQ_cup/install/bin"
             echo "  3) 손으로 띄우려면 tmux daq 의 supervisor pane 에서 scripts/daq-tmux.sh --print-cmd supervisor 가 찍는 줄"
             echo "  4) 알람을 끄려면 :  scripts/daq-alarm.sh --silence" ;;
-         disk_low)
+         disk_low|mid_disk_low)
             echo "  디스크 여유가 문턱 아래다. /Data_ssd 가 차면 DAQ 가 쓰기를 못 해 멎는다."
             echo "  1) dataflow 가 도는지 :  scripts/chainwatch.sh --status  (dataflow 줄)"
             echo "  2) 무엇이 차지하나 :  du -sh /Data_ssd/RAW/* | sort -h | tail ;  scripts/dataflow.sh --params config/dataflow.params --once --dry-run"
