@@ -1071,6 +1071,8 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 **남은 것.** 리뷰 참고 ⓐⓑⓒ(§6 백로그) · manual 재기동 경로의 실물 동작은 수집 중이라 시험 못 했다(다음에 사람이 세우고 hold 없이 30 분 두면 확인됨) · 드릴 전체 · 전원 단계 실물 · 옛 dataflow 재기동(`! kill -TERM 90209 3542929` 하면 chainwatch D-4 가 5 분 안에 새 코드로 dataflow pane 을 되살린다, 시간당 1 회 상한).
 
+**이어서 (22:1x~22:33) — 옛 dataflow 정지 · 고아 rsync 가 잠금을 물려받아 자동 재기동이 한 번 빠짐 · 22:33 새 dataflow.** 사용자가 22:1x `kill -TERM 90209 3542929` 로 옛 dataflow·backup-khu 를 세웠고, chainwatch 가 22:20:01 에 D-4 로 dataflow 를 pane(%4) 에 다시 띄웠으나 즉시 "이미 실행 중이다 (/tmp/.dataflow.1001.lock). 종료" 로 빠졌다. 원인: 옛 backup-khu 가 띄운 rsync(pid 883700, `/data/RAW/004431/PRD/ -> khu`, 파이프 tail 883701 · sed 883702)가 부모가 죽은 뒤 고아로 돌며 **옛 dataflow 의 flock fd 9 를 물려받아 쥐고 있었다** (`/proc/883700/fd/9 -> /tmp/.dataflow.1001.lock`, `fuser -v` 로 확인). 옛 코드(a82df5a 이전)는 2 단계 자식에게 잠금 fd 를 닫지 않았고 새 코드는 `9>&-` 로 닫는다(§11.228 auto-dataflow). PRD 560 GB · 15.7 MB/s 라 혼자 끝나려면 ~06 시. 사용자가 22:32 `kill -TERM 883700 883701 883702` -> 잠금 해제 -> 오케스트레이터 대기 스크립트가 22:33:00 pane %4 에 `scripts/dataflow.sh --params config/dataflow.params --follow` 를 쳐 새 dataflow(pid 1454382, 새 inode · 압박 모드 · 2 단계 분리) 기동, 곧바로 부팅 실패 잔재 런 4425 · 4428 백업(F-5 동작 확인). 22:33 chainwatch --status: postrun · dataflow 살아 있음, /Data_ssd 여유 3416 GB. run 4433 sub 38, 6.45 kHz, USB 0·0·0, PRD 36, 감시자 health OK x3. chainwatch 의 dataflow 자동 재기동 자체(22:20)는 실물에서 처음 동작 확인됨(잠금 때문에 결과만 못 냈을 뿐). 4431 PRD 경희대 전송은 `.rsync-partial` 에서 새 backup-khu 가 이어간다(마커 없음). **교훈:** 옛 판 dataflow 를 세울 때는 `fuser /tmp/.dataflow.1001.lock` 로 잠금 보유자(고아 rsync)까지 확인할 것; chainwatch 자동 재기동은 시간당 1 회라 잠금에 막히면 다음 회차는 1 시간 뒤다.
+
 #### 11.225 ★★ 사이트 정전으로 PC·저장소 서버 다운 11-01 14:49 → 11-02 00:02 재부팅 (★ 원인 확정 : 비가 와 멀티탭에 달팽이가 들어가고 물방울이 튀어 쇼트, 사용자 현장 확인) · run 4416 마감 · TCB 응답 없음으로 대기 (사용자 질문 "컴퓨터가 꺼졌는데 왜, 언제" → "1번부터 5번까지 전부 대응", 11-02 00:0x ~ 00:3x)
 
 정본: `/Data_ssd/LOG/harness/20261102_daq-incident-responder_power-loss.md`. 수치는 거기서.
@@ -5596,7 +5598,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 
 | 무엇 | 왜 | 어디에 |
 |---|---|---|
-| **(1) `! kill -TERM 90209 3542929` (옛 dataflow + backup-khu)** | 옛 inode 라 압박 모드·2 단계 분리가 없고 4431 경희대 백업을 보내는 중. 세우면 chainwatch D-4 가 5 분 안에 새 코드로 dataflow pane 을 되살린다(시간당 1 회 상한) | §11.228 |
+| ✅ **(1) 옛 dataflow(90209)+backup-khu(3542929) 정지 · 새 dataflow 기동 완료 (22:33)** | 고아 rsync(883700)가 잠금 fd 를 쥐어 22:20 자동 재기동이 한 번 빠졌고, 22:32 사용자가 그것까지 세워 22:33:00 새 dataflow(pid 1454382) 기동 | §11.228 |
 | **(2) 수집 재기동 뒤 자율 복구 드릴** | 전제 : 감시자 새 바이너리·시험 런·전문가 사전 공지. 망 차단은 `sudo nmcli connection down enp0s31f6` (daq_gateway 금지). `--with-power` 는 승인 뒤 | §11.228 · docs/AUTONOMY-DRILL.md |
 | **(3) 4432 `Merged` 584 G 삭제 여부 결정** | 재생 가능 캐시(§11.149) | §11.228 |
 | **다음 런 재기동 여부·설정 결정 (사용자)** | 11-05 12:00 부터 대기. 재기동 시 rcterm.params(_p7off) 확인, 판 7 HV 켜면 THR 100 복귀 | §11.227 |
@@ -5659,6 +5661,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 11 cron 이 도는 메일 큐에 '보내지 않을 파일' 을 두지 말 것 (§11.146)
 12 외장하드는 umount 하고 뽑을 것 — 09-07 에 마운트된 채 떨어져 저널이 끊겼다. 그리고 full 로 옮긴
      마지막 조각은 parts_index 에 없다. 런을 복원하려면 §11.170 의 표부터 볼 것
+13 옛 판 dataflow 를 세울 때 `fuser /tmp/.dataflow.1001.lock` 로 잠금 보유자(고아 rsync)까지 확인할 것 — 옛 코드는 자식에게 flock fd 9 를 물려 chainwatch 자동 재기동이 "이미 실행 중" 으로 빠진다 (§11.228)
 ```
 
 ### 2026-08-28 — `/backup_hdd` 를 되살리고, 시트 등재를 자동화했다
