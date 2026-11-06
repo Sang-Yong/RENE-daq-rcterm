@@ -22,7 +22,7 @@ sys.exit(int(os.environ.get("FAKE_RC", "0")))
 PY
 printf '#!/bin/bash\necho "$*" >> "%s/alarm.calls"\nexit 0\n' "$T" > "$T/fake_alarm.sh"; chmod +x "$T/fake_alarm.sh"
 export CALLS=$T/calls NOTIFY_LOG=$T/notify.log NOTIFY_MAILQ=$T/MAILQ NOTIFY_MAILER=$T/fake_mail.py \
-       NOTIFY_ALARM=$T/fake_alarm.sh NETSYNC_STATE=$T/netsync.state
+       NOTIFY_ALARM=$T/fake_alarm.sh NETSYNC_STATE=$T/netsync.state DRILL_FLAG=$T/drill.active
 P=$T/notify.params
 cat > "$P" <<EOF2
 heartbeat = $T/none.hb
@@ -34,7 +34,8 @@ mail_min_interval = 300
 EOF2
 nq()   { find "$T/MAILQ" -maxdepth 1 -name '*.mail' 2>/dev/null | wc -l; }
 ncall(){ [ -r "$CALLS" ] && wc -l < "$CALLS" || echo 0; }
-reset(){ rm -rf "$T/MAILQ" "$CALLS" "$T/alarm.calls" "$T"/.notify-*.last "$T/netsync.state"; }
+pst() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat"; }    # 플래그의 pstart (drill_proc_start 와 같은 값)
+reset(){ rm -rf "$T/MAILQ" "$CALLS" "$T/alarm.calls" "$T"/.notify-*.last "$T/netsync.state" "$T/drill.active"; }
 
 echo "[1] 보내면 큐는 비어 있고 도배 방지 표식이 생긴다"
 reset; FAKE_RC=0 "$NT" --params "$P" chain_down --msg "시험 1" >/dev/null 2>&1
@@ -124,6 +125,49 @@ echo "[11] 종료코드는 언제나 0 (큐 디렉터리를 못 만들어도)"
 reset; NOTIFY_MAILQ=/proc/no/such FAKE_RC=5 "$NT" --params "$P" chain_down --msg "x" >/dev/null 2>&1; rc=$?
 check "rc 0"                 '[ "$rc" -eq 0 ]'
 check "로그에 WARN"          'grep -q "큐에도 못 쌓았다" "$NOTIFY_LOG"'
+
+echo "[12] 드릴 중 (플래그를 산 pid 가 쥐고 있다) : 책임자에게만 · [DRILL] · 알람 없음"
+reset; printf 'pid=%s\npstart=%s\nstart=%s\nrun=4440\nplan=offline-full\n' "$$" "$(pst $$)" "$(date +%s)" > "$T/drill.active"
+out=$("$NT" --params "$P" chain_down --run 4441 --msg "드릴" --dry-run 2>&1)
+check "dry : 전문가 사건인데 routine"    'printf "%s" "$out" | grep -q "메일 -> routine : \[DRILL\] chain_down run 4441 - 드릴"'
+check "dry : 본문 머리에 드릴 중 발생"   'printf "%s" "$out" | sed -n "/--- 본문 ---/{n;p}" | grep -q "자율 복구 드릴 중 발생 (pid $$ · plan offline-full"'
+FAKE_RC=0 "$NT" --params "$P" restart --run 4441 --msg "드릴 2" >/dev/null 2>&1
+check "메일기 --to routine · 제목 [DRILL]" 'grep -q -- "--to routine --subject \[DRILL\] restart run 4441 - 드릴 2" "$CALLS"'
+check "로그에 drill=1"                  'grep -q "event=restart run=4441 act=mail drill=1" "$NOTIFY_LOG"'
+FAKE_RC=0 "$NT" --params "$P" rate_high --msg "40 kHz" >/dev/null 2>&1
+FAKE_RC=0 "$NT" --params "$P" supervisor_down --msg "FATAL" --force-alarm >/dev/null 2>&1
+FAKE_RC=0 "$NT" --params "$P" recovery_failed --msg "x" >/dev/null 2>&1
+check "알람 0 (rate_high · --force-alarm · recovery_failed)" '[ ! -s "$T/alarm.calls" ]'
+check "recovery_failed 도 routine"     'grep -q -- "--to routine --subject \[DRILL\] recovery_failed" "$CALLS"'
+check "전문가(expert·both) 수신 0 회"  '! grep -qE -- "--to (expert|both)" "$CALLS"'
+reset; printf 'pid=%s\npstart=%s\n' "$$" "$(pst $$)" > "$T/drill.active"; echo "net=down" > "$T/netsync.state"
+FAKE_RC=0 "$NT" --params "$P" chain_down --msg "큐" >/dev/null 2>&1
+f=$(ls "$T"/MAILQ/*.mail 2>/dev/null | head -1)
+check "망 단절 큐에도 routine · [DRILL]" '[ "$(sed -n 2p "$f")" = "to: routine" ] && head -1 "$f" | grep -q "^subject: \[DRILL\] chain_down"'
+
+echo "[13] 죽은 플래그 · 오래된 플래그 · 깨진 플래그는 드릴이 아니다 (전문가 메일을 막지 않는다)"
+reset; printf 'pid=999999\n' > "$T/drill.active"
+out=$("$NT" --params "$P" chain_down --msg "죽은" --dry-run 2>&1)
+check "죽은 pid -> both · 접두어 없음"  'printf "%s" "$out" | grep -q "메일 -> both : chain_down - 죽은"'
+printf 'pid=%s\npstart=%s\n' "$$" "$(pst $$)" > "$T/drill.active"; touch -d '2 days ago' "$T/drill.active"
+out=$("$NT" --params "$P" chain_down --msg "오래된" --dry-run 2>&1)
+check "24 h 넘은 플래그 -> both"         'printf "%s" "$out" | grep -q "메일 -> both : chain_down - 오래된"'
+printf 'pid=%s\npstart=1\n' "$$" > "$T/drill.active"
+out=$("$NT" --params "$P" chain_down --msg "재사용" --dry-run 2>&1)
+check "pid 는 살았으나 pstart 가 다르다 (pid 재사용) -> both" 'printf "%s" "$out" | grep -q "메일 -> both : chain_down - 재사용"'
+printf 'pid=%s\n' "$$" > "$T/drill.active"
+out=$("$NT" --params "$P" chain_down --msg "옛서식" --dry-run 2>&1)
+check "pstart 없고 그 pid 가 autonomy-drill 이 아니다 -> both" 'printf "%s" "$out" | grep -q "메일 -> both : chain_down - 옛서식"'
+printf 'garbage\n' > "$T/drill.active"
+out=$("$NT" --params "$P" rate_high --msg "깨진" --dry-run 2>&1)
+check "pid 없는 플래그 -> 알람 그대로"   'printf "%s" "$out" | grep -q "\[DRY\] 알람 : rate_high"'
+
+echo "[14] params 의 drill_flag 를 읽는다 (환경변수 DRILL_FLAG 가 없을 때)"
+reset; printf 'pid=%s\npstart=%s\n' "$$" "$(pst $$)" > "$T/other.flag"; cp "$P" "$P.df"; echo "drill_flag = $T/other.flag   # 주석" >> "$P.df"
+out=$(env -u DRILL_FLAG "$NT" --params "$P.df" chain_down --msg "키" --dry-run 2>&1)
+check "params 경로의 플래그로 드릴 판정" 'printf "%s" "$out" | grep -q "메일 -> routine : \[DRILL\] chain_down - 키"'
+out=$("$NT" --params "$P.df" chain_down --msg "환경" --dry-run 2>&1)
+check "환경변수가 이긴다 (없는 파일 -> 드릴 아님)" 'printf "%s" "$out" | grep -q "메일 -> both : chain_down - 환경"'
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

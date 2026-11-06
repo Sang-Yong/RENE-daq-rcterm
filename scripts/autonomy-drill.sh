@@ -3,8 +3,8 @@
 #  autonomy-drill.sh - 자율 복구 드릴. 일부러 고장을 내고, 시스템이 사람 없이 되살아나는지 본다.
 #
 #  사용 :
-#     autonomy-drill.sh --plan offline-full --confirm-test-run [--with-power] [--log DIR]
-#     autonomy-drill.sh --plan quick        --confirm-test-run [--with-power] [--log DIR]
+#     autonomy-drill.sh --plan offline-full --confirm-test-run [--with-power] [--continue-online] [--no-mark-db] [--log DIR]
+#     autonomy-drill.sh --plan quick        --confirm-test-run [--with-power] [--no-mark-db] [--log DIR]
 #     autonomy-drill.sh --plan <이름> --dry-run      계획과 전제 점검만. 주입 0 회
 #
 #  왜 (2026-11-05 사용자 요청, 감사 §8 의 주입 표)
@@ -18,6 +18,7 @@
 #                 멈춤 파일 없음 · /Data_ssd 여유 >= 500 G · 다른 드릴 없음.  하나라도 아니면 주입 0 으로 끝
 #     1  기준선   런 · 서브런 · 계수율 · 감시자 pid · 로그 위치 · 메일 큐 수
 #     2  [사람]   바깥 망을 끊는다 -> netsync 가 net=down 을 적을 때까지 (기본 15 분)
+#                 ★ 끊긴 것이 확인되지 않으면 여기서 멈춘다 (주입 0). --continue-online 이면 망이 산 채로 계속
 #     3  메일     chainwatch 를 한 번 돌리고, 알림이 /Data_ssd/LOG/MAILQ 에 쌓이는지
 #     4  daq 종료 daq 하나에 TERM -> 감시자 restart -> 새 런 running + DRAM 8/8
 #     5  stale    rcterm 에 STOP -> 감시자가 heartbeat stale 로 잡아 재시작 -> 새 런 (뒤에 CONT 로 안전 마감)
@@ -25,8 +26,22 @@
 #     7  SIGUSR1  감시자에 USR1 (SigCgt 로 지원 확인) -> 지금 런 정상 마감 -> 새 런
 #     8  전원     기본 : usb-recover.sh --force-power-cycle --dry-run (게이트 확인, 하드웨어 0)
 #                 --with-power : 감시자 TERM -> usb-recover --force-power-cycle 실물 1 회 -> 감시자 재기동
-#     9  [사람]   바깥 망을 되살린다 -> net=up -> 메일 큐 0 · 시트 밀린 완결 런 0
-#     10 요약     result.tsv + report.md
+#     9  [사람]   바깥 망을 되살린다 -> net=up -> 메일 큐 0 · netsync flush 가 시트·웹을 건너뜀(드릴 중)
+#     10 요약     runcatalog 표시(아래) + result.tsv + report.md
+#
+#  드릴 플래그 (2026-11-06)
+#     전제 통과 직후 drill_flag(notify.params, 기본 /Data_ssd/LOG/drill.active)에 pid= start= run= plan= 을 쓰고
+#     끝(정상·중단·신호)에 지운다. 그동안 daq-notify 는 책임자에게만 [DRILL] 로 보내고 알람을 울리지 않으며,
+#     netsync 는 복귀 flush 에서 시트·웹을 건너뛰고, sheetlog-auto 는 --force 여도 쓰지 않는다. --dry-run 은 만들지 않는다.
+#  runcatalog 표시 (기본 켬, --no-mark-db 로 끔)
+#     끝날 때 DB 를 <DRILL_DBBAK_DIR>/runcatalog.db.bak-<시각>-drill 로 (sqlite3 .backup) 백업한 뒤
+#       첫 주입 런 <= 런 < 끝 런   (주입이 없었으면 시작 런 < 런 < 끝 런)
+#     을 onlbit=0, runlog 앞에 'autonomy drill test run (<시작>~<끝>), excluded from sheet' (옛 runlog 는 ' ; ' 뒤에).
+#     하한이 첫 주입 런인 것은 2·3 단계 대기 중 자연 로테이션이 오면 플래그 런이 24 h 완주 정상 런이기 때문 (리뷰 M2).
+#     끝 런은 heartbeat 가 running 이면 뺀다 -- 정상 설정으로 계속 도는 런이다 (11-05 의 4437 은 9.6 h 돌았다).
+#     running 이 아니면 rcterm 이 없고 phase=ended|failed 일 때만 넣는다 -- 살아 있는 rcterm 은 런을 닫으며 onlbit 를
+#     다시 쓴다 (리뷰 M1). 최대 120 s 기다리고 그래도 있으면 report.md 에 그 런만의 명령을 남긴다. 표시 뒤 되읽어 대조.
+#     바꾼 행은 db-mark.tsv · report.md · drill.log 에 표로.
 #
 #  안전
 #     - 4~8 은 --confirm-test-run 이 있을 때만 (시험 런을 깨뜨린다). 없으면 SKIP
@@ -36,7 +51,7 @@
 #     - 멈춤 파일(chainwatch.hold)을 만들지 않는다 -- 자동 재기동을 시험하는 것이므로.
 #       ★ 예외 : 8 단계(--with-power)는 감시자 TERM 전에 자기 표식이 든 hold 를 만들고 감시자 재기동 직전에 지운다 --
 #         chainwatch 가 chain_sup_restart_manual=1 로 전원 작업 도중 감시자를 띄우지 않게 (리뷰 2026-11-05)
-#       대신 <루트>/RUNNING 표식으로 두 드릴이 겹치지 않게 한다
+#       대신 <루트>/RUNNING 표식으로 두 드릴이 겹치지 않게 한다 (드릴 플래그도 살아 있는 남의 것이면 멈춘다)
 #     - STOP 을 건 프로세스는 끝날 때(정상·중단 모두) CONT 를 보낸다
 #     - --dry-run 은 kill · tmux · chainwatch · usb-recover 를 하나도 부르지 않는다
 #
@@ -80,17 +95,26 @@ T_USR1=${DRILL_T_USR1:-900}
 T_POWER=${DRILL_T_POWER:-2400}
 T_NETUP=${DRILL_T_NETUP:-1800}
 T_FLUSH=${DRILL_T_FLUSH:-900}
-T_SHEET=${DRILL_T_SHEET:-1500}       # netsync flush 의 sheetlog-auto --force 는 최대 1200 s
+T_SHEET=${DRILL_T_SHEET:-1500}       # netsync flush 는 mailq-send(최대 600 s) 뒤에 sheetlog 줄(드릴 중이면 '건너뜀')을 적는다
+PARAMS=${DRILL_PARAMS:-$DIR/config/notify.params}
+DBBAK_DIR=${DRILL_DBBAK_DIR:-/Data_ssd/LOG/harness}
+# shellcheck source=/dev/null
+. "$DIR/scripts/netsync-lib.sh" 2>/dev/null       # drill_flag_param · drill_flag_get · drill_active (DRILL_FLAG 환경변수가 이긴다)
+[ -r "$PARAMS" ] && type drill_flag_param >/dev/null 2>&1 && \
+   drill_flag_param "$(sed -n 's/^[[:space:]]*drill_flag[[:space:]]*=[[:space:]]*//p' "$PARAMS" 2>/dev/null | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//' | head -1)"
+DRILL_FLAG=${DRILL_FLAG:-/Data_ssd/LOG/drill.active}
 PROMPT_RE=${DRILL_PROMPT_RE:-'[$#] ?$'}
 
-PLAN=""; DRY=0; CONFIRM=0; POWER=0; LOGDIR=""
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; }
+PLAN=""; DRY=0; CONFIRM=0; POWER=0; LOGDIR=""; MARKDB=1; ONLINE=0
+usage() { sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; }
 while [ $# -gt 0 ]; do
    case "$1" in
       --plan)             PLAN=${2:-}; shift 2 ;;
       --dry-run)          DRY=1; shift ;;
       --confirm-test-run) CONFIRM=1; shift ;;
       --with-power)       POWER=1; shift ;;
+      --no-mark-db)       MARKDB=0; shift ;;
+      --continue-online)  ONLINE=1; shift ;;
       --log)              LOGDIR=${2:-}; shift 2 ;;
       -h|--help)          usage; exit 0 ;;
       *) echo "모르는 인자 : $1" >&2; exit 2 ;;
@@ -122,6 +146,11 @@ if [ -n "${DRILL_TEST_HOOK:-}" ]; then
    [ -r "$DRILL_TEST_HOOK" ] || { echo "DRILL_TEST_HOOK 을 읽을 수 없다 : $DRILL_TEST_HOOK" >&2; exit 2; }
    # shellcheck source=/dev/null
    . "$DRILL_TEST_HOOK"
+fi
+#  ★ 시험(DRILL_TEST_HOOK)인데 플래그·백업 경로를 안 갈아끼웠으면 운영 자리(/Data_ssd/LOG)에 쓰지 않게 ROOT 밑으로 돌린다
+if [ -n "${DRILL_TEST_HOOK:-}" ]; then
+   [ -n "${DRILL_FLAG_FROM_ENV:-}" ] || DRILL_FLAG=$ROOT/drill.active
+   [ -n "${DRILL_DBBAK_DIR:-}" ] || DBBAK_DIR=$ROOT/dbbak
 fi
 
 # ---- 기록 ----------------------------------------------------------------
@@ -197,15 +226,158 @@ wait_for() {
 MARK=$ROOT/RUNNING; OWN_MARK=0; STOPPED=""
 cleanup() {
    local p
+   ignore_sigs              # 정리 도중 두 번째 INT/TERM 이 정리를 끊지 못하게 (리뷰 M3)
    for p in $STOPPED; do pid_alive "$p" && { send_sig CONT "$p"; log "정리 : pid $p 에 CONT (STOP 해 둔 것)"; }; done
    STOPPED=""
    drill_hold_rm
    [ "${POWER_DOWN:-0}" = 1 ] && log "★ 수집 멈춤 (전원 단계 도중 끝났다). 손으로 띄울 것 : tmux daq:1.2 에서 ${POWER_CMD:-bash scripts/daq-tmux.sh --print-cmd supervisor 의 명령}"
+   type mark_db >/dev/null 2>&1 && mark_db
    [ "$OWN_MARK" = 1 ] && [ "$REPORTED" = 0 ] && type write_report >/dev/null 2>&1 && write_report
+   flag_drop
    [ "$OWN_MARK" = 1 ] && rm -f "$MARK"
    return 0
 }
 REPORTED=0
+
+# ---- 드릴 플래그 -------------------------------------------------------------
+OWN_FLAG=0; F_RUN=""; INJ=0; INJ_RUN=""; INJ_RUNS=""
+#  첫 주입이 때린 런을 기억한다 (리뷰 M2). 단계 2·3 대기 중 자연 로테이션이 오면 F_RUN 은 24 h 를 완주한
+#  정상 런이고 주입은 F_RUN+1 에 간다 -- 표시의 하한은 F_RUN 이 아니라 이 런이다
+inj_mark() { local r; r=${R0:-$(hb_run)}; INJ=$(( INJ + 1 )); [ -n "$INJ_RUN" ] || INJ_RUN=$r; INJ_RUNS="$INJ_RUNS $r"; }
+flag_take() {            # 전제 통과 직후. 살아 있는 남의 플래그면 1
+   local op
+   if [ -e "$DRILL_FLAG" ]; then
+      op=$(sed -n 's/^pid=//p' "$DRILL_FLAG" 2>/dev/null | head -1)
+      if [ -n "$op" ] && [ "$op" != "$$" ] && pid_alive "$op"; then
+         record 0 드릴플래그 - "다른 드릴 없음" "pid $op 가 $DRILL_FLAG 을 쥐고 있다" FAIL "$DRILL_FLAG"; return 1
+      fi
+      log "죽은 드릴 플래그를 지운다 (pid ${op:-?} 는 없다) : $DRILL_FLAG"; rm -f "$DRILL_FLAG"
+   fi
+   F_RUN=$(hb_run)
+   #  pstart = 이 셸의 /proc 시작 시각. 읽는 쪽(drill_active)이 pid 재사용을 가린다 (리뷰 R1)
+   if ( set -o noclobber; printf 'pid=%s\npstart=%s\nstart=%s\nrun=%s\nplan=%s\nlog=%s\n' "$$" "$(drill_proc_start $$ 2>/dev/null)" "$(now_s)" "$F_RUN" "$PLAN" "$LOGDIR" > "$DRILL_FLAG" ) 2>/dev/null; then
+      OWN_FLAG=1; log "드릴 플래그를 만들었다 ($DRILL_FLAG, run $F_RUN) -- 알림은 책임자에게만 [DRILL], 시트 등재는 멈춘다"; return 0
+   fi
+   record 0 드릴플래그 - "플래그를 만든다" "만들 수 없다 ($DRILL_FLAG)" FAIL ""; return 1
+}
+flag_drop() { [ "$OWN_FLAG" = 1 ] || return 0; rm -f "$DRILL_FLAG"; OWN_FLAG=0; log "드릴 플래그를 지웠다 ($DRILL_FLAG)"; }
+
+# ---- 끝날 때 : 이번 드릴의 런을 runcatalog 에서 뺀다 ------------------------------
+#  ★ rcterm 은 런을 닫을 때 FinalizeRunInDB 가 onlbit = goodRun?1:0 을, MarkFailedRunInDB 가 runlog 를 통째로 쓴다
+#    (src/RunControl.cc). 그래서 rcterm 이 아직 쥐고 있는 런(heartbeat 의 마지막 런)을 지금 0 으로 적어도
+#    나중에 1 로 되돌아간다 (리뷰 M1 -- STOP 중 INT 뒤 CONT 받은 rcterm 이 정상 마감하는 경로).
+#    끝 런은 rcterm 이 없고 phase 가 ended/failed 일 때만 넣는다. 아니면 기다리고, 그래도 아니면 손으로.
+#  ★ 표시는 두 번에 나눈다 (리뷰 M3) : 이미 닫힌 런(하한 .. 지금 heartbeat 런-1)은 기다리기 전에 곧바로,
+#    끝 런은 최대 T_ENDWAIT 초 기다린 뒤. 그리고 표시하는 동안 INT/TERM 은 무시한다 -- 두 번째 Ctrl-C 가
+#    정리를 끊으면 bash 는 EXIT trap 을 다시 돌리지 않아 UPDATE · report · 플래그 지우기가 통째로 빠진다.
+T_ENDWAIT=${DRILL_T_ENDWAIT:-120}
+MARKED=0; DB_MSG=""; DB_SQL=""; END_RUN=""; END_MODE=""; DB_PEND_SQL=""; DB_VERIFY=""; DB_NOTE=""
+DB_N=0; DB_BAKS=""; DB_ERR=""; DB_LO=0; DB_HIX=0; DB_COND=""; DB_TAG=""
+ignore_sigs() { trap 'log "★ 정리 중이라 신호를 무시한다 -- 끝 런을 최대 ${T_ENDWAIT} s 기다린 뒤 스스로 끝난다"' INT TERM; }
+end_state() {            # END_RUN · END_MODE (running | done | pending) 를 정한다. 최대 T_ENDWAIT 초 기다린다
+   local t0 ph; t0=$(now_s)
+   while :; do
+      END_RUN=$(hb_run); ph=$(hbf phase)
+      if hb_running; then END_MODE=running; return 0; fi
+      if [ -z "$(pid_of rcterm)" ] && { [ "$ph" = ended ] || [ "$ph" = failed ]; }; then END_MODE=done; return 0; fi
+      if [ $(( $(now_s) - t0 )) -ge "$T_ENDWAIT" ]; then END_MODE=pending; return 0; fi
+      [ $(( $(now_s) - t0 )) = 0 ] && log "runcatalog : 끝 런 $END_RUN 의 rcterm 이 아직 있거나 phase=${ph:-?} -- 최대 ${T_ENDWAIT} s 기다린다"
+      sleep_s "$POLL"
+   done
+}
+db_lo() {                # 표시 하한.  주입했으면 max(첫 주입 런, 시작 런), 아니면 시작 런 다음.  못 정하면 0 (리뷰 P2)
+   local f i
+   f=${F_RUN:-0}; case "$f" in ''|*[!0-9]*) f=0 ;; esac
+   i=${INJ_RUN:-0}; case "$i" in ''|*[!0-9]*) i=0 ;; esac
+   if [ "$INJ" -gt 0 ] && [ "$i" -gt 0 ]; then [ "$i" -lt "$f" ] && i=$f; echo "$i"; return 0; fi
+   if [ "$INJ" -gt 0 ]; then echo "$f"; return 0; fi     # 주입했는데 그 런을 못 읽었다 : 시작 런부터 (0 이면 표시 안 함)
+   [ "$f" -gt 0 ] && { echo $(( f + 1 )); return 0; }
+   echo 0
+}
+db_sql() { echo "UPDATE runcatalog SET onlbit=0, runlog = CASE WHEN runlog LIKE 'autonomy drill test run%' THEN runlog ELSE '$DB_TAG' || COALESCE(' ; ' || NULLIF(runlog, ''), '') END WHERE $1;"; }
+db_backup() {            # $1=백업 파일.  sqlite3 .backup (쓰는 도중에도 일관된 사본). 없으면 cp -p (리뷰 R2)
+   sqlite3 -cmd '.timeout 10000' "$DBFILE" ".backup '$1'" 2>/dev/null && [ -s "$1" ] && return 0
+   cp -p "$DBFILE" "$1" 2>/dev/null
+}
+mark_range() {           # $1=하한 $2=상한(제외) $3=백업 꼬리표.  그 사이 런을 백업 뒤 0 으로.  문제면 DB_ERR, rc 1
+   local lo hix suf cond rows bak out n
+   lo=$1; hix=$2; suf=$3
+   [ "$hix" -gt "$lo" ] || return 0
+   cond="(runnum >= $lo AND runnum < $hix)"
+   rows=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL'), IFNULL(substr(runlog,1,80),'') FROM runcatalog WHERE $cond ORDER BY runnum;" 2>&1) \
+      || { DB_ERR="★ DB 를 읽지 못했다 : $(clean "$rows")"; log "$DB_ERR"; return 1; }
+   [ -z "$rows" ] && return 0
+   mkdir -p "$DBBAK_DIR" 2>/dev/null
+   bak="$DBBAK_DIR/runcatalog.db.bak-$(date +%Y%m%d%H%M%S)-drill$suf"
+   db_backup "$bak" || { DB_ERR="★ 백업을 만들지 못해 표시하지 않았다 ($bak)"; log "$DB_ERR"; return 1; }
+   if ! out=$(sqlite3 -cmd '.timeout 10000' "$DBFILE" "$(db_sql "$cond")" 2>&1); then
+      DB_ERR="★ UPDATE 실패 : $(clean "$out") (백업 $bak)"; log "$DB_ERR"; return 1
+   fi
+   [ -s "$LOGDIR/db-mark.tsv" ] || printf 'run\tonlbit_before\tonlbit_after\trunlog_before\n' > "$LOGDIR/db-mark.tsv"
+   printf '%s\n' "$rows" | awk -F '|' '{ printf "%s\t%s\t0\t%s\n", $1, $2, $3 }' >> "$LOGDIR/db-mark.tsv"
+   n=$(printf '%s\n' "$rows" | grep -c .)
+   DB_N=$(( DB_N + n )); DB_BAKS="${DB_BAKS:+$DB_BAKS, }$bak"
+   log "runcatalog : 런 $n 개를 onlbit=0 으로 (조건 $cond, 백업 $bak)"
+   printf '%s\n' "$rows" | awk -F '|' '{ printf "   run %s  onlbit %s -> 0  runlog(전) %s\n", $1, $2, $3 }' | while IFS= read -r l; do log "$l"; done
+   return 0
+}
+mark_db() {
+   local lo r0 mid bad
+   [ "$MARKED" = 1 ] && return 0; MARKED=1
+   [ "$OWN_FLAG" = 1 ] || return 0           # dry-run · 전제 실패 : 드릴이 아니었다
+   ignore_sigs                               # 여기부터 끝까지 신호로 끊기지 않는다 (리뷰 M3)
+   DB_TAG="autonomy drill test run ($(date -d "@$START" '+%F %H:%M' 2>/dev/null)~$(date -d "@$(now_s)" '+%m-%d %H:%M' 2>/dev/null)), excluded from sheet"
+   lo=$(db_lo); DB_LO=$lo
+   if [ "$lo" -le 0 ]; then
+      END_RUN=$(hb_run); DB_COND="(없음)"; DB_HIX=0
+      DB_MSG="★ 표시 하한을 정하지 못해 표시하지 않았다 (시작 런 ${F_RUN:-?} · 첫 주입 런 ${INJ_RUN:-?}) -- 손으로 확인할 것"
+      log "runcatalog : $DB_MSG"; return 0
+   fi
+   #  1) 이미 닫힌 런 : 지금 heartbeat 의 런보다 앞의 것은 rcterm 이 손을 뗐다. 기다리기 전에 먼저
+   r0=$(hb_run)
+   if [ "$MARKDB" = 1 ] && [ -w "$DBFILE" ] && [ "$r0" -gt "$lo" ]; then mark_range "$lo" "$r0" ""; fi
+   #  2) 끝 런 : 최대 T_ENDWAIT 초 기다린다
+   end_state
+   DB_HIX=$END_RUN; [ "$END_MODE" = done ] && DB_HIX=$(( END_RUN + 1 ))
+   [ "$DB_HIX" -lt "$lo" ] && DB_HIX=$lo
+   DB_COND="(runnum >= $lo AND runnum < $DB_HIX)"
+   DB_SQL=$(db_sql "$DB_COND")
+   if [ "$END_MODE" = pending ] && [ "$END_RUN" -ge "$lo" ]; then
+      DB_PEND_SQL="sqlite3 $DBFILE \".backup '$DBBAK_DIR/runcatalog.db.bak-\$(date +%Y%m%d%H%M%S)-drill'\" && sqlite3 $DBFILE \"$(db_sql "runnum = $END_RUN")\""
+      log "★ 끝 런 $END_RUN 은 rcterm 이 아직 있어(phase=$(hbf phase)) 표시하지 않았다 -- rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. 닫힌 뒤 손으로 : $DB_PEND_SQL"
+   fi
+   #  끝 런이 주입을 맞았는데 rcterm 이 다시 살아 running 이면 정상 런으로 빼는 것이 맞다. 그 사실만 남긴다 (리뷰 P1)
+   if [ "$END_MODE" = running ] && [ "$END_RUN" -ge "$lo" ] && case " $INJ_RUNS " in *" $END_RUN "*) true ;; *) false ;; esac; then
+      DB_NOTE="끝 런 $END_RUN 은 주입을 맞았으나 CONT 뒤 running 으로 돌아가 정상 런으로 두었다 (표시하지 않음)"
+      log "runcatalog : $DB_NOTE"
+   fi
+   if [ "$MARKDB" = 0 ]; then
+      DB_MSG="--no-mark-db : runcatalog 를 건드리지 않았다. 시트에서 빼려면 손으로 (백업 먼저)"
+      log "$DB_MSG : $DB_SQL"; return 0
+   fi
+   if [ ! -w "$DBFILE" ]; then DB_MSG="★ $DBFILE 에 쓸 수 없다 -- 표시하지 못했다"; log "$DB_MSG"; return 0; fi
+   #  1) 에서 못 넣은 나머지 (기다리는 사이 닫힌 런 · done 인 끝 런)
+   mid=$lo; [ "$r0" -gt "$lo" ] && mid=$r0
+   [ -z "$DB_ERR" ] && mark_range "$mid" "$DB_HIX" "-end"
+   if [ -n "$DB_ERR" ]; then
+      DB_MSG="$DB_ERR"; [ "$DB_N" -gt 0 ] && DB_MSG="$DB_MSG (그 전에 런 $DB_N 개는 표시했다, 백업 $DB_BAKS)"
+   elif [ "$DB_N" -eq 0 ]; then
+      DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0
+   else
+      DB_MSG="런 $DB_N 개를 onlbit=0 으로 (조건 $DB_COND, 백업 $DB_BAKS)"
+   fi
+   log "runcatalog : $DB_MSG"
+   [ "$DB_N" -gt 0 ] || return 0
+   #  되읽어 대조 (리뷰 R3) -- 표시한 런만
+   bad=$(tail -n +2 "$LOGDIR/db-mark.tsv" | cut -f1 | paste -sd, -)
+   bad=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL') FROM runcatalog WHERE runnum IN ($bad) AND (onlbit IS NULL OR onlbit != 0) ORDER BY runnum;" 2>&1)
+   if [ -n "$bad" ]; then
+      DB_VERIFY="★ 되읽기 어긋남 : $(clean "$bad") -- onlbit 가 0 이 아니다"
+   else
+      DB_VERIFY="되읽기 : $DB_N 개 모두 onlbit=0"
+   fi
+   log "runcatalog : $DB_VERIFY"
+}
 trap cleanup EXIT
 trap 'ABORTED="신호를 받았다"; log "★ 드릴이 신호로 중단됐다"; exit 1' INT TERM
 if [ "$DRY" -eq 0 ]; then
@@ -270,13 +442,22 @@ s1() {
 NETWENT=0
 s2() {
    local t; t=$(ts)
-   banner "★ 사람 차례 : 지금 바깥 망을 끊어라 (root, 콘솔에서).  예) sudo nmcli connection down enp0s31f6  또는 벽 쪽 랜 케이블(enp0s31f6)을 뽑는다 (★ daq_gateway 아님)
-   (원격 세션은 여기서 끊긴다. 드릴은 혼자 계속 돈다.)  netsync 가 net=down 을 적을 때까지 최대 ${T_NETDOWN} s 기다린다"
+   banner "★ 사람 차례 : 지금 바깥 망을 끊어라 (root, 콘솔에서).  sudo nmcli connection down enp0s31f6   (★ daq_gateway 아님)
+   ★ 케이블을 뽑기보다 nmcli 로 끊는 편이 안전하다 -- 11-06 09:18 케이블을 뽑다 FADC USB 가 빠져 run 4437 이 죽었다.
+   (원격 세션은 여기서 끊긴다. 드릴은 혼자 계속 돈다.)  netsync 가 net=down 을 적을 때까지 최대 ${T_NETDOWN} s 기다린다.
+   끊긴 것이 확인되지 않으면 $( [ "$ONLINE" = 1 ] && echo '--continue-online 이라 망이 산 채로 계속한다' || echo '드릴은 여기서 멈춘다 (주입 0)')"
    if wait_for "$T_NETDOWN" ns_is_down; then
       NETWENT=1; record 2 망차단 "$t" "netsync net=down" "down (since=$(ns_get since))" PASS "$NSSTATE checked=$(ns_get checked)"
+      return
+   fi
+   record 2 망차단 "$t" "netsync net=down (${T_NETDOWN} s 안)" "net=$(ns_get net) checked=$(ns_get checked)" FAIL "$NSSTATE"
+   if [ "$ONLINE" = 1 ] && [ -z "$ABORTED" ]; then
+      NETWENT=1   # 사람이 늦게 끊었을 수는 있다. 9 단계 안내는 그대로 한다
+      log "--continue-online : 망이 산 채로 주입을 계속한다 (알림은 드릴 플래그로 책임자에게만 [DRILL])"
    else
-      NETWENT=1   # 사람이 끊었을 수는 있다. 9 단계 안내는 그대로 한다
-      record 2 망차단 "$t" "netsync net=down (${T_NETDOWN} s 안)" "net=$(ns_get net) checked=$(ns_get checked)" FAIL "$NSSTATE"
+      [ -n "$ABORTED" ] || ABORTED="망을 끊지 않아 중단 (2 단계, --continue-online 없음)"
+      NETWENT=0
+      log "★ $ABORTED -- 주입하지 않는다. 늦게 끊었다면 지금 되살려라 : sudo nmcli connection up enp0s31f6"
    fi
 }
 ns_is_down() { [ "$(ns_net)" = down ]; }
@@ -328,7 +509,7 @@ s4() {
    guard 4 daq종료 || return
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); p=$(first_pid daq)
    [ -n "$p" ] || { record 4 daq종료 - "daq 프로세스" "pgrep -x daq 가 없다" FAIL ""; return; }
-   t=$(ts); log "주입 : daq pid $p 에 TERM (run $R0)"; send_sig TERM "$p"
+   t=$(ts); log "주입 : daq pid $p 에 TERM (run $R0)"; inj_mark; send_sig TERM "$p"
    if wait_for "$T_KILL" new_run_up; then
       ev=$(sup_has 'restart #')
       if [ -n "$ev" ]; then record 4 daq종료 "$t" "restart -> 새 런 running + DRAM ${DRAM_LINES}" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -348,7 +529,7 @@ s5() {
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); p=$(first_pid rcterm)
    [ -n "$p" ] || { record 5 stale - "rcterm 프로세스" "pgrep -x rcterm 가 없다" FAIL ""; return; }
    t=$(ts); log "주입 : rcterm pid $p 에 STOP (run $R0). 감시자 check=${SUP_CHECK} s stale=${SUP_STALE} s -> 최대 ${lim} s 기다린다"
-   STOPPED="$STOPPED $p"; send_sig STOP "$p"
+   STOPPED="$STOPPED $p"; inj_mark; send_sig STOP "$p"
    if wait_for "$lim" new_run_up; then
       ev=$(sup_has 'heartbeat stale')
       if [ -n "$ev" ]; then record 5 stale "$t" "heartbeat stale -> 재시작 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -395,7 +576,7 @@ s7() {
       record 7 SIGUSR1 - "감시자가 USR1 을 받는다" "SigCgt=$m -- 옛 감시자(USR1 이면 죽는다). 보내지 않았다" SKIP "/proc/$sp/status"; return
    fi
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); t=$(ts); log "주입 : 감시자 pid $sp 에 USR1 (run $R0)"
-   send_sig USR1 "$sp"
+   inj_mark; send_sig USR1 "$sp"
    if wait_for "$T_USR1" new_run_up; then
       ev=$(sup_has 'SIGUSR1 : ending')
       if [ -n "$ev" ]; then record 7 SIGUSR1 "$t" "정상 마감 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -426,6 +607,7 @@ s8() {
    local t sp rc cmd
    if [ "$POWER" != 1 ]; then
       [ "$DRY" -eq 1 ] && return
+      [ -n "$ABORTED" ] && { record 8 전원 - "-" "중단 : $ABORTED" SKIP ""; return; }
       t=$(ts); run_usbrecover --force-power-cycle --dry-run > "$LOGDIR/usb-recover-dry.txt" 2>&1; rc=$?
       case $rc in
          3) record 8 전원 "$t" "dry-run : 수집 중이면 안전 게이트가 막는다(3)" "rc=3 게이트가 막았다 (하드웨어 0)" PASS "$LOGDIR/usb-recover-dry.txt" ;;
@@ -441,7 +623,7 @@ s8() {
    t=$(ts); log "주입 : 감시자 pid $sp 에 TERM (run $R0 정상 마감) -> 전원 단계"
    POWER_CMD=$cmd; POWER_DOWN=1          # 여기부터 감시자 재기동까지 수집이 멎는다. 신호로 끝나도 안내가 남게
    drill_hold_set                        # 전원 작업 도중 chainwatch(chain_sup_restart_manual=1)가 감시자를 띄우지 않게
-   send_sig TERM "$sp"
+   inj_mark; send_sig TERM "$sp"
    all_down() { [ -z "$(first_pid rcsupervisor)$(first_pid rcterm)$(first_pid daq)$(first_pid tcb)$(first_pid merger)" ]; }
    if ! wait_for 600 all_down; then
       drill_hold_rm
@@ -475,42 +657,31 @@ s8() {
 # =====================================================================
 #  9 — [사람] 바깥 망 복귀
 # =====================================================================
-drill_runs_cmd() {       # 이번 드릴의 런 범위를 onlbit=0 으로 빼는 명령 (백업 먼저). 드릴은 DB 를 건드리지 않는다
-   local lo=${B_RUN:-0} hi; hi=$(hb_run)
-   [ "$hi" -ge "$lo" ] || hi=$lo
-   printf "cp -p %s /Data_ssd/LOG/harness/runcatalog.db.bak-\$(date +%%Y%%m%%d%%H%%M)-before-drill && sqlite3 %s \"UPDATE runcatalog SET onlbit=0, runlog='autonomy drill test run, excluded from sheet' || COALESCE(' ; ' || runlog, '') WHERE runnum BETWEEN %s AND %s;\"" \
-      "$DBFILE" "$DBFILE" "$lo" "$hi"
-}
 s9() {
-   local t off line rc runs
+   local t off line q
    t=$(ts)
-   DRILL_DB_CMD=$(drill_runs_cmd)
-   banner "★ 사람 차례 1 : 망을 되살리기 *전에* 이번 드릴의 런($B_RUN ~ $(hb_run))을 시트에서 뺀다.
-   망이 돌아오는 순간 netsync 가 sheetlog-auto --force 로 onlbit=1 런을 GoodRuns 에 싣는다. 먼저 이것을 친다 (백업 먼저) :
-   $DRILL_DB_CMD"
    off=$(fsize "$NSLOG")
-   banner "★ 사람 차례 2 : 그다음 바깥 망을 되살려라 (root).  예) sudo nmcli connection up enp0s31f6  또는 뽑은 케이블을 다시 꽂는다 (★ daq_gateway 를 올리지 말 것 -- .71 충돌)
-   netsync 가 net=up 을 적고 밀린 메일·시트를 내보낼 때까지 최대 ${T_NETUP} s 기다린다"
+   banner "★ 사람 차례 : 바깥 망을 되살려라 (root).  sudo nmcli connection up enp0s31f6  (★ daq_gateway 를 올리지 말 것 -- .71 충돌)
+   드릴 플래그가 있으므로 netsync 의 복귀 flush 는 메일 큐만 내보내고 시트·웹은 건너뛴다.
+   이번 드릴의 런은 드릴이 끝날 때 runcatalog 에서 onlbit=0 으로 스스로 뺀다$( [ "$MARKDB" = 0 ] && echo ' (★ --no-mark-db : 손으로 빼야 한다)').
+   netsync 가 net=up 을 적고 flush 할 때까지 최대 ${T_NETUP} s 기다린다"
    if ! wait_for "$T_NETUP" ns_is_up; then
       record 9 망복귀 "$t" "netsync net=up" "net=$(ns_get net) checked=$(ns_get checked)" FAIL "$NSSTATE"; return
    fi
-   #  netsync 는 up 을 먼저 적고 flush 안에서 mailq-send -> sheetlog-auto --force (최대 1200 s) 순으로 돈다.
-   #  그래서 큐 0 이나 --status 가 아니라 netsync.log 의 'sheetlog-auto --force rc=' 줄(이번 오프셋 이후)을 기다린다.
-   flushed() { line=$(since "$NSLOG" "$off" | grep 'sheetlog-auto --force rc=' | tail -1); [ -n "$line" ]; }
+   #  netsync 는 up 을 먼저 적고 flush 안에서 mailq-send -> sheetlog(드릴 중이면 '건너뜀') 순으로 돈다.
+   #  그래서 큐 0 이 아니라 netsync.log 의 sheetlog 줄(이번 오프셋 이후)을 기다린다.
+   flushed() { line=$(since "$NSLOG" "$off" | grep -E 'sheetlog-auto (건너뜀|rc=|--force rc=)' | tail -1); [ -n "$line" ]; }
    if ! wait_for "$T_SHEET" flushed; then
-      record 9 망복귀 "$t" "netsync flush 의 sheetlog-auto --force 결과 (${T_SHEET} s 안)" "net=up 이나 flush 기록 없음" FAIL "$NSLOG"; return
+      record 9 망복귀 "$t" "netsync flush 의 sheetlog 줄 (${T_SHEET} s 안)" "net=up 이나 flush 기록 없음" FAIL "$NSLOG"; return
    fi
-   rc=$(printf '%s' "$line" | sed -n 's/.*--force rc=\([0-9]*\).*/\1/p'); runs=$(printf '%s' "$line" | sed -n 's/.*등재 \([0-9]*\) 런.*/\1/p')
    q_empty() { [ "$(qcount "$LOCALQ")" = 0 ] && [ "$(qcount "$NFSQ")" = 0 ]; }
    if ! wait_for "$T_FLUSH" q_empty; then
-      record 9 망복귀 "$t" "메일 큐 0" "local=$(qcount "$LOCALQ") nfs=$(qcount "$NFSQ") 통 남음 (sheetlog rc=${rc:-?})" FAIL "mailq-send.sh --status"; return
+      record 9 망복귀 "$t" "메일 큐 0" "local=$(qcount "$LOCALQ") nfs=$(qcount "$NFSQ") 통 남음" FAIL "mailq-send.sh --status"; return
    fi
-   #  flush 뒤에 완결된 런(7·8 단계의 꼬리, 드릴 런)은 다음 cron 몫이라 판정에 넣지 않는다 -- rc 와 등재 수로만
-   if [ "${rc:-x}" = 0 ]; then
-      record 9 망복귀 "$t" "net=up · sheetlog --force rc 0 · 큐 0" "up since=$(ns_get since), 시트 등재 ${runs:-0} 런, 큐 0" PASS "$line"
-   else
-      record 9 망복귀 "$t" "sheetlog-auto --force rc 0" "rc=${rc:-?} 등재 ${runs:-?} 런" FAIL "$line"
-   fi
+   case "$line" in
+      *건너뜀*) record 9 망복귀 "$t" "net=up · 큐 0 · 드릴 중이라 시트 건너뜀" "up since=$(ns_get since), 큐 0, 시트 건너뜀" PASS "$line" ;;
+      *)        record 9 망복귀 "$t" "드릴 중 flush 는 시트를 건너뛴다" "netsync 가 드릴 중에 sheetlog-auto 를 돌렸다 -- 드릴 플래그($DRILL_FLAG)를 못 봤다 (옛 netsync? drill_flag 경로가 다른가?)" FAIL "$line" ;;
+   esac
 }
 
 name_of() {
@@ -525,7 +696,7 @@ plan_line() {
    case $1 in
       0) echo "전제 점검 (읽기)" ;;
       1) echo "기준선 기록 (읽기)" ;;
-      2) echo "[사람] 망 차단 -> netsync down 대기 ${T_NETDOWN} s" ;;
+      2) echo "[사람] 망 차단 (nmcli) -> netsync down 대기 ${T_NETDOWN} s. 확인 안 되면 $( [ "$ONLINE" = 1 ] && echo '그래도 계속 (--continue-online)' || echo '여기서 멈춘다 (주입 0)')" ;;
       3) echo "chainwatch 1 회 -> $LOCALQ 적재 대기 ${T_MAILQ} s" ;;
       4) echo "daq TERM -> restart -> 새 런 + DRAM ${DRAM_LINES} (${T_KILL} s)" ;;
       5) sup_timing; echo "rcterm STOP -> stale -> 새 런 (${T_STALE:-$(( SUP_CHECK + SUP_STALE + 900 ))} s, 뒤에 CONT)" ;;
@@ -533,7 +704,7 @@ plan_line() {
       7) echo "감시자 USR1 (SigCgt 확인) -> 새 런 (${T_USR1} s)" ;;
       8) [ "$POWER" = 1 ] && echo "★ 감시자 TERM -> usb-recover --force-power-cycle 실물 -> 감시자 재기동 (${T_POWER} s)" \
                            || echo "usb-recover --force-power-cycle --dry-run (하드웨어 0)" ;;
-      9) echo "[사람] 망 복귀 -> net=up · 큐 0 · 시트 0 (${T_NETUP}+${T_FLUSH} s)" ;;
+      9) echo "[사람] 망 복귀 -> net=up · 큐 0 · flush 가 시트·웹 건너뜀 (${T_NETUP}+${T_FLUSH} s)" ;;
    esac
 }
 
@@ -555,11 +726,33 @@ REPORTED=1
    echo "PASS $(cut -f6 "$RES" | grep -c '^PASS$') · FAIL $(cut -f6 "$RES" | grep -c '^FAIL$') · SKIP $(cut -f6 "$RES" | grep -c '^SKIP$')"
    echo
    echo "FAIL 이 있으면 docs/AUTONOMY-DRILL.md 의 '실패했을 때' 표를 볼 것."
-   if [ -n "${B_RUN:-}" ] && [ "$CONFIRM" = 1 ]; then
-      echo
-      echo "★ 이번 드릴의 런($B_RUN ~ $(hb_run))을 시트에서 뺄 것 (아직 안 했으면, 백업 먼저) :"
-      echo
-      echo '```'; drill_runs_cmd; echo; echo '```'
+   echo
+   echo "## runcatalog 표시"
+   echo
+   if [ "$OWN_FLAG" = 1 ] || [ -n "$DB_MSG" ]; then
+      case "$END_MODE" in
+         running) em="running -> 뺐다 (정상 런으로 계속 돈다)" ;;
+         done)    em="rcterm 이 닫았다 -> 넣었다" ;;
+         pending) em="★ rcterm 이 아직 있다 -> 넣지 않았다 (아래 명령으로 손으로)" ;;
+         *)       em="-" ;;
+      esac
+      echo "- 시작 런 ${F_RUN:-?} · 첫 주입 런 ${INJ_RUN:-없음} · 끝 런 ${END_RUN:-$(hb_run)} ($em) · 주입 $INJ 회"
+      echo "- ${DB_MSG:-표시하지 않았다}"
+      [ -n "$DB_VERIFY" ] && echo "- $DB_VERIFY"
+      [ -n "$DB_NOTE" ] && echo "- $DB_NOTE"
+      if [ -n "$DB_PEND_SQL" ]; then
+         echo "- ★ 끝 런 $END_RUN 은 rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. rcterm 이 끝난 뒤(phase=ended) 손으로 :"
+         echo; echo '```'; echo "$DB_PEND_SQL"; echo '```'
+      fi
+      if [ -s "$LOGDIR/db-mark.tsv" ]; then
+         echo
+         echo "| 런 | onlbit 전 | 후 | runlog (전) |"; echo "|---|---|---|---|"
+         tail -n +2 "$LOGDIR/db-mark.tsv" | awk -F '\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
+      elif [ "$MARKDB" = 0 ] && [ -n "$DB_SQL" ]; then
+         echo; echo '```'; printf 'sqlite3 %s ".backup %s/runcatalog.db.bak-$(date +%%Y%%m%%d%%H%%M%%S)-drill" && sqlite3 %s "%s"\n' "$DBFILE" "$DBBAK_DIR" "$DBFILE" "$DB_SQL"; echo '```'
+      fi
+   else
+      echo "- 드릴 플래그를 잡지 않았다 (dry-run · 전제 실패) -- runcatalog 무접촉"
    fi
 } > "$LOGDIR/report.md"
 }
@@ -569,7 +762,8 @@ REPORTED=1
 if [ "$DRY" -eq 1 ]; then
    for s in $STEPS; do log "[계획] 단계 $s : $(plan_line "$s")"; done
    s0 >/dev/null; pre=$?; log "[계획] 전제 : $(tail -1 "$RES" | cut -f5,6)"
-   log "[DRY] 주입 0 회. 아무것도 하지 않았다."
+   [ -e "$DRILL_FLAG" ] && log "[DRY] 드릴 플래그가 이미 있다 ($DRILL_FLAG, pid $(sed -n 's/^pid=//p' "$DRILL_FLAG" 2>/dev/null | head -1)) -- 실제로 돌리면 살아 있는 것이면 멈추고 죽은 것이면 지운다"
+   log "[DRY] 주입 0 회. 드릴 플래그·runcatalog 무접촉. 아무것도 하지 않았다."
    [ "$pre" -eq 0 ] && exit 0
    log "[DRY] 전제가 충족되지 않아 지금은 드릴을 돌릴 수 없다 (rc 1)"
    exit 1
@@ -577,7 +771,7 @@ fi
 
 PREOK=1
 for s in $STEPS; do
-   if [ "$s" = 0 ]; then s0 || PREOK=0; continue; fi
+   if [ "$s" = 0 ]; then { s0 && flag_take; } || PREOK=0; continue; fi
    if [ "$PREOK" = 0 ]; then
       record "$s" "$(name_of "$s")" - - "전제 실패로 하지 않았다" SKIP ""; continue
    fi
@@ -585,6 +779,7 @@ for s in $STEPS; do
    "s$s"
 done
 
+mark_db
 write_report
 log "끝 : PASS $(cut -f6 "$RES" | grep -c '^PASS$') · FAIL $NFAIL · SKIP $(cut -f6 "$RES" | grep -c '^SKIP$') -> $LOGDIR/report.md"
 [ "$NFAIL" -eq 0 ] && [ -z "$ABORTED" ] && exit 0
