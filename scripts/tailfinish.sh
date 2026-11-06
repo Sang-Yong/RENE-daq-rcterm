@@ -59,6 +59,7 @@ BADRUN=${TAILFINISH_BADRUN:-$DIR/scripts/badrun.sh}
 NOTIFY=${TAILFINISH_NOTIFY:-$DIR/scripts/daq-notify.sh}
 MERGE_CMD=${TAILFINISH_MERGE:-}          # 비면 ROOT 로 진짜 merge 매크로. 시험은 가짜
 PS_FILE=${TAILFINISH_PS:-}               # 'pid args' 줄. 비면 진짜 ps
+PGREP=${TAILFINISH_PGREP:-pgrep}         # 살아 있는 DAQ 확인 (pgrep -x 만 쓴다)
 
 STATE=${TAILFINISH_STATE:-/Data_ssd/LOG/tailfinish.state}
 LOG=${TAILFINISH_LOG:-/Data_ssd/LOG/tailfinish.log}
@@ -123,7 +124,10 @@ while [ $# -gt 0 ]; do
       --status)     MODE=status; shift ;;
       --dry-run)    DRY=1; shift ;;
       --foreground) MODE=work; shift ;;
-      --run)        ONLYRUN=$((10#$2)); shift 2 ;;
+      --run)        case "${2:-}" in
+                       ''|*[!0-9]*) echo "사용법 : --run <런 번호(숫자)> -- 받은 값 '${2:-}'" >&2; exit 2 ;;
+                    esac
+                    ONLYRUN=$((10#$2)); shift 2 ;;
       --force)      FORCE=1; shift ;;
       --quiet-sec)  QUIET=$2; shift 2 ;;
       -h|--help)    sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -161,6 +165,20 @@ acquiring_run() {        # 지금 수집 중인 런 번호를 찍는다. 없으�
    [ "$ph" = ended ] && return 0
    [ "$age" -gt "$HB_MAX_AGE" ] && return 0
    echo $((10#$r))
+}
+
+#  heartbeat 가 이 런을 가리키는데 DAQ 프로세스가 살아 있으면 손대지 않는다.
+#  heartbeat 가 묵었어도(멈춘 USB 등으로 파일을 안 쓰는 DAQ) recent_change 하나에만 기대지 않는다.
+#  ★ pgrep -f 가 아니라 -x (CLAUDE.md 10)
+daq_alive_on() {         # run_num -> 0 이면 heartbeat 런 == run 이고 daq/tcb/merger/rcterm 이 산다
+   local r p
+   r=$(hb_field run)
+   [ -n "$r" ] || return 1
+   [ "$((10#$r))" -eq "$1" ] || return 1
+   for p in daq tcb merger rcterm; do
+      "$PGREP" -x "$p" >/dev/null 2>&1 && return 0
+   done
+   return 1
 }
 
 # ---- 그 런을 손으로 처리하는 것이 있는가 ----------------------------------
@@ -203,6 +221,7 @@ judge() {                # run_num  -> 0 대상 / 1 아님 (WHY 에 사유)
    [ -d "$dd" ] || { WHY="런 디렉터리 없음"; return 1; }
    cur=$(acquiring_run)
    [ -n "$cur" ] && [ "$cur" -eq "$rn" ] && { WHY="수집 중 (heartbeat)"; return 1; }
+   daq_alive_on "$rn" && { WHY="heartbeat 가 이 런이고 DAQ 프로세스가 살아 있다 (수집 중일 수 있다)"; return 1; }
    nf=$(n_fadc "$dd" "$rp"); np=$(n_prd "$dd" "$rp")
    [ "$nf" -ge 2 ] || { WHY="FADC $nf 개 (부팅 실패 잔재는 dataflow 몫)"; return 1; }
    [ "$nf" -gt "$np" ] || { WHY="완결 (FADC $nf = PRD $np)"; return 1; }
@@ -273,7 +292,8 @@ ensure_carry() {         # rn rp dd m maxarg   -> 0 이면 m-1 의 로그에 car
    [ "$DRY" -eq 1 ] && return 0
    mkdir -p "$TMPROOT" 2>/dev/null
    tdir=$(mktemp -d "$TMPROOT/$rp.XXXXXX" 2>/dev/null) || { say "  carry : 임시 디렉터리를 못 만든다 ($TMPROOT)"; return 1; }
-   mkdir -p "$tdir/Merged"
+   CUR_TDIR=$tdir                              # 일꾼이 도중에 죽어도 trap 이 지운다
+   mkdir -p "$tdir/Merged" "$tdir/PNG"         # PNG/ 가 없으면 매크로가 TASImage 오류 줄을 낸다 (무해)
    for f in "$dd"/FADC_"$rp".root.* "$dd"/SADC_"$rp".root.*; do [ -f "$f" ] && ln -s "$f" "$tdir/"; done
    out="$tdir/merge.out"
    for (( j = start; j <= m - 1; j++ )); do
@@ -281,7 +301,7 @@ ensure_carry() {         # rn rp dd m maxarg   -> 0 이면 m-1 의 로그에 car
       if ! run_merge "$rn" "$maxarg" "$j" "$s" "$e" "$t" "$tdir" > "$out" 2>&1 || ! read_carry "$out"; then
          say "  carry : 서브런 $j 의 merge 를 다시 돌렸으나 carry 가 안 나온다"
          tail -5 "$out" 2>/dev/null | sed 's/^/      /'
-         rm -rf "$tdir"; return 1
+         rm -rf "$tdir"; CUR_TDIR=""; return 1
       fi
       s=$C_S; e=$C_E; t=$C_T
       rm -f "$tdir"/Merged/* 2>/dev/null          # 80~440 MB 짜리라 하나씩 지운다
@@ -294,10 +314,10 @@ ensure_carry() {         # rn rp dd m maxarg   -> 0 이면 m-1 의 로그에 car
    if { printf '# tailfinish.sh 가 서브런 %s..%s 를 다시 merge 해 남긴 carry (%s)\n' "$start" "$((m-1))" "$(ts)"; cat "$out"; } > "$dst" 2>/dev/null \
       && read_carry "$dst"; then
       say "  carry : $dst 에 남겼다 ($C_S,$C_E,$C_T)"
-      rm -rf "$tdir"; return 0
+      rm -rf "$tdir"; CUR_TDIR=""; return 0
    fi
    say "  carry : merge 로그를 쓰지 못했다 ($dst)"
-   rm -rf "$tdir"; return 1
+   rm -rf "$tdir"; CUR_TDIR=""; return 1
 }
 
 # ---- 런 하나 마감 --------------------------------------------------------
@@ -452,9 +472,17 @@ if [ "$MODE" = launch ] && [ "$DRY" -eq 0 ]; then
 fi
 
 #  일꾼 (또는 --dry-run)
+CUR_TDIR=""
 if [ "$DRY" -eq 0 ]; then
    exec 8>"$GLOCK" 2>/dev/null || exit 0
    flock -n 8 2>/dev/null || { log "다른 일꾼이 돌고 있다. 건너뛴다"; exit 0; }
+   #  도중에 죽으면 임시 merge 디렉터리(최대 ~440 MB)를 남기지 않는다
+   trap '[ -n "$CUR_TDIR" ] && rm -rf "$CUR_TDIR"' EXIT
+   trap 'exit 130' TERM INT HUP
+   #  전역 잠금을 쥐었으니 다른 일꾼은 없다 -- 지난번 kill -9 · 재부팅이 남긴 임시 디렉터리를 치운다
+   for d in "$TMPROOT"/[0-9][0-9][0-9][0-9][0-9][0-9].??????; do
+      [ -d "$d" ] && { rm -rf "$d"; log "지난 일꾼이 남긴 임시 디렉터리를 지웠다 : $d"; }
+   done
 fi
 #  ROOT 환경 (cron 에는 없다 -- CLAUDE.md 10). postrun 은 스스로 잡지만 badrun · runcheck 는 아니다.
 #  --dry-run 의 badrun --dry-run 도 ROOT 로 파일을 열어 봐야 무엇을 격리할지 보인다 (읽기만 한다)
@@ -469,7 +497,12 @@ any=0
 for r in $(list_runs); do
    if judge "$r"; then
       any=1
-      [ "$DRY" -eq 1 ] && say "run $r : $WHY"
+      if [ "$DRY" -eq 1 ]; then
+         #  dry-run 은 런 잠금 파일도 만들지 않는다 (무접촉)
+         say "run $r : $WHY"
+         finish_run "$r"
+         continue
+      fi
       exec 7>"$LOCKDIR/.tailfinish.$(printf '%06d' "$r").lock" 2>/dev/null || continue
       if flock -n 7 2>/dev/null; then
          finish_run "$r"

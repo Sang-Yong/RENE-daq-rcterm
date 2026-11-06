@@ -323,6 +323,7 @@ heartbeat 의 새 런으로 넘어가 버린다. 직전 런의 꼬리(`--lag` �
 | 조건 | 왜 |
 |---|---|
 | 수집 중이 아니다 — heartbeat 의 run 이 아니거나 `phase=ended` 이거나 heartbeat 가 2 분 넘게 묵었다 | 묵은 heartbeat 는 정전·kill -9 뒤의 붙박이다 |
+| heartbeat 가 그 런을 가리키면 `daq`·`tcb`·`merger`·`rcterm` 이 하나도 살아 있지 않다 (`pgrep -x`) | 멈춘 채 살아 파일을 안 쓰는 DAQ 를 묵은 heartbeat 만 보고 건드리지 않는다 |
 | 최상위 FADC ≥ 2 이고 FADC > PRD | FADC 1 개짜리 부팅 실패 잔재는 dataflow 가 옮긴다 |
 | 최근 `tail_quiet_sec`(600 s) 안에 FADC·SADC·Merged·PRD 가 안 바뀌었다 | `postrun --follow` 가 '런 전환 → 이전 런 마무리' 를 하는 중일 수 있다 |
 | 그 런을 처리하는 `postrun` · `runcheck` · `badrun` · 손 merge 가 없다 (`ps`, `pgrep -f` 안 씀) | 사람이 손으로 복구 중이다 |
@@ -360,6 +361,10 @@ chainwatch 가 5 분마다 부른다 (`config/notify.params` 의 `chain_tailfini
 (`/tmp/.tailfinish.lock`), 런마다 `/tmp/.tailfinish.<런>.lock`. 기록 : 요약 `/Data_ssd/LOG/tailfinish.log`,
 시도마다 전체 출력 `/Data_ssd/LOG/tailfinish/<런>-<시각>.log`, 상태 `/Data_ssd/LOG/tailfinish.state`.
 수동 작업 중에는 `touch /Data_ssd/LOG/chainwatch.hold` 로 멈춘다.
+**★ chainwatch 의 gate 가 꺼져 있으면(tmux `daq` 도 감시자도 없음 = 사람이 세운 상태) 꼬리 마감도 불리지 않는다.**
+그동안 끝난 런의 꼬리는 운용을 다시 띄운 뒤 첫 회차에 처리되거나, 기다리지 않으려면 `--run R --foreground` 로 손으로 부른다.
+일꾼이 도중에 죽어도 임시 merge 디렉터리(`/Data_ssd/LOG/tailfinish.tmp/<런>.XXXXXX`)는 trap 이 지우고,
+kill -9 · 재부팅으로 남은 것은 다음 일꾼이 시작할 때 치운다. `--dry-run` 은 잠금 파일도 만들지 않는다.
 
 **아직 자동으로 못 닫는 것.** 직전 merge 의 carry 가 존재하지 않는 다음 SADC 파일을 가리키는 꼬리
 (run 4396 의 모양, CLAUDE.md §11.222). 꼬리 파일은 둘 다 열리고 사건도 있어 badrun 이 격리하지 않고,

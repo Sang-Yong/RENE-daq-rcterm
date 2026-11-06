@@ -49,14 +49,18 @@ cat > "$T/bin/merge" <<'MG'
 echo "$*" >> "$TFT/merge.calls"
 [ -e "$TFT/merge_fail" ] && { echo "Error in <TFile::TFile>"; exit 1; }
 [ -d "$7/Merged" ] || exit 3
+[ -d "$7/PNG" ] && echo png >> "$TFT/merge.png"
+[ -e "$TFT/merge_slow" ] && { echo "$$" > "$TFT/merge.pid"; sleep 3; }
 echo big > "$7/Merged/MERGED_x.root.$(printf '%05d' $3)"
 echo "final before_FADC_trgnum = $(( $6 + 1000 ))"
 echo "final SADC = $(( $4 + 1 ))"
 echo "final SADC_evt = $(( $5 + 10 ))"
 echo "final before_SADC_trgnum = $(( $6 + 1000 ))"
 MG
+#  가짜 pgrep : $TFT/daq_alive 가 있으면 '산다' (진짜 pgrep 은 지금 운영 수집을 잡는다)
+printf '#!/bin/bash\necho "$*" >> "$TFT/pgrep.calls"\n[ -e "$TFT/daq_alive" ]\n' > "$T/bin/pgrep"
 chmod +x "$T"/bin/*
-export TFT=$T
+export TFT=$T TAILFINISH_PGREP=$T/bin/pgrep
 export TAILFINISH_POSTRUN=$T/bin/postrun TAILFINISH_RUNCHECK=$T/bin/runcheck TAILFINISH_BADRUN=$T/bin/badrun \
        TAILFINISH_NOTIFY=$T/bin/notify TAILFINISH_MERGE=$T/bin/merge TAILFINISH_PS=$T/ps.txt \
        TAILFINISH_STATE=$T/state TAILFINISH_LOG=$T/tf.log TAILFINISH_RUNLOGDIR=$T/runlogs TAILFINISH_TMPROOT=$T/tmp \
@@ -85,7 +89,7 @@ mkrun() {
 }
 reset() {
    rm -rf "${T:?}/RAW" "${T:?}/state" "${T:?}/tf.log" "${T:?}/runlogs" "${T:?}/tmp" "${T:?}/hold" \
-          "${T:?}/postrun_noop" "${T:?}/merge_fail" "${T:?}/prod/LOG/Merge_log"
+          "${T:?}/postrun_noop" "${T:?}/merge_fail" "${T:?}/prod/LOG/Merge_log" "${T:?}/daq_alive" "${T:?}/merge_slow" "${T:?}/lk"
    rm -f "${T:?}"/*.calls "${T:?}"/quar_*
    mkdir -p "$T/RAW" "$ML"; : > "$T/ps.txt"; hb 9999 running
 }
@@ -115,6 +119,12 @@ check "phase=ended -> 대상"                              '[ -s "$T/postrun.cal
 reset; mkrun 4434 6 3; mklog 4434 2; hb 4434 running 3600
 run --foreground
 check "heartbeat 가 1 시간 묵음(정전·kill -9) -> 대상"   '[ -s "$T/postrun.calls" ]'
+check "  ... pgrep 은 -x 로만"                           'grep -q "^-x daq" "$T/pgrep.calls" && ! grep -q -- "-f" "$T/pgrep.calls"'
+reset; mkrun 4434 6 3; mklog 4434 2; hb 4434 running 3600; touch "$T/daq_alive"
+run --foreground
+check "heartbeat 묵었어도 이 런이고 DAQ 가 살면 손대지 않음" '[ ! -e "$T/postrun.calls" ] && [ ! -e "$T/badrun.calls" ]'
+hb 9999 running 5; run --foreground
+check "  ... heartbeat 가 다른 런이면 DAQ 가 살아도 대상"   '[ -s "$T/postrun.calls" ]'
 
 echo "[3] 대상 아님 : FADC 1 · 최근 변경 · 손 작업 · 멈춤 파일 · 로그 루트 없음"
 reset; mkrun 4424 1 0; run --foreground
@@ -162,6 +172,7 @@ check "merge 1 회 (sub 2, carry 2,261,789678)"             '[ "$(wc -l < "$T/me
 check "sub 2 로그에 carry 3 줄"                            'grep -q "final SADC = 3" "$ML/log_merge_FADC_SADC_v3_5v_run4434_subrun2.txt" && grep -q "final before_SADC_trgnum = 790678" "$ML/log_merge_FADC_SADC_v3_5v_run4434_subrun2.txt"'
 check "이미 있는 Merged 는 안 건드림"                       '[ "$(cat "$T/RAW/004434/Merged/MERGED_004434.root.00002")" = m ]'
 check "임시 디렉터리 지움"                                 '[ -z "$(ls -A "$T/tmp" 2>/dev/null)" ]'
+check "임시 디렉터리에 PNG/ 를 만든다"                      '[ -s "$T/merge.png" ]'
 check "그 뒤 postrun --from 3"                             'grep -q "^4434 --from 3 --to 5" "$T/postrun.calls"'
 reset; mkrun 4434 6 3                       # 로그가 하나도 없다 -> sub 0 부터 (0,0,0)
 run --foreground
@@ -179,6 +190,19 @@ check "5 개 안에 carry 없음 -> merge·postrun 안 함"          '[ ! -e "$T
 check "  ... 실패 알림에 carry 사유 (시도 상한 1)"           'grep tail_finish_failed "$T/notify.calls" | grep -q "carry"'
 : > "$P"
 
+echo "[6b] 일꾼이 도중에 죽어도 임시 디렉터리를 남기지 않는다"
+reset; rm -f "${T:?}/merge.png"; mkrun 4434 6 3; mklog 4434 1; touch "$T/merge_slow"
+"$TF" --params "$P" --foreground > "$T/out" 2>&1 & wpid=$!
+for i in $(seq 1 50); do [ -s "$T/merge.pid" ] && break; sleep 0.1; done
+check "  merge 도중 임시 디렉터리가 있다"                    '[ -n "$(ls -A "$T/tmp" 2>/dev/null)" ]'
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+check "  TERM 뒤 임시 디렉터리 없음"                         '[ -z "$(ls -A "$T/tmp" 2>/dev/null)" ]'
+check "  postrun 은 안 불렀다"                               '[ ! -e "$T/postrun.calls" ]'
+rm -f "${T:?}/merge_slow" "${T:?}/merge.pid"
+reset; mkrun 4434 6 3; mklog 4434 2; mkdir -p "$T/tmp/004434.Ab3dEf/Merged"; echo big > "$T/tmp/004434.Ab3dEf/Merged/x"
+run --foreground
+check "지난 일꾼(kill -9)이 남긴 임시 디렉터리를 치운다"      '[ ! -e "$T/tmp/004434.Ab3dEf" ] && grep -q "임시 디렉터리를 지웠다" "$T/tf.log"'
+
 echo "[7] 결손 경계가 둘 : 각 경계마다 carry"
 reset; mkrun 4434 8 3; mklog 4434 2
 #  sub 5 도 끝나 있다 (3,4 결손 / 5 끝 / 6,7 결손). sub 4·5 의 로그 없음 -> 6 의 carry 를 위해 3..5 를 다시 merge
@@ -187,14 +211,21 @@ run --foreground
 check "sub 5 경계에서 merge 재실행 (sub 3,4,5 from log 2)"  '[ "$(cut -d" " -f3 "$T/merge.calls" | paste -sd,)" = "3,4,5" ]'
 
 echo "[8] --dry-run · --status 는 아무것도 안 바꾼다"
-reset; mkrun 4434 6 3
-run --dry-run
+reset; mkrun 4434 6 3; mkdir -p "$T/lk"
+TAILFINISH_LOCKDIR=$T/lk run --dry-run
+check "dry-run : 잠금 파일도 안 만든다 (LOCKDIR 비어 있음)"  '[ -z "$(ls -A "$T/lk")" ]'
 check "dry-run : postrun·runcheck·notify·merge 안 부름"     '[ ! -e "$T/postrun.calls" ] && [ ! -e "$T/runcheck.calls" ] && [ ! -e "$T/notify.calls" ] && [ ! -e "$T/merge.calls" ]'
 check "dry-run : badrun 은 --dry-run 으로만"               'grep -q -- "--dry-run" "$T/badrun.calls" && ! grep -v -- "--dry-run" "$T/badrun.calls" | grep -q .'
 check "dry-run : 상태·로그·임시 파일 없음"                  '[ ! -e "$T/state" ] && [ ! -e "$T/tf.log" ] && [ ! -e "$T/runlogs" ] && [ ! -e "$T/tmp" ]'
 check "dry-run : 계획을 찍는다"                             'grep -q "postrun.* 4434 --from 3 --to 5" "$T/out" && grep -q "carry : 서브런 2" "$T/out"'
 rm -f "${T:?}"/*.calls; run --status
 check "status : 대상 표시, 아무것도 안 부름"                 'grep -q "run 4434 .*★ 대상" "$T/out" && [ ! -e "$T/badrun.calls" ] && [ ! -e "$T/state" ]'
+
+echo "[8b] --run 비숫자 거부"
+reset; "$TF" --params "$P" --run abc --dry-run > "$T/out" 2>&1; rc=$?
+check "--run abc -> rc 2, 사용법"                           '[ "$rc" -eq 2 ] && grep -q "사용법" "$T/out"'
+"$TF" --params "$P" --run > "$T/out" 2>&1; rc=$?
+check "--run (값 없음) -> rc 2"                             '[ "$rc" -eq 2 ]'
 
 echo "[9] 뒤에서 띄우기 (chainwatch 가 부르는 꼴)"
 reset; mkrun 4434 6 3; mklog 4434 2
@@ -207,7 +238,7 @@ check "대상 없으면 일꾼을 안 띄운다"                        '[ ! -e 
 
 echo "[10] cron 환경 (env -i)"
 reset; mkrun 4434 6 3; mklog 4434 2
-env -i PATH=/usr/bin:/bin HOME="$HOME" TFT="$T" TAILFINISH_POSTRUN="$TAILFINISH_POSTRUN" TAILFINISH_RUNCHECK="$TAILFINISH_RUNCHECK" \
+env -i PATH=/usr/bin:/bin HOME="$HOME" TFT="$T" TAILFINISH_PGREP="$TAILFINISH_PGREP" TAILFINISH_POSTRUN="$TAILFINISH_POSTRUN" TAILFINISH_RUNCHECK="$TAILFINISH_RUNCHECK" \
    TAILFINISH_BADRUN="$TAILFINISH_BADRUN" TAILFINISH_NOTIFY="$TAILFINISH_NOTIFY" TAILFINISH_MERGE="$TAILFINISH_MERGE" \
    TAILFINISH_PS="$T/ps.txt" TAILFINISH_STATE="$T/state" TAILFINISH_LOG="$T/tf.log" TAILFINISH_RUNLOGDIR="$T/runlogs" \
    TAILFINISH_TMPROOT="$T/tmp" TAILFINISH_LOCKDIR="$T" TAILFINISH_RAWROOT="$T/RAW" TAILFINISH_HB="$T/rcterm.hb" \
