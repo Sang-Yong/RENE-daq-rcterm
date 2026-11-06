@@ -207,23 +207,32 @@ void chk() {
       TFile* f = TFile::Open(s.c_str());
       bool ok = (f && !f->IsZombie() && f->GetListOfKeys() && f->GetListOfKeys()->GetSize() > 0);
       printf("BADRUNCHK %s %s\n", ok ? "OK" : "BAD", s.c_str());
+      //  사건 수. 꼬리 서브런의 '열리지만 사건 0' 을 가르는 데 쓴다 (run 4392 SADC 00962)
+      if (ok) {
+         TTree* t = (TTree*) f->Get("AbsEvent");
+         printf("BADRUNENT %lld %s\n", t ? (long long) t->GetEntries() : -1LL, s.c_str());
+      }
       if (f) { f->Close(); delete f; }
    }
 }
 MACRO
 
-declare -A OPENOK
+declare -A OPENOK OPENENT
 #  ★ 파이프라인으로 부르지 말 것. 파이프의 각 단계는 서브셸이라 OPENOK 에 넣은
 #    것이 통째로 사라지고, 조회가 전부 실패해 멀쩡한 파일이 'bad_raw' 로
 #    떨어진다. 목록은 파일로 건네고 이 함수는 파이프 없이 부른다.
 check_files() {          # $TMP/list.txt 를 읽어 OPENOK[path]=OK|BAD 를 채운다
    local lf="$TMP/list.txt" st path
    [ -s "$lf" ] || return 0
-   BADRUN_CHECK_LIST="$lf" root -l -b -q "$TMP/chk.C" 2>/dev/null \
-      | sed -n 's/^BADRUNCHK \([A-Z]*\) \(.*\)$/\1|\2/p' > "$TMP/res.txt"
+   BADRUN_CHECK_LIST="$lf" root -l -b -q "$TMP/chk.C" 2>/dev/null > "$TMP/res.raw"
+   sed -n 's/^BADRUNCHK \([A-Z]*\) \(.*\)$/\1|\2/p' "$TMP/res.raw" > "$TMP/res.txt"
    while IFS='|' read -r st path; do
       [ -n "$path" ] && OPENOK["$path"]=$st
    done < "$TMP/res.txt"
+   sed -n 's/^BADRUNENT \(-\{0,1\}[0-9]*\) \(.*\)$/\1|\2/p' "$TMP/res.raw" > "$TMP/ent.txt" 2>/dev/null
+   while IFS='|' read -r st path; do
+      [ -n "$path" ] && OPENENT["$path"]=$st
+   done < "$TMP/ent.txt"
 }
 
 # =====================================================================
@@ -390,7 +399,12 @@ classify() {             # run_num
 
    #  ★ 판정을 셋으로 나눈다. 조회에 실패했으면(UNKNOWN) **격리하지 않는다** —
    #    확신이 없을 때 멀쩡한 원본을 묻는 것보다 목록에 남기는 편이 안전하다.
-   local bad_raw="" blocked="" gap="" nof_subs="" v_f v_s v_n nofile
+   local bad_raw="" blocked="" gap="" nof_subs="" zero_subs="" v_f v_s v_n nofile e_f e_s tail
+   #  ★ 꼬리 서브런(FADC 번호가 가장 큰 것)에 한해 '열리지만 사건 0' 도 bad_raw 로 본다.
+   #    TERM 으로 닫힌 런의 마지막 몇 초짜리 파일이 SADC 0 사건이면 merge 가 구조적으로
+   #    안 되는데, 열리기는 하므로 예전에는 gap 으로 남아 런이 영영 미완결이었다
+   #    (run 4392 00962 · 4399 00076, CLAUDE.md 11.220). 꼬리가 아닌 서브런은 바꾸지 않는다.
+   tail=$(printf '%s\n' "$f_subs" | grep '[0-9]' | sort -n | tail -1)
    for s in $checked; do
       nofile=0
       if [ -f "$rawdir/FADC_$rp.root.$s" ]; then
@@ -404,7 +418,13 @@ classify() {             # run_num
          v_n=${OPENOK["$sadcdir/SADC_$rp.root.$nx"]:-UNKNOWN}
       else v_n=NONE; fi
 
-      if [ "$v_f" = BAD ] || [ "$v_s" = BAD ] || [ "$nofile" -eq 1 ]; then
+      e_f=""; e_s=""
+      if [ "$s" = "$tail" ] && [ "$v_f" = OK ] && [ "$v_s" = OK ]; then
+         e_f=${OPENENT["$rawdir/FADC_$rp.root.$s"]:-}
+         e_s=${OPENENT["$sadcdir/SADC_$rp.root.$s"]:-}
+      fi
+      if [ "$v_f" = BAD ] || [ "$v_s" = BAD ] || [ "$nofile" -eq 1 ] || [ "$e_f" = 0 ] || [ "$e_s" = 0 ]; then
+         { [ "$e_f" = 0 ] || [ "$e_s" = 0 ]; } && zero_subs="$zero_subs ${s}(FADC ${e_f} / SADC ${e_s} 사건)"
          #  ★ 한쪽만 죽어도 **그 서브런의 양쪽을 함께** 격리한다. 짝 없는
          #    FADC 는 혼자서는 merge 도 production 도 못 하므로 최상위에
          #    남겨 두면 PRD 개수와 영원히 어긋나 런이 옮겨지지 않는다.
@@ -428,6 +448,7 @@ classify() {             # run_num
       memo="격리 대상 서브런$bad_raw (원본이 ROOT 로 안 열린다)"
       #  '안 열린다' 와 '아예 없다' 는 다르다. 왜 포기했는지의 근거가 되므로 밝힌다.
       [ -n "$nof_subs" ] && memo="$memo. 짝이 없는 것 :$nof_subs"
+      [ -n "$zero_subs" ] && memo="$memo. 꼬리가 열리지만 사건 0 :$zero_subs"
    fi
    if [ -n "$blocked" ]; then
       [ -n "$cats" ] && cats="$cats+prd_gap" || cats="prd_gap"
