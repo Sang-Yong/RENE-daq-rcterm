@@ -226,6 +226,7 @@ wait_for() {
 MARK=$ROOT/RUNNING; OWN_MARK=0; STOPPED=""
 cleanup() {
    local p
+   ignore_sigs              # 정리 도중 두 번째 INT/TERM 이 정리를 끊지 못하게 (리뷰 M3)
    for p in $STOPPED; do pid_alive "$p" && { send_sig CONT "$p"; log "정리 : pid $p 에 CONT (STOP 해 둔 것)"; }; done
    STOPPED=""
    drill_hold_rm
@@ -239,10 +240,10 @@ cleanup() {
 REPORTED=0
 
 # ---- 드릴 플래그 -------------------------------------------------------------
-OWN_FLAG=0; F_RUN=""; INJ=0; INJ_RUN=""
+OWN_FLAG=0; F_RUN=""; INJ=0; INJ_RUN=""; INJ_RUNS=""
 #  첫 주입이 때린 런을 기억한다 (리뷰 M2). 단계 2·3 대기 중 자연 로테이션이 오면 F_RUN 은 24 h 를 완주한
 #  정상 런이고 주입은 F_RUN+1 에 간다 -- 표시의 하한은 F_RUN 이 아니라 이 런이다
-inj_mark() { INJ=$(( INJ + 1 )); [ -n "$INJ_RUN" ] || INJ_RUN=${R0:-$(hb_run)}; }
+inj_mark() { local r; r=${R0:-$(hb_run)}; INJ=$(( INJ + 1 )); [ -n "$INJ_RUN" ] || INJ_RUN=$r; INJ_RUNS="$INJ_RUNS $r"; }
 flag_take() {            # 전제 통과 직후. 살아 있는 남의 플래그면 1
    local op
    if [ -e "$DRILL_FLAG" ]; then
@@ -266,8 +267,13 @@ flag_drop() { [ "$OWN_FLAG" = 1 ] || return 0; rm -f "$DRILL_FLAG"; OWN_FLAG=0; 
 #    (src/RunControl.cc). 그래서 rcterm 이 아직 쥐고 있는 런(heartbeat 의 마지막 런)을 지금 0 으로 적어도
 #    나중에 1 로 되돌아간다 (리뷰 M1 -- STOP 중 INT 뒤 CONT 받은 rcterm 이 정상 마감하는 경로).
 #    끝 런은 rcterm 이 없고 phase 가 ended/failed 일 때만 넣는다. 아니면 기다리고, 그래도 아니면 손으로.
+#  ★ 표시는 두 번에 나눈다 (리뷰 M3) : 이미 닫힌 런(하한 .. 지금 heartbeat 런-1)은 기다리기 전에 곧바로,
+#    끝 런은 최대 T_ENDWAIT 초 기다린 뒤. 그리고 표시하는 동안 INT/TERM 은 무시한다 -- 두 번째 Ctrl-C 가
+#    정리를 끊으면 bash 는 EXIT trap 을 다시 돌리지 않아 UPDATE · report · 플래그 지우기가 통째로 빠진다.
 T_ENDWAIT=${DRILL_T_ENDWAIT:-120}
-MARKED=0; DB_MSG=""; DB_SQL=""; END_RUN=""; END_MODE=""; DB_PEND_SQL=""; DB_VERIFY=""
+MARKED=0; DB_MSG=""; DB_SQL=""; END_RUN=""; END_MODE=""; DB_PEND_SQL=""; DB_VERIFY=""; DB_NOTE=""
+DB_N=0; DB_BAKS=""; DB_ERR=""; DB_LO=0; DB_HIX=0; DB_COND=""; DB_TAG=""
+ignore_sigs() { trap 'log "★ 정리 중이라 신호를 무시한다 -- 끝 런을 최대 ${T_ENDWAIT} s 기다린 뒤 스스로 끝난다"' INT TERM; }
 end_state() {            # END_RUN · END_MODE (running | done | pending) 를 정한다. 최대 T_ENDWAIT 초 기다린다
    local t0 ph; t0=$(now_s)
    while :; do
@@ -279,58 +285,96 @@ end_state() {            # END_RUN · END_MODE (running | done | pending) 를 �
       sleep_s "$POLL"
    done
 }
-db_where() {             # 표시할 런의 조건 DB_COND.  하한 : 주입했으면 첫 주입 런, 아니면 시작 런 다음.  상한 : 끝 런 (done 일 때만 포함)
-   local lo hix
-   if [ "$INJ" -gt 0 ] && [ -n "$INJ_RUN" ]; then lo=$INJ_RUN; else lo=$(( ${F_RUN:-0} + 1 )); fi
-   end_state
-   hix=$END_RUN; [ "$END_MODE" = done ] && hix=$(( END_RUN + 1 ))
-   DB_LO=$lo; DB_HIX=$hix
-   DB_COND="(runnum >= $lo AND runnum < $hix)"
+db_lo() {                # 표시 하한.  주입했으면 max(첫 주입 런, 시작 런), 아니면 시작 런 다음.  못 정하면 0 (리뷰 P2)
+   local f i
+   f=${F_RUN:-0}; case "$f" in ''|*[!0-9]*) f=0 ;; esac
+   i=${INJ_RUN:-0}; case "$i" in ''|*[!0-9]*) i=0 ;; esac
+   if [ "$INJ" -gt 0 ] && [ "$i" -gt 0 ]; then [ "$i" -lt "$f" ] && i=$f; echo "$i"; return 0; fi
+   if [ "$INJ" -gt 0 ]; then echo "$f"; return 0; fi     # 주입했는데 그 런을 못 읽었다 : 시작 런부터 (0 이면 표시 안 함)
+   [ "$f" -gt 0 ] && { echo $(( f + 1 )); return 0; }
+   echo 0
 }
+db_sql() { echo "UPDATE runcatalog SET onlbit=0, runlog = CASE WHEN runlog LIKE 'autonomy drill test run%' THEN runlog ELSE '$DB_TAG' || COALESCE(' ; ' || NULLIF(runlog, ''), '') END WHERE $1;"; }
 db_backup() {            # $1=백업 파일.  sqlite3 .backup (쓰는 도중에도 일관된 사본). 없으면 cp -p (리뷰 R2)
    sqlite3 -cmd '.timeout 10000' "$DBFILE" ".backup '$1'" 2>/dev/null && [ -s "$1" ] && return 0
    cp -p "$DBFILE" "$1" 2>/dev/null
 }
+mark_range() {           # $1=하한 $2=상한(제외) $3=백업 꼬리표.  그 사이 런을 백업 뒤 0 으로.  문제면 DB_ERR, rc 1
+   local lo hix suf cond rows bak out n
+   lo=$1; hix=$2; suf=$3
+   [ "$hix" -gt "$lo" ] || return 0
+   cond="(runnum >= $lo AND runnum < $hix)"
+   rows=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL'), IFNULL(substr(runlog,1,80),'') FROM runcatalog WHERE $cond ORDER BY runnum;" 2>&1) \
+      || { DB_ERR="★ DB 를 읽지 못했다 : $(clean "$rows")"; log "$DB_ERR"; return 1; }
+   [ -z "$rows" ] && return 0
+   mkdir -p "$DBBAK_DIR" 2>/dev/null
+   bak="$DBBAK_DIR/runcatalog.db.bak-$(date +%Y%m%d%H%M%S)-drill$suf"
+   db_backup "$bak" || { DB_ERR="★ 백업을 만들지 못해 표시하지 않았다 ($bak)"; log "$DB_ERR"; return 1; }
+   if ! out=$(sqlite3 -cmd '.timeout 10000' "$DBFILE" "$(db_sql "$cond")" 2>&1); then
+      DB_ERR="★ UPDATE 실패 : $(clean "$out") (백업 $bak)"; log "$DB_ERR"; return 1
+   fi
+   [ -s "$LOGDIR/db-mark.tsv" ] || printf 'run\tonlbit_before\tonlbit_after\trunlog_before\n' > "$LOGDIR/db-mark.tsv"
+   printf '%s\n' "$rows" | awk -F '|' '{ printf "%s\t%s\t0\t%s\n", $1, $2, $3 }' >> "$LOGDIR/db-mark.tsv"
+   n=$(printf '%s\n' "$rows" | grep -c .)
+   DB_N=$(( DB_N + n )); DB_BAKS="${DB_BAKS:+$DB_BAKS, }$bak"
+   log "runcatalog : 런 $n 개를 onlbit=0 으로 (조건 $cond, 백업 $bak)"
+   printf '%s\n' "$rows" | awk -F '|' '{ printf "   run %s  onlbit %s -> 0  runlog(전) %s\n", $1, $2, $3 }' | while IFS= read -r l; do log "$l"; done
+   return 0
+}
 mark_db() {
-   local tag rows bak n out bad sqlend
+   local lo r0 mid bad
    [ "$MARKED" = 1 ] && return 0; MARKED=1
    [ "$OWN_FLAG" = 1 ] || return 0           # dry-run · 전제 실패 : 드릴이 아니었다
-   db_where
-   tag="autonomy drill test run ($(date -d "@$START" '+%F %H:%M' 2>/dev/null)~$(date -d "@$(now_s)" '+%m-%d %H:%M' 2>/dev/null)), excluded from sheet"
-   DB_SQL="UPDATE runcatalog SET onlbit=0, runlog = CASE WHEN runlog LIKE 'autonomy drill test run%' THEN runlog ELSE '$tag' || COALESCE(' ; ' || NULLIF(runlog, ''), '') END WHERE $DB_COND;"
-   #  끝 런을 rcterm 이 아직 쥐고 있으면 넣지 않고, 그 런만의 명령을 report 에 남긴다
-   if [ "$END_MODE" = pending ] && [ "$END_RUN" -ge "$DB_LO" ]; then
-      sqlend=${DB_SQL% WHERE*}" WHERE runnum = $END_RUN;"
-      DB_PEND_SQL="sqlite3 $DBFILE \".backup '$DBBAK_DIR/runcatalog.db.bak-\$(date +%Y%m%d%H%M%S)-drill'\" && sqlite3 $DBFILE \"$sqlend\""
+   ignore_sigs                               # 여기부터 끝까지 신호로 끊기지 않는다 (리뷰 M3)
+   DB_TAG="autonomy drill test run ($(date -d "@$START" '+%F %H:%M' 2>/dev/null)~$(date -d "@$(now_s)" '+%m-%d %H:%M' 2>/dev/null)), excluded from sheet"
+   lo=$(db_lo); DB_LO=$lo
+   if [ "$lo" -le 0 ]; then
+      END_RUN=$(hb_run); DB_COND="(없음)"; DB_HIX=0
+      DB_MSG="★ 표시 하한을 정하지 못해 표시하지 않았다 (시작 런 ${F_RUN:-?} · 첫 주입 런 ${INJ_RUN:-?}) -- 손으로 확인할 것"
+      log "runcatalog : $DB_MSG"; return 0
+   fi
+   #  1) 이미 닫힌 런 : 지금 heartbeat 의 런보다 앞의 것은 rcterm 이 손을 뗐다. 기다리기 전에 먼저
+   r0=$(hb_run)
+   if [ "$MARKDB" = 1 ] && [ -w "$DBFILE" ] && [ "$r0" -gt "$lo" ]; then mark_range "$lo" "$r0" ""; fi
+   #  2) 끝 런 : 최대 T_ENDWAIT 초 기다린다
+   end_state
+   DB_HIX=$END_RUN; [ "$END_MODE" = done ] && DB_HIX=$(( END_RUN + 1 ))
+   [ "$DB_HIX" -lt "$lo" ] && DB_HIX=$lo
+   DB_COND="(runnum >= $lo AND runnum < $DB_HIX)"
+   DB_SQL=$(db_sql "$DB_COND")
+   if [ "$END_MODE" = pending ] && [ "$END_RUN" -ge "$lo" ]; then
+      DB_PEND_SQL="sqlite3 $DBFILE \".backup '$DBBAK_DIR/runcatalog.db.bak-\$(date +%Y%m%d%H%M%S)-drill'\" && sqlite3 $DBFILE \"$(db_sql "runnum = $END_RUN")\""
       log "★ 끝 런 $END_RUN 은 rcterm 이 아직 있어(phase=$(hbf phase)) 표시하지 않았다 -- rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. 닫힌 뒤 손으로 : $DB_PEND_SQL"
+   fi
+   #  끝 런이 주입을 맞았는데 rcterm 이 다시 살아 running 이면 정상 런으로 빼는 것이 맞다. 그 사실만 남긴다 (리뷰 P1)
+   if [ "$END_MODE" = running ] && [ "$END_RUN" -ge "$lo" ] && case " $INJ_RUNS " in *" $END_RUN "*) true ;; *) false ;; esac; then
+      DB_NOTE="끝 런 $END_RUN 은 주입을 맞았으나 CONT 뒤 running 으로 돌아가 정상 런으로 두었다 (표시하지 않음)"
+      log "runcatalog : $DB_NOTE"
    fi
    if [ "$MARKDB" = 0 ]; then
       DB_MSG="--no-mark-db : runcatalog 를 건드리지 않았다. 시트에서 빼려면 손으로 (백업 먼저)"
       log "$DB_MSG : $DB_SQL"; return 0
    fi
    if [ ! -w "$DBFILE" ]; then DB_MSG="★ $DBFILE 에 쓸 수 없다 -- 표시하지 못했다"; log "$DB_MSG"; return 0; fi
-   if [ "$DB_HIX" -le "$DB_LO" ]; then DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0; fi
-   rows=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL'), IFNULL(substr(runlog,1,80),'') FROM runcatalog WHERE $DB_COND ORDER BY runnum;" 2>&1) \
-      || { DB_MSG="★ DB 를 읽지 못했다 : $(clean "$rows")"; log "$DB_MSG"; return 0; }
-   if [ -z "$rows" ]; then DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0; fi
-   mkdir -p "$DBBAK_DIR" 2>/dev/null
-   bak="$DBBAK_DIR/runcatalog.db.bak-$(date +%Y%m%d%H%M%S)-drill"
-   db_backup "$bak" || { DB_MSG="★ 백업을 만들지 못해 표시하지 않았다 ($bak)"; log "$DB_MSG"; return 0; }
-   if ! out=$(sqlite3 -cmd '.timeout 10000' "$DBFILE" "$DB_SQL" 2>&1); then
-      DB_MSG="★ UPDATE 실패 : $(clean "$out") (백업 $bak)"; log "$DB_MSG"; return 0
+   #  1) 에서 못 넣은 나머지 (기다리는 사이 닫힌 런 · done 인 끝 런)
+   mid=$lo; [ "$r0" -gt "$lo" ] && mid=$r0
+   [ -z "$DB_ERR" ] && mark_range "$mid" "$DB_HIX" "-end"
+   if [ -n "$DB_ERR" ]; then
+      DB_MSG="$DB_ERR"; [ "$DB_N" -gt 0 ] && DB_MSG="$DB_MSG (그 전에 런 $DB_N 개는 표시했다, 백업 $DB_BAKS)"
+   elif [ "$DB_N" -eq 0 ]; then
+      DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0
+   else
+      DB_MSG="런 $DB_N 개를 onlbit=0 으로 (조건 $DB_COND, 백업 $DB_BAKS)"
    fi
-   { printf 'run\tonlbit_before\tonlbit_after\trunlog_before\n'
-     printf '%s\n' "$rows" | awk -F '|' '{ printf "%s\t%s\t0\t%s\n", $1, $2, $3 }'; } > "$LOGDIR/db-mark.tsv"
-   n=$(printf '%s\n' "$rows" | grep -c .)
-   DB_MSG="런 $n 개를 onlbit=0 으로 (조건 $DB_COND, 백업 $bak)"
    log "runcatalog : $DB_MSG"
-   printf '%s\n' "$rows" | awk -F '|' '{ printf "   run %s  onlbit %s -> 0  runlog(전) %s\n", $1, $2, $3 }' | while IFS= read -r l; do log "$l"; done
-   #  되읽어 대조 (리뷰 R3)
-   bad=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL') FROM runcatalog WHERE $DB_COND AND (onlbit IS NULL OR onlbit != 0) ORDER BY runnum;" 2>&1)
+   [ "$DB_N" -gt 0 ] || return 0
+   #  되읽어 대조 (리뷰 R3) -- 표시한 런만
+   bad=$(tail -n +2 "$LOGDIR/db-mark.tsv" | cut -f1 | paste -sd, -)
+   bad=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL') FROM runcatalog WHERE runnum IN ($bad) AND (onlbit IS NULL OR onlbit != 0) ORDER BY runnum;" 2>&1)
    if [ -n "$bad" ]; then
       DB_VERIFY="★ 되읽기 어긋남 : $(clean "$bad") -- onlbit 가 0 이 아니다"
    else
-      DB_VERIFY="되읽기 : $n 개 모두 onlbit=0"
+      DB_VERIFY="되읽기 : $DB_N 개 모두 onlbit=0"
    fi
    log "runcatalog : $DB_VERIFY"
 }
@@ -695,6 +739,7 @@ REPORTED=1
       echo "- 시작 런 ${F_RUN:-?} · 첫 주입 런 ${INJ_RUN:-없음} · 끝 런 ${END_RUN:-$(hb_run)} ($em) · 주입 $INJ 회"
       echo "- ${DB_MSG:-표시하지 않았다}"
       [ -n "$DB_VERIFY" ] && echo "- $DB_VERIFY"
+      [ -n "$DB_NOTE" ] && echo "- $DB_NOTE"
       if [ -n "$DB_PEND_SQL" ]; then
          echo "- ★ 끝 런 $END_RUN 은 rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. rcterm 이 끝난 뒤(phase=ended) 손으로 :"
          echo; echo '```'; echo "$DB_PEND_SQL"; echo '```'

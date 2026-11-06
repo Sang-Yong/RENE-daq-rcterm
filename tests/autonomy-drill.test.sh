@@ -385,6 +385,36 @@ rc=$(drill --plan quick --confirm-test-run)
 chk "4440 0 · 끝 런 4441 그대로 1 · 4442 그대로 · 플래그 지움" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 011 ] && [ ! -e $DRILL_FLAG ]"
 chk "CONT 가 표시보다 먼저" "awk '/CONT/{c=NR} /runcatalog :/{if(!r)r=NR} END{exit !(c && r && c<r)}' $T/out/drill.log"
 chk "report 에 4441 손 명령" "grep -q 'WHERE runnum = 4441;' $T/out/report.md"; unset SC_INT_AT
+echo "[24h] 끝 런을 기다리는 동안 두 번째 INT : 정리가 끊기지 않는다 (리뷰 M3)"
+new_world; export SC_DAQ=4441 SC_INT_AT=1793900200
+cat > "$T/hook6.sh" <<'H6'
+. "$HOOK1"
+eval "$(declare -f sleep_s | sed '1s/sleep_s/_sleep6/')"
+sleep_s() { _sleep6 "$1"; if [ -z "${_X2:-}" ] && grep -q 'runcatalog : 끝 런 .* 기다린다' "$LOGDIR/drill.log" 2>/dev/null; then _X2=1; kill -INT $$; fi; }
+H6
+export HOOK1=$TOP/hook.sh DRILL_TEST_HOOK=$T/hook6.sh; rc=$(drill --plan quick --confirm-test-run); export DRILL_TEST_HOOK=$TOP/hook.sh
+chk "두 번째 INT 를 받았다 (무시 로그)" "grep -q '정리 중이라 신호를 무시한다' $T/out/drill.log"
+chk "그래도 4440 0 · 끝 런 4441 그대로 1" "[ \$(ob 4440)\$(ob 4441) = 01 ]"
+chk "닫힌 런은 기다리기 전에 표시" "awk '/onlbit=0 으로/{if(!m)m=NR} /끝 런 .* 기다린다/{if(!w)w=NR} END{exit !(m && w && m<w)}' $T/out/drill.log"
+chk "report.md · db-mark.tsv 있음 · 플래그 지움" "[ -s $T/out/report.md ] && [ -s $T/out/db-mark.tsv ] && [ ! -e $DRILL_FLAG ]"
+chk "report 에 4441 손 명령" "grep -q 'WHERE runnum = 4441;' $T/out/report.md"; unset SC_INT_AT
+echo "[24i] 하한을 못 정하면 (heartbeat 런을 못 읽어 시작 런·주입 런 0) 표시하지 않는다 (리뷰 P2)"
+new_world; export SC_DAQ="" DRILL_T_KILL=60 DRILL_T_STALE=60 DRILL_T_POSTRUN=60 DRILL_T_USR1=60
+sed -i 's/^run=.*/run=?/' "$DRILL_HB"; rc=$(drill --plan quick --confirm-test-run)
+chk "주입은 했다" "grep -q '주입 : daq pid' $T/stdout"
+chk "아무 런도 0 이 아니다 · 백업 없음" "[ \$(ob 4439)\$(ob 4440)\$(ob 4441) = 111 ] && [ ! -d $T/bak ]"
+chk "report 에 '하한을 정하지 못해'" "grep -q '표시 하한을 정하지 못해' $T/out/report.md"
+unset DRILL_T_KILL DRILL_T_STALE DRILL_T_POSTRUN DRILL_T_USR1
+echo "[24j] 끝 런이 주입(STOP)을 맞았으나 CONT 뒤 running : report 에 한 줄 (리뷰 P1)"
+new_world; export SC_DAQ=4441 SC_INT_AT=1793900200
+cat > "$T/hook7.sh" <<'H7'
+. "$HOOK1"
+eval "$(declare -f send_sig | sed '1s/send_sig/_ss7/')"
+send_sig() { _ss7 "$@"; [ "$1" = CONT ] && touch "$W/hb_live" && sed -i 's/^phase=.*/phase=running/' "$DRILL_HB"; return 0; }
+H7
+export HOOK1=$TOP/hook.sh DRILL_TEST_HOOK=$T/hook7.sh; rc=$(drill --plan quick --confirm-test-run); export DRILL_TEST_HOOK=$TOP/hook.sh
+chk "4440 0 · 4441 (running) 1" "[ \$(ob 4440)\$(ob 4441) = 01 ]"
+chk "report 에 '주입을 맞았으나 … running'" "grep -q '끝 런 4441 은 주입을 맞았으나 CONT 뒤 running' $T/out/report.md"; unset SC_INT_AT
 echo "[24g] 단계 2 대기 중 자연 로테이션 뒤 주입 : 24 h 를 완주한 시작 런은 빼지 않는다 (리뷰 M2)"
 new_world; printf 'net=up\nsince=1793800000\nchecked=1793900000\n' > "$DRILL_NSSTATE"; touch "$W/ns_live"
 cat > "$T/hook5.sh" <<'H5'
