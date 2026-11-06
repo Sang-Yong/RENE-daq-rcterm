@@ -89,6 +89,8 @@ on_mid_disk_low     = mail      # /data 여유가 문턱 아래 (같은 규칙, 
 on_standby_retry    = none      # 감시자 대기(standby) 중 재시도 (시간당 1 회, 하루 24 통 가능). 기본 로그만. 받으려면 mail
 on_net_down         = mail      # 바깥 망 단절 (netsync). 큐에 들어가 복귀 뒤에 나간다
 on_net_restored     = mail      # 바깥 망 복귀 -- 밀린 메일·시트를 내보낸 결과
+on_tail_finish      = mail      # 비정상 런 꼬리 자동 마감 완료 (tailfinish). 책임자만 (아래 목록에 넣지 말 것)
+on_tail_finish_failed = mail    # 꼬리 자동 마감 실패 (시도 상한). 책임자만
 mail_queue          = /Data_ssd/LOG/MAILQ   # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
 
 #  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
@@ -170,3 +172,16 @@ chain_hold_file     = /Data_ssd/LOG/chainwatch.hold   # ★ 이 파일이 있으
 
 # ---- 바깥 망 감시 (scripts/netsync.sh, cron */5) ----------------------
 #  키는 없다. 환경변수 NETSYNC_DOWN_CONSEC(기본 2) · NETSYNC_FRESH_SEC(기본 900) 로만 바꾼다.
+
+# ---- 비정상 런 꼬리 자동 마감 (scripts/tailfinish.sh, chainwatch 가 5 분마다 부른다) ----
+#  런이 kill -9 · exit 2 · USB 이탈 · 정전으로 끝나면 postrun --follow 가 새 런으로 넘어가
+#  직전 런의 꼬리가 남는다 (PRD != FADC -> dataflow · websummary 가 막힌다). 그것을 사람 없이 닫는다 :
+#  badrun --quarantine -> carry 확보 -> postrun --from/--to -> runcheck --fix -> FADC == PRD 면 tail_finish
+chain_tailfinish    = 1       # 0 이면 chainwatch 가 부르지 않는다 (손으로 tailfinish.sh 는 쓸 수 있다)
+tail_quiet_sec      = 600     # 최근 이만큼[초] 안에 FADC·SADC·Merged·PRD 가 바뀐 런은 손대지 않는다
+tail_max_try        = 2       # 런당 시도 상한. 다 쓰면 tail_finish_failed 를 한 번 보내고 멈춘다
+tail_retry_min      = 60      # 시도 사이 간격 [분]
+tail_jobs           = 2       # postrun production 병렬 (수집과 겹치므로 작게)
+tail_rawroot        = /Data_ssd/RAW
+tail_log_fallback   = /scratch/LOG
+tail_carry_back     = 30      # carry 를 찾으러 거슬러 올라갈 서브런 상한 (그 안에 없으면 postrun 을 부르지 않는다)

@@ -97,6 +97,8 @@ SUP_RESTART_DAILY=3  # 하루 상한 -- 보드가 정말 죽었으면 매시 런
 AUTORESTART=1        # postrun · dataflow 가 죽었으면 pane 에서 다시 띄운다 (시간당 1 회)
 SUP_RESTART_AFTER_MIN=30   # 감시자가 끝난 뒤(마지막 [SUP] 줄) 이만큼 지나야 다시 띄운다 -- 사람이 손대는 중일 수 있다
 SUP_MAX_AGE=900      # 감시자 대기 상태 파일(time=)이 이보다 오래되면 믿지 않는다
+TAIL_FINISH=0        # 1 이면 비정상으로 끝난 런의 꼬리를 scripts/tailfinish.sh 로 자동 마감한다 (params chain_tailfinish)
+TAILFINISH=${CHAINWATCH_TAILFINISH:-$DIR/scripts/tailfinish.sh}
 SUP_RESTART_MANUAL=0 # 1 이면 사람이 'rcsupervisor stop' 으로 세운 감시자도 SUP_RESTART_AFTER_MIN 뒤 다시 띄운다 (세워 두려면 멈춤 파일)
 STATUS=0; DRY=0; NONOTIFY=0
 GATE=auto            # auto | on | off   (off/on 은 시험용 강제)
@@ -136,6 +138,7 @@ load_params() {
          chain_sup_standby_max_age) SUP_MAX_AGE=$v ;;
          chain_sup_restart_manual) SUP_RESTART_MANUAL=$v ;;
          chain_hold_file)    HOLD=$v ;;
+         chain_tailfinish)   TAIL_FINISH=$v ;;
       esac
    done < "$f"
 }
@@ -638,6 +641,23 @@ chain_autorestart() {
    return 0
 }
 
+# ---- 비정상 런 꼬리 자동 마감 -------------------------------------------
+#  판정(읽기 전용)과 처리는 tailfinish.sh 가 한다. 대상이 있으면 그것이 스스로 뒤에서
+#  일꾼을 띄우고 곧 돌아오므로 chainwatch 회차가 늘어지지 않는다. 멈춤 파일도 그쪽이 본다.
+tail_kick() {
+   [ "$TAIL_FINISH" = 1 ] || return 0
+   [ -x "$TAILFINISH" ] || { log "WARN tailfinish 를 실행할 수 없다 ($TAILFINISH)"; return 0; }
+   if [ "$DRY" -eq 1 ]; then
+      say "  꼬리 마감 (tailfinish --dry-run) :"
+      "$TAILFINISH" --params "$PARAMS" --dry-run 2>&1 | sed 's/^/    /'
+      return 0
+   fi
+   #  ★ 9>&- : 우리 잠금(fd 9)을 물려주지 않는다. 뒤에 뜨는 일꾼이 그것을 쥐면 다음 회차들이
+   #    '이미 실행 중' 으로 빠진다 -- 옛 dataflow 의 고아 rsync 가 그랬다 (CLAUDE.md 11.228)
+   "$TAILFINISH" --params "$PARAMS" >/dev/null 2>&1 9>&- || log "WARN tailfinish rc=$?"
+   return 0
+}
+
 # ---- 한 조건을 처리한다 ----------------------------------------------
 #  연속 CONSEC 회여야 알리고, 이어지는 동안은 REALERT_MIN 간격으로만 알린다.
 handle() {               # $1=이벤트  $2=이상이면 1  $3=사유  [$4=연속 문턱 (기본 CONSEC)]
@@ -730,6 +750,7 @@ main() {
    handle rate_high "$h" "$HIGH_MSG" 1
 
    check_runchange
+   tail_kick
    return 0
 }
 
@@ -765,6 +786,7 @@ if [ "$STATUS" -eq 1 ]; then
       else echo "  감시자      : 없음 (사람이 세웠다 -- chain_sup_restart_manual=0 이라 다시 띄우지 않는다)"; fi
    fi
    [ -e "$HOLD" ] && echo "  ★ 멈춤 파일 : $HOLD -- pane 자동 재기동을 하지 않는다 (알림은 나간다)"
+   echo "  꼬리 마감   : chain_tailfinish=$TAIL_FINISH  (상세 : scripts/tailfinish.sh --status)"
    echo "  자동 재기동 : postrun/dataflow chain_autorestart=$AUTORESTART · 감시자 chain_sup_autorestart=$SUP_AUTORESTART (하루 ${SUP_RESTART_DAILY} 회, 끝난 뒤 ${SUP_RESTART_AFTER_MIN}분) · 마지막 $(for k in postrun dataflow supervisor; do t=$(st_get autorestart_$k); printf '%s=%s ' $k "$( [ -n "$t" ] && date -d @"$t" '+%m-%d %H:%M' || echo -)"; done)"
    exit 0
 fi

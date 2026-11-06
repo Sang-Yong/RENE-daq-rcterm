@@ -29,6 +29,8 @@
 #                      대기에 들어간 사건(fatal)은 이미 한 번 나간다. 메일로 받으려면 on_standby_retry = mail
 #     net_down         바깥 망(메일·시트)이 끊겼다 (scripts/netsync.sh). 큐에 들어가 망이 돌아올 때 나간다
 #     net_restored     바깥 망이 돌아왔다 -- 밀린 메일·시트를 내보낸 결과
+#     tail_finish      비정상으로 끝난 런의 꼬리를 자동 마감했다 (scripts/tailfinish.sh). 책임자만
+#     tail_finish_failed  꼬리 자동 마감이 시도 상한까지 안 됐다. 사람이 볼 것. 책임자만
 #
 #  ★ 메일이 안 나가면 버리지 않는다 (2026-11-05). /Data_ssd/LOG/MAILQ 에 mailq-send.sh 와 같은 형식으로
 #    적재하고, mailq-send(cron 5분) · netsync(망 복귀 때) 가 내보낸다. netsync 가 망 단절(net=down)이라고
@@ -74,7 +76,8 @@ declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
-                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail )
+                [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail \
+                [tail_finish]=mail [tail_finish_failed]=mail )
 EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
@@ -112,6 +115,8 @@ load_params() {
          on_standby_retry)   ON[standby_retry]=$v ;;
          on_net_down)        ON[net_down]=$v ;;
          on_net_restored)    ON[net_restored]=$v ;;
+         on_tail_finish)     ON[tail_finish]=$v ;;
+         on_tail_finish_failed) ON[tail_finish_failed]=$v ;;
          mail_queue)         NOTIFY_MAILQ=$v ;;
          mail_expert_events) EXPERT_EVENTS=$v ;;
          *) : ;;
@@ -293,6 +298,16 @@ build_body() {
          net_restored)
             echo "  바깥 망이 돌아왔다. 밀린 메일과 시트 등재를 내보냈다 (위 '내용')."
             echo "  상태 :  scripts/netsync.sh --status ;  scripts/mailq-send.sh --status" ;;
+         tail_finish)
+            echo "  비정상으로 끝난 런의 꼬리(lag 몫 + 잘린 마지막 파일)를 tailfinish.sh 가 마감했다. 할 일은 없다."
+            echo "  격리한 원시 파일이 있으면 badrun 목록에 남는다 :  /Data_ssd/LOG/badrun_list.txt"
+            echo "  이제 dataflow 가 그 런을 옮기고 websummary 게이트도 넘어간다." ;;
+         tail_finish_failed)
+            echo "  꼬리 자동 마감이 시도 상한까지 안 됐다. 그 런은 PRD != FADC 로 /Data_ssd 에 남고 websummary 가 막힌다."
+            echo "  1) 상태 :  scripts/tailfinish.sh --status   (위 '복구 시도 기록' 에 마지막 시도의 꼬리 60 줄)"
+            echo "  2) 대조 :  scripts/runcheck.sh --run <런> --heartbeat /dev/null"
+            echo "  3) carry 를 못 구했으면 손으로 (CLAUDE.md 11.136) · 꼬리가 merge 불가면 badrun --quarantine (11.222)"
+            echo "  4) 고친 뒤 다시 :  scripts/tailfinish.sh --run <런> --foreground --force" ;;
          rotate)
             echo "  정상적인 런 교체다. 할 일은 없다."
             echo "  계수율이 이전 런과 크게 다르면 그때만 볼 것 (위 '런 교체 상세')." ;;

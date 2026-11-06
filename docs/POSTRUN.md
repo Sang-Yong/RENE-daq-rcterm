@@ -303,3 +303,64 @@ cd /home/frontend/DAQ/DAQ_cup/production/Shell && ./audit_run.sh 004288
   이미 7만 개가 넘는다. 정리 정책이 필요하다.
 - `postrun.sh` 는 `libRawObjs` 가 필요하다(`cupdaq_env.sh`). ROOT 나 CUPDAQ 환경이
   없으면 스스로 source 하고, 그래도 없으면 시작하지 않는다.
+
+---
+
+## 7. 비정상으로 끝난 런의 꼬리 자동 마감 — `scripts/tailfinish.sh` (2026-11-06)
+
+**왜.** 런이 kill -9 · exit 2 · USB 이탈 · 정전으로 끝나면 `postrun --follow` 는
+heartbeat 의 새 런으로 넘어가 버린다. 직전 런의 꼬리(`--lag` 몫 + 잘린 마지막 파일)는
+아무도 처리하지 않아 **PRD 개수 != FADC 개수** 로 남고, 그러면
+
+- dataflow 의 `is_processed()` 를 영영 못 넘어 `/Data_ssd` 에 붙박이가 되고
+- websummary 게이트가 '후처리 미완' 으로 그 뒤 런까지 전부 막는다
+  (2026-11-06 run 4434 : FADC 13 / PRD 3, 10 시간 정지).
+
+지금까지 손으로 하던 것(CLAUDE.md §11.220 · §11.225 · §11.227)을 그대로 대신한다.
+
+**언제 손대나 (읽기 전용 판정, 하나라도 아니면 건너뛴다)**
+
+| 조건 | 왜 |
+|---|---|
+| 수집 중이 아니다 — heartbeat 의 run 이 아니거나 `phase=ended` 이거나 heartbeat 가 2 분 넘게 묵었다 | 묵은 heartbeat 는 정전·kill -9 뒤의 붙박이다 |
+| 최상위 FADC ≥ 2 이고 FADC > PRD | FADC 1 개짜리 부팅 실패 잔재는 dataflow 가 옮긴다 |
+| 최근 `tail_quiet_sec`(600 s) 안에 FADC·SADC·Merged·PRD 가 안 바뀌었다 | `postrun --follow` 가 '런 전환 → 이전 런 마무리' 를 하는 중일 수 있다 |
+| 그 런을 처리하는 `postrun` · `runcheck` · `badrun` · 손 merge 가 없다 (`ps`, `pgrep -f` 안 씀) | 사람이 손으로 복구 중이다 |
+| 런당 시도 `tail_max_try`(2) · 간격 `tail_retry_min`(60 분) · 멈춤 파일 없음 | 같은 실패를 매 5 분 되풀이하지 않는다 |
+| 로그 루트(`production/LOG` = `/scratch/DAQ_LOG`)가 있다 | `/scratch` 가 빠지면 postrun 이 곧바로 죽는다. 시도로 세지 않는다 |
+
+**무엇을 하나**
+
+```
+1  badrun.sh --quarantine --run R      안 열리는 원시 파일 + 꼬리 서브런의 '열리지만 사건 0' 짝 -> badrun/
+2  carry 확보                          첫 결손(과 '끝난 서브런 -> 결손' 경계마다)의 직전 merge 로그에 carry 가 없으면
+                                       carry 가 있는 곳까지 거슬러 올라가(tail_carry_back, 30) 그 구간의 merge 를
+                                       임시 디렉터리에서 다시 돌려 carry 를 merge 로그로 남긴다 (§11.136, 매크로는 결정적)
+                                       임시 디렉터리에는 원시 파일의 심볼릭 링크만 둔다 -- 있는 Merged/PRD 를 덮지 않는다
+                                       ★ carry 를 끝내 못 구하면 postrun 을 부르지 않는다 (carry 0 은 조용히 모자란다, §11.68)
+3  postrun.sh R --from <첫 결손> --to <마지막 FADC> --heartbeat /dev/null --jobs 2
+4  runcheck.sh --run R --heartbeat /dev/null --fix
+5  FADC == PRD -> tail_finish (책임자) / 시도 상한까지 못 채우면 tail_finish_failed 1 회 (책임자)
+```
+
+임시 merge 방식은 실물로 확인했다 — run 4437 서브런 1 을 심볼릭 링크 디렉터리에서 서브런 0 의
+carry(1, 731, 394252)로 다시 돌리니 원래 로그와 같은 carry(2, 261, 789678)가 나왔다.
+
+**운용**
+
+```bash
+scripts/tailfinish.sh --status                     # 대상 런과 시도 상태 (읽기 전용)
+scripts/tailfinish.sh --dry-run                    # 계획만. badrun 도 --dry-run 으로만 부른다
+scripts/tailfinish.sh --run 4434 --foreground      # 한 런을 지금 이 자리에서
+scripts/tailfinish.sh --run 4434 --foreground --force   # 포기한 런을 다시 (quiet · 수집 중 판정은 그대로)
+```
+
+chainwatch 가 5 분마다 부른다 (`config/notify.params` 의 `chain_tailfinish = 1`, 없으면 0 = 안 부른다).
+대상이 있으면 tailfinish 가 스스로 `setsid nohup` 으로 일꾼을 띄우고 곧 돌아온다. 일꾼은 하나뿐이다
+(`/tmp/.tailfinish.lock`), 런마다 `/tmp/.tailfinish.<런>.lock`. 기록 : 요약 `/Data_ssd/LOG/tailfinish.log`,
+시도마다 전체 출력 `/Data_ssd/LOG/tailfinish/<런>-<시각>.log`, 상태 `/Data_ssd/LOG/tailfinish.state`.
+수동 작업 중에는 `touch /Data_ssd/LOG/chainwatch.hold` 로 멈춘다.
+
+**아직 자동으로 못 닫는 것.** 직전 merge 의 carry 가 존재하지 않는 다음 SADC 파일을 가리키는 꼬리
+(run 4396 의 모양, CLAUDE.md §11.222). 꼬리 파일은 둘 다 열리고 사건도 있어 badrun 이 격리하지 않고,
+postrun 은 `does not exist` 로 실패한다. 그때는 `tail_finish_failed` 가 오고 사람이 `--quarantine` 한다.
