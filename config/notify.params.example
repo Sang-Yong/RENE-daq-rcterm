@@ -91,6 +91,14 @@ on_net_down         = mail      # 바깥 망 단절 (netsync). 큐에 들어가 
 on_net_restored     = mail      # 바깥 망 복귀 -- 밀린 메일·시트를 내보낸 결과
 mail_queue          = /Data_ssd/LOG/MAILQ   # 못 보낸 메일을 쌓는 곳. mailq-send.sh 가 비운다
 
+#  자율 복구 드릴 플래그 (scripts/autonomy-drill.sh 가 만들고 지운다, 2026-11-06).
+#  이 파일이 있고 그 안의 pid 가 살아 있으면(24 h 안) 드릴 중으로 본다 :
+#    daq-notify   모든 사건을 책임자에게만(전문가 목록 제외), 제목 [DRILL], 본문 머리에 '드릴 중 발생', 알람 없음
+#    netsync      망 복귀 flush 에서 sheetlog-auto · websummary 를 건너뛴다 (메일 큐는 내보낸다)
+#    sheetlog-auto  --force 여도 쓰지 않는다 ([SKIP] drill)
+#  환경변수 DRILL_FLAG 가 이 값을 이긴다 (시험용).
+drill_flag          = /Data_ssd/LOG/drill.active
+
 #  누구에게 가나 (2026-09-09 사용자 지시).  여기 적힌 사건은 전문가 목록 + 책임자,
 #  나머지는 책임자만.  비워 두면 예전 규칙(recovery_failed · fatal 만 전문가).
 mail_expert_events  = restart stale recovered recovery_failed fatal chain_down rate_low resumed supervisor_down disk_low mid_disk_low

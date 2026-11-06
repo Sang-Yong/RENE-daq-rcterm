@@ -36,6 +36,10 @@
 #
 #  옵션 --force-alarm : 그 사건의 on_<이벤트> 가 mail 이어도 이번에는 알람까지 (disk_low 알람 문턱)
 #
+#  ★ 자율 복구 드릴 중이면 (drill_flag, 기본 /Data_ssd/LOG/drill.active, 2026-11-06)
+#    모든 사건을 책임자(routine)에게만, 제목 앞에 [DRILL], 본문 머리에 '드릴 중 발생', 알람(소리)은 울리지 않는다.
+#    11-05 드릴이 망이 산 채로 돌아 전문가 13 명에게 2 시간 동안 메일 10 통이 나갔다.
+#
 #  누구에게 가나 (config/notify.params 의 mail_expert_events, 2026-09-09 사용자 지시)
 #     목록에 있는 사건  -> 전문가 목록 + 책임자   (문제가 생겼거나, 해결돼 다시 정상 가동)
 #     그 밖의 사건      -> 책임자만               (정상 런 교체 rotate 가 대표)
@@ -69,6 +73,7 @@ NOTIFY_MAILQ=${NOTIFY_MAILQ:-/Data_ssd/LOG/MAILQ}      # 못 보낸 메일을 �
 [ -n "${NOTIFY_ALARM:-}" ] && ALARM=$NOTIFY_ALARM      # 시험용 가짜 알람
 # shellcheck source=/dev/null
 . "$DIR/scripts/netsync-lib.sh" 2>/dev/null || netsync_is_down() { return 1; }
+type drill_active >/dev/null 2>&1 || { drill_active() { return 1; }; drill_flag_param() { :; }; }
 
 declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [recovery_failed]=both [fatal]=both [backup_audit]=mail \
@@ -114,6 +119,7 @@ load_params() {
          on_net_restored)    ON[net_restored]=$v ;;
          mail_queue)         NOTIFY_MAILQ=$v ;;
          mail_expert_events) EXPERT_EVENTS=$v ;;
+         drill_flag)         drill_flag_param "$v" ;;
          *) : ;;
       esac
    done < "$f"
@@ -143,7 +149,13 @@ ACT=${ON[$EVENT]:-mail}
 if [ "$FORCE_ALARM" -eq 1 ]; then
    case "$ACT" in mail) ACT=both ;; none) ACT=alarm ;; esac
 fi
-log "event=$EVENT run=${RUN:-?} act=$ACT msg=${MSG:-}"
+DRILL=0; drill_active && DRILL=1
+if [ "$DRILL" -eq 1 ]; then         # 드릴 중 : 알람 없음
+   case "$ACT" in both) ACT=mail ;; alarm) ACT=none ;; esac
+   log "event=$EVENT run=${RUN:-?} act=$ACT drill=1 msg=${MSG:-}"
+else
+   log "event=$EVENT run=${RUN:-?} act=$ACT msg=${MSG:-}"
+fi
 
 # ---- 도배 방지 -------------------------------------------------------
 #  놓치면 안 되는 둘은 제한하지 않는다.
@@ -180,6 +192,7 @@ queue_mail() {           # $1=수신자 $2=제목 $3=본문 파일  -> 쌓은 �
 build_body() {
    local f=$1
    {
+      [ "$DRILL" -eq 1 ] && { echo "★ 자율 복구 드릴 중 발생 (pid $(drill_flag_get pid) · plan $(drill_flag_get plan) · $DRILL_FLAG) -- 시험으로 일으킨 사건일 수 있다. 책임자에게만 보냈다"; echo; }
       echo "사건      : $EVENT"
       [ -n "$MSG" ] && echo "내용      : $MSG"
       [ -n "$RUN" ] && echo "런        : $RUN"
@@ -354,9 +367,11 @@ case "$ACT" in
       fi
       BODY=$(mktemp /tmp/daq-notify-XXXXXX.txt) || exit 0
       build_body "$BODY"
+      [ "$DRILL" -eq 1 ] && WHO=routine          # 드릴 중 : 전문가 목록 제외
       SUBJ="$EVENT"
       [ -n "$RUN" ] && SUBJ="$SUBJ run $RUN"
       [ -n "$MSG" ] && SUBJ="$SUBJ - $MSG"
+      [ "$DRILL" -eq 1 ] && SUBJ="[DRILL] $SUBJ"
       if [ "$DRY" -eq 1 ]; then
          echo "[DRY] 메일 -> $WHO : $SUBJ"; echo "--- 본문 ---"; cat "$BODY"
       elif netsync_is_down; then
