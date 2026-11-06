@@ -21,16 +21,18 @@
 
 ## 드릴 플래그와 runcatalog 표시 (2026-11-06)
 
+★ **배포 : 드릴 · netsync · daq-notify · sheetlog-auto 는 같은 판으로 배포한다** (운영 디렉터리 `git pull` 뒤에 드릴). 넷이 `scripts/netsync-lib.sh` 의 `drill_active` 를 함께 쓰고, 단계 9 판정이 netsync 로그의 `sheetlog-auto 건너뜀 (드릴 중` 문구에 묶여 있다 — 옛 netsync 면 9 가 FAIL 이다.
+
 11-05 드릴에서 둘이 어긋났다 : ① 2 단계 망 차단이 확인되지 않았는데 주입을 계속해, 망이 산 채로 전문가 목록 13 명에게
 2 시간 동안 메일 10 통이 나갔다. ② 드릴 런을 onlbit=0 으로 빼는 일이 사람 몫이었는데 안 됐고, 11-06 09:35 망 복귀 때
 netsync 가 `sheetlog-auto --force` 를 불러 시험 런 4435·4436 이 GoodRuns 에 그 자리에서 실렸다. 그래서 :
 
 | 무엇 | 어떻게 |
 |---|---|
-| 드릴 플래그 | 전제(0) 통과 직후 `drill_flag` (notify.params, 기본 `/Data_ssd/LOG/drill.active`) 에 `pid= start= run= plan=` 을 쓰고, 끝(정상 · 중단 · 신호)에 지운다. `--dry-run` 은 안 만든다. 남의 살아 있는 플래그면 단계 0 FAIL, 죽은 것이면 지우고 진행 |
+| 드릴 플래그 | 전제(0) 통과 직후 `drill_flag` (notify.params, 기본 `/Data_ssd/LOG/drill.active`) 에 `pid= pstart= start= run= plan=` 을 쓰고, 끝(정상 · 중단 · 신호)에 지운다. `--dry-run` 은 안 만든다. 남의 살아 있는 플래그면 단계 0 FAIL, 죽은 것이면 지우고 진행 |
 | 플래그가 있는 동안 | `daq-notify` : 모든 사건을 **책임자에게만**, 제목 `[DRILL]`, 본문 머리 '드릴 중 발생', **알람 없음**, 로그 `drill=1`. `netsync` 복귀 flush : 메일 큐만 내보내고 `sheetlog-auto` · `websummary` 는 건너뜀. `sheetlog-auto` : `--force` 여도 `[SKIP] drill` |
-| 죽은 플래그 | pid 가 없거나 24 h 를 넘긴 플래그는 '드릴 아님' — 전문가 메일을 영영 막지 않는다 |
-| runcatalog 표시 (기본 켬, `--no-mark-db` 로 끔) | 끝날 때 DB 를 `/Data_ssd/LOG/harness/runcatalog.db.bak-<시각>-drill` 로 백업한 뒤 **시작 런 < 런 < 끝 런** 과, 주입을 한 번이라도 했으면 **시작 런 자신**(첫 주입이 그 런을 끝낸다)을 `onlbit=0`, runlog 앞에 `autonomy drill test run (<시작>~<끝>), excluded from sheet` (옛 runlog 는 ` ; ` 뒤에 보존). **끝 런은 heartbeat 가 running 이면 뺀다** — 정상 설정으로 계속 도는 런이다 (11-05 의 4437 은 9.6 h 돌았다). running 이 아니면(수집이 멎은 채, 또는 STOP 중에 끝남) 끝 런도 넣는다. 바꾼 행은 `db-mark.tsv` · `report.md` · `drill.log` 에 표로 |
+| 죽은 플래그 | pid 가 없거나, 그 pid 의 `/proc` 시작 시각이 플래그의 `pstart` 와 다르거나(pid 재사용 — pid_max 4.19 M 이 이미 한 바퀴 돈다), `pstart` 가 없는데 그 pid 의 명령줄에 `autonomy-drill` 이 없거나, 24 h 를 넘긴 플래그는 '드릴 아님' — 전문가 메일을 영영 막지 않는다 |
+| runcatalog 표시 (기본 켬, `--no-mark-db` 로 끔) | 끝날 때 DB 를 `sqlite3 .backup` 으로 `/Data_ssd/LOG/harness/runcatalog.db.bak-<시각>-drill` 에 백업한 뒤 **첫 주입 런 ≤ 런 < 끝 런** (주입이 없었으면 시작 런 < 런 < 끝 런) 을 `onlbit=0`, runlog 앞에 `autonomy drill test run (<시작>~<끝>), excluded from sheet` (옛 runlog 는 ` ; ` 뒤에 보존). 하한이 '플래그를 만든 런' 이 아니라 '첫 주입이 때린 런' 인 것은 2·3 단계 대기(최대 ~25 분) 중 자연 로테이션이 오면 24 h 를 완주한 정상 런을 빼지 않기 위해서다. **끝 런은 heartbeat 가 running 이면 뺀다** — 정상 설정으로 계속 도는 런이다 (11-05 의 4437 은 9.6 h 돌았다). running 이 아니면 **rcterm 이 없고 phase 가 ended/failed 일 때만** 넣는다 — rcterm 은 런을 닫을 때 `FinalizeRunInDB` 가 onlbit 를, `MarkFailedRunInDB` 가 runlog 를 다시 쓰므로(src/RunControl.cc) 살아 있는 rcterm 의 런을 0 으로 적어도 1 로 되돌아간다. 최대 120 s(`DRILL_T_ENDWAIT`) 기다리고, 그래도 rcterm 이 있으면 표시하지 않고 report.md 에 그 런만의 백업 + UPDATE 명령을 남긴다 (rcterm 이 끝난 뒤 손으로). 표시 뒤 onlbit 를 되읽어 report 에 적는다. 바꾼 행은 `db-mark.tsv` · `report.md` · `drill.log` 에 표로 |
 | 2 단계 멈춤 | 망 차단이 확인되지 않으면(FAIL) **기본은 거기서 멈춘다** — 4~8 주입 0, report 에 '망을 끊지 않아 중단'. 망이 산 채로 돌리려면 `--continue-online` (그래도 알림은 플래그로 책임자에게만) |
 
 ## 사용자가 밟을 순서

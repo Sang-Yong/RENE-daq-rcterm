@@ -10,6 +10,7 @@
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd); D=$DIR/scripts/autonomy-drill.sh
 pass=0; fail=0
+echo "시험 대상 : $D ($(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo '?'))"   # 어느 판을 돌렸는지 (리뷰 R10 : 129 는 main 판의 검사 수다)
 ok() { pass=$((pass+1)); echo "  ok   $1"; }; ng() { fail=$((fail+1)); echo "  FAIL $1"; }
 chk() { if eval "$2"; then ok "$1"; else ng "$1"; fi; }
 TOP=$(mktemp -d)
@@ -33,6 +34,7 @@ sleep_s() {
       at 60 "rm -f $DRILL_LOCALQ/*.mail $DRILL_NFSQ/*.mail; echo '2026-11-05 12:00:00   mailq-send rc=0' >> $DRILL_NSLOG"
       at "${SC_FLUSH_DELAY:-300}" "echo '2026-11-05 12:05:00   ${SC_FLUSH_LINE:-sheetlog-auto 건너뜀 (드릴 중 : drill.active pid 1)}' >> $DRILL_NSLOG; echo 0 > $W/sheetleft"
       SC_NETUP=""; }
+   [ -n "${SC_RCTERM_EXIT_AT:-}" ] && [ "$FAKE_NOW" -ge "$SC_RCTERM_EXIT_AT" ] && { SC_RCTERM_EXIT_AT=""; rm -f "$W/proc.rcterm"; set_phase ended; }
    [ -n "${SC_INT_AT:-}" ] && [ "$FAKE_NOW" -ge "$SC_INT_AT" ] && { SC_INT_AT=""; kill -INT $$; }
    return 0
 }
@@ -119,7 +121,7 @@ new_world() {
    printf '%06d' 4440 >/dev/null
    for i in 1 2 3 4 5 6 7 8; do echo "DRAM($i) is aligned" >> "$T/log/daq/TCB_004440.log"; done
    echo '2026-11-05 08:00:00 검사 : dns=ok' > "$T/netsync.log"
-   unset SC_DAQ SC_DAQ_DRAM SC_STALE SC_PR SC_USR1 SC_AFTER4 SC_NETUP SC_POWER_NEW SC_SUPDOWN SC_INT_AT SC_FLUSH_DELAY SC_FLUSH_LINE SC_DAQ_HOLD
+   unset SC_DAQ SC_DAQ_DRAM SC_STALE SC_PR SC_USR1 SC_AFTER4 SC_NETUP SC_POWER_NEW SC_SUPDOWN SC_INT_AT SC_FLUSH_DELAY SC_FLUSH_LINE SC_DAQ_HOLD SC_RCTERM_EXIT_AT DRILL_T_ENDWAIT
 }
 ob() { sqlite3 "$DRILL_DBFILE" "SELECT IFNULL(onlbit,'N') FROM runcatalog WHERE runnum=$1"; }
 rl() { sqlite3 "$DRILL_DBFILE" "SELECT IFNULL(runlog,'') FROM runcatalog WHERE runnum=$1"; }
@@ -335,7 +337,7 @@ unset DRILL_PANE_IDLE
 echo "[23] 드릴 플래그 : 전제 뒤에 만들고 끝에 지운다 · dry-run 은 안 만든다 · 죽은 것은 치우고 산 것이면 멈춘다"
 new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
 rc=$(drill --plan quick --confirm-test-run)
-chk "첫 주입 때 플래그가 있었다 (pid·run·plan)" "grep -q '^pid=[0-9]' $W/flag.snap && grep -qx 'run=4440' $W/flag.snap && grep -qx 'plan=quick' $W/flag.snap && grep -q '^start=1793900' $W/flag.snap"
+chk "첫 주입 때 플래그가 있었다 (pid·pstart·run·plan)" "grep -q '^pid=[0-9]' $W/flag.snap && grep -q '^pstart=[0-9]' $W/flag.snap && grep -qx 'run=4440' $W/flag.snap && grep -qx 'plan=quick' $W/flag.snap && grep -q '^start=1793900' $W/flag.snap"
 chk "끝나면 지웠다" "[ ! -e $DRILL_FLAG ]"; chk "운영 자리에 안 썼다" "! grep -q '/Data_ssd/LOG/drill.active' $T/out/drill.log"
 new_world; rc=$(drill --plan quick --dry-run --confirm-test-run); chk "dry-run : 플래그 없음" "[ ! -e $DRILL_FLAG ] && ! grep -q '드릴 플래그를 만들었다' $T/stdout"
 new_world; printf 'pid=999999\nrun=4400\n' > "$DRILL_FLAG"; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
@@ -356,19 +358,46 @@ chk "runlog 앞에 태그, 옛 runlog 는 ' ; ' 뒤에" "rl 4441 | grep -q '^aut
 chk "옛 runlog 없으면 태그만" "rl 4440 | grep -q 'excluded from sheet\$'"
 chk "백업 runcatalog.db.bak-*-drill (바꾸기 전 내용)" "f=\$(ls $T/bak/runcatalog.db.bak-*-drill) && [ \$(sqlite3 \$f 'select onlbit from runcatalog where runnum=4440') = 1 ]"
 chk "db-mark.tsv 3 줄" "[ \$(tail -n +2 $T/out/db-mark.tsv | grep -c .) = 3 ]"; chk "drill.log 에 표" "grep -q 'run 4442  onlbit 1 -> 0' $T/out/drill.log"
-echo "[24b] 끝 런이 running 이 아니면 (주입 뒤 수집이 멎음) 끝 런도 넣는다"
+echo "[24b] 끝 런의 rcterm 이 끝났고 phase=ended 이면 (주입 뒤 수집이 멎음) 끝 런도 넣는다"
+new_world; export SC_DAQ="" SC_AFTER4="set_phase ended; rm -f $W/hb_live $W/proc.rcterm" DRILL_T_KILL=100
+rc=$(drill --plan quick --confirm-test-run)
+chk "4440 0 (시작=끝 런, 닫혔다)" "[ \$(ob 4440) = 0 ]"; chk "4441 은 그대로" "[ \$(ob 4441) = 1 ]"
+chk "되읽기 줄" "grep -q '되읽기 : 1 개 모두 onlbit=0' $T/out/report.md"; unset DRILL_T_KILL
+echo "[24e] 끝 런의 rcterm 이 살아 있으면 (phase=ended 여도) 표시하지 않고 report 에 손으로 칠 명령 (리뷰 M1)"
 new_world; export SC_DAQ="" SC_AFTER4="set_phase ended; rm -f $W/hb_live" DRILL_T_KILL=100
 rc=$(drill --plan quick --confirm-test-run)
-chk "4440 0 (시작=끝 런, 멎었다)" "[ \$(ob 4440) = 0 ]"; chk "4441 은 그대로" "[ \$(ob 4441) = 1 ]"; unset DRILL_T_KILL
+chk "4440 그대로 1 (rcterm 이 나중에 onlbit 를 쓴다)" "[ \$(ob 4440) = 1 ]"
+chk "기다렸다 (120 s)" "grep -q '최대 120 s 기다린다' $T/stdout"
+chk "report 에 그 런만의 백업 + UPDATE 명령" "grep -q 'rcterm 이 아직 있다 -> 넣지 않았다' $T/out/report.md && grep -q '.backup' $T/out/report.md && grep -q 'WHERE runnum = 4440;' $T/out/report.md"
+unset DRILL_T_KILL
+echo "[24f] 기다리는 동안 rcterm 이 끝나면 넣는다"
+new_world; export SC_DAQ="" SC_AFTER4="set_phase ending; rm -f $W/hb_live" DRILL_T_KILL=100 DRILL_T_ENDWAIT=900 SC_RCTERM_EXIT_AT=1793900400
+rc=$(drill --plan quick --confirm-test-run)
+chk "4440 0 (기다린 끝에 닫혔다)" "[ \$(ob 4440) = 0 ] && grep -q 'rcterm 이 닫았다 -> 넣었다' $T/out/report.md"; unset DRILL_T_KILL; unset DRILL_T_ENDWAIT
 echo "[24c] --no-mark-db : 무접촉, report 에 손으로 칠 명령"
 new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
 rc=$(drill --plan quick --confirm-test-run --no-mark-db)
 chk "전부 그대로" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 111 ] && [ ! -d $T/bak ]"
 chk "report 에 백업 + UPDATE 명령" "grep -q 'runcatalog.db.bak-' $T/out/report.md && grep -q 'UPDATE runcatalog SET onlbit=0' $T/out/report.md"
-echo "[24d] 중간에 INT 로 끝나도 표시한다 (trap)"
+echo "[24d] STOP 중 INT : CONT 뒤 rcterm(가짜)이 살아 있으니 끝 런 4441 은 표시하지 않는다 (리뷰 M1 의 바로 그 경로)"
 new_world; export SC_DAQ=4441 SC_INT_AT=1793900200
 rc=$(drill --plan quick --confirm-test-run)
-chk "4440 0 · STOP 중이라 heartbeat 가 멎은 끝 런 4441 도 0 · 4442 그대로 · 플래그 지움" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 001 ] && [ ! -e $DRILL_FLAG ]"; unset SC_INT_AT
+chk "4440 0 · 끝 런 4441 그대로 1 · 4442 그대로 · 플래그 지움" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 011 ] && [ ! -e $DRILL_FLAG ]"
+chk "CONT 가 표시보다 먼저" "awk '/CONT/{c=NR} /runcatalog :/{if(!r)r=NR} END{exit !(c && r && c<r)}' $T/out/drill.log"
+chk "report 에 4441 손 명령" "grep -q 'WHERE runnum = 4441;' $T/out/report.md"; unset SC_INT_AT
+echo "[24g] 단계 2 대기 중 자연 로테이션 뒤 주입 : 24 h 를 완주한 시작 런은 빼지 않는다 (리뷰 M2)"
+new_world; printf 'net=up\nsince=1793800000\nchecked=1793900000\n' > "$DRILL_NSSTATE"; touch "$W/ns_live"
+cat > "$T/hook5.sh" <<'H5'
+. "$HOOK1"
+eval "$(declare -f sleep_s | sed '1s/sleep_s/_sleep5/')"
+sleep_s() { _sleep5 "$1"; if [ -z "${_ROT:-}" ] && grep -q '망을 끊어라' "$LOGDIR/drill.log" 2>/dev/null; then _ROT=1; at 100 "new_run 4441 8"; at 300 set_net_down; fi; }
+H5
+export HOOK1=$TOP/hook.sh DRILL_TEST_HOOK=$T/hook5.sh SC_DAQ=4442 SC_STALE=4443 SC_PR=1 SC_USR1=4444 SC_NETUP=1
+rc=$(drill --plan offline-full --confirm-test-run); export DRILL_TEST_HOOK=$TOP/hook.sh
+chk "rc 0" "[ $rc = 0 ]"; chk "첫 주입은 로테이션 뒤의 4441" "grep -q '주입 : daq pid 4321 에 TERM (run 4441)' $T/stdout"
+chk "4440 (플래그 런, 주입 전 정상 마감) 그대로 1" "[ \$(ob 4440) = 1 ]"
+chk "4441 4442 4443 0 · 끝 런 4444 (running) 1" "[ \$(ob 4441)\$(ob 4442)\$(ob 4443)\$(ob 4444) = 0001 ]"
+chk "report 에 첫 주입 런" "grep -q '첫 주입 런 4441' $T/out/report.md"
 chk "운영 DB·로그 무접촉 (경로가 sandbox)" "! grep -rq '/Data_ssd/runcatalog.db' $T/out/drill.log"
 
 if [ -n "${KEEP:-}" ]; then echo "남김 $TOP"; else rm -rf -- "${TOP:?}"; fi

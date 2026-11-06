@@ -34,11 +34,14 @@
 #     끝(정상·중단·신호)에 지운다. 그동안 daq-notify 는 책임자에게만 [DRILL] 로 보내고 알람을 울리지 않으며,
 #     netsync 는 복귀 flush 에서 시트·웹을 건너뛰고, sheetlog-auto 는 --force 여도 쓰지 않는다. --dry-run 은 만들지 않는다.
 #  runcatalog 표시 (기본 켬, --no-mark-db 로 끔)
-#     끝날 때 DB 를 <DRILL_DBBAK_DIR>/runcatalog.db.bak-<시각>-drill 로 백업한 뒤
-#       시작 런 < 런 < 끝 런  (+ 주입을 한 번이라도 보냈으면 시작 런 자신 -- 첫 주입이 그 런을 끝낸다)
+#     끝날 때 DB 를 <DRILL_DBBAK_DIR>/runcatalog.db.bak-<시각>-drill 로 (sqlite3 .backup) 백업한 뒤
+#       첫 주입 런 <= 런 < 끝 런   (주입이 없었으면 시작 런 < 런 < 끝 런)
 #     을 onlbit=0, runlog 앞에 'autonomy drill test run (<시작>~<끝>), excluded from sheet' (옛 runlog 는 ' ; ' 뒤에).
+#     하한이 첫 주입 런인 것은 2·3 단계 대기 중 자연 로테이션이 오면 플래그 런이 24 h 완주 정상 런이기 때문 (리뷰 M2).
 #     끝 런은 heartbeat 가 running 이면 뺀다 -- 정상 설정으로 계속 도는 런이다 (11-05 의 4437 은 9.6 h 돌았다).
-#     running 이 아니면(수집이 멎은 채 끝남) 끝 런도 넣는다. 바꾼 행은 db-mark.tsv · report.md · drill.log 에 표로.
+#     running 이 아니면 rcterm 이 없고 phase=ended|failed 일 때만 넣는다 -- 살아 있는 rcterm 은 런을 닫으며 onlbit 를
+#     다시 쓴다 (리뷰 M1). 최대 120 s 기다리고 그래도 있으면 report.md 에 그 런만의 명령을 남긴다. 표시 뒤 되읽어 대조.
+#     바꾼 행은 db-mark.tsv · report.md · drill.log 에 표로.
 #
 #  안전
 #     - 4~8 은 --confirm-test-run 이 있을 때만 (시험 런을 깨뜨린다). 없으면 SKIP
@@ -103,7 +106,7 @@ DRILL_FLAG=${DRILL_FLAG:-/Data_ssd/LOG/drill.active}
 PROMPT_RE=${DRILL_PROMPT_RE:-'[$#] ?$'}
 
 PLAN=""; DRY=0; CONFIRM=0; POWER=0; LOGDIR=""; MARKDB=1; ONLINE=0
-usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'; }
 while [ $# -gt 0 ]; do
    case "$1" in
       --plan)             PLAN=${2:-}; shift 2 ;;
@@ -236,7 +239,10 @@ cleanup() {
 REPORTED=0
 
 # ---- 드릴 플래그 -------------------------------------------------------------
-OWN_FLAG=0; F_RUN=""; INJ=0
+OWN_FLAG=0; F_RUN=""; INJ=0; INJ_RUN=""
+#  첫 주입이 때린 런을 기억한다 (리뷰 M2). 단계 2·3 대기 중 자연 로테이션이 오면 F_RUN 은 24 h 를 완주한
+#  정상 런이고 주입은 F_RUN+1 에 간다 -- 표시의 하한은 F_RUN 이 아니라 이 런이다
+inj_mark() { INJ=$(( INJ + 1 )); [ -n "$INJ_RUN" ] || INJ_RUN=${R0:-$(hb_run)}; }
 flag_take() {            # 전제 통과 직후. 살아 있는 남의 플래그면 1
    local op
    if [ -e "$DRILL_FLAG" ]; then
@@ -247,7 +253,8 @@ flag_take() {            # 전제 통과 직후. 살아 있는 남의 플래그�
       log "죽은 드릴 플래그를 지운다 (pid ${op:-?} 는 없다) : $DRILL_FLAG"; rm -f "$DRILL_FLAG"
    fi
    F_RUN=$(hb_run)
-   if ( set -o noclobber; printf 'pid=%s\nstart=%s\nrun=%s\nplan=%s\nlog=%s\n' "$$" "$(now_s)" "$F_RUN" "$PLAN" "$LOGDIR" > "$DRILL_FLAG" ) 2>/dev/null; then
+   #  pstart = 이 셸의 /proc 시작 시각. 읽는 쪽(drill_active)이 pid 재사용을 가린다 (리뷰 R1)
+   if ( set -o noclobber; printf 'pid=%s\npstart=%s\nstart=%s\nrun=%s\nplan=%s\nlog=%s\n' "$$" "$(drill_proc_start $$ 2>/dev/null)" "$(now_s)" "$F_RUN" "$PLAN" "$LOGDIR" > "$DRILL_FLAG" ) 2>/dev/null; then
       OWN_FLAG=1; log "드릴 플래그를 만들었다 ($DRILL_FLAG, run $F_RUN) -- 알림은 책임자에게만 [DRILL], 시트 등재는 멈춘다"; return 0
    fi
    record 0 드릴플래그 - "플래그를 만든다" "만들 수 없다 ($DRILL_FLAG)" FAIL ""; return 1
@@ -255,34 +262,60 @@ flag_take() {            # 전제 통과 직후. 살아 있는 남의 플래그�
 flag_drop() { [ "$OWN_FLAG" = 1 ] || return 0; rm -f "$DRILL_FLAG"; OWN_FLAG=0; log "드릴 플래그를 지웠다 ($DRILL_FLAG)"; }
 
 # ---- 끝날 때 : 이번 드릴의 런을 runcatalog 에서 뺀다 ------------------------------
-MARKED=0; DB_MSG=""; DB_SQL=""
-db_where() {             # 표시할 런의 조건을 DB_LO · DB_HIX · DB_INCL 로
-   local hi; DB_LO=${F_RUN:-0}; hi=$(hb_run)
-   if hb_running; then DB_HIX=$hi; else DB_HIX=$(( hi + 1 )); fi
-   [ "$DB_HIX" -gt "$DB_LO" ] || DB_HIX=$(( DB_LO + 1 ))
-   DB_INCL=0; [ "$INJ" -gt 0 ] && DB_INCL=1
-   DB_COND="((runnum > $DB_LO AND runnum < $DB_HIX)"
-   [ "$DB_INCL" = 1 ] && DB_COND="$DB_COND OR runnum = $DB_LO"
-   DB_COND="$DB_COND)"
+#  ★ rcterm 은 런을 닫을 때 FinalizeRunInDB 가 onlbit = goodRun?1:0 을, MarkFailedRunInDB 가 runlog 를 통째로 쓴다
+#    (src/RunControl.cc). 그래서 rcterm 이 아직 쥐고 있는 런(heartbeat 의 마지막 런)을 지금 0 으로 적어도
+#    나중에 1 로 되돌아간다 (리뷰 M1 -- STOP 중 INT 뒤 CONT 받은 rcterm 이 정상 마감하는 경로).
+#    끝 런은 rcterm 이 없고 phase 가 ended/failed 일 때만 넣는다. 아니면 기다리고, 그래도 아니면 손으로.
+T_ENDWAIT=${DRILL_T_ENDWAIT:-120}
+MARKED=0; DB_MSG=""; DB_SQL=""; END_RUN=""; END_MODE=""; DB_PEND_SQL=""; DB_VERIFY=""
+end_state() {            # END_RUN · END_MODE (running | done | pending) 를 정한다. 최대 T_ENDWAIT 초 기다린다
+   local t0 ph; t0=$(now_s)
+   while :; do
+      END_RUN=$(hb_run); ph=$(hbf phase)
+      if hb_running; then END_MODE=running; return 0; fi
+      if [ -z "$(pid_of rcterm)" ] && { [ "$ph" = ended ] || [ "$ph" = failed ]; }; then END_MODE=done; return 0; fi
+      if [ $(( $(now_s) - t0 )) -ge "$T_ENDWAIT" ]; then END_MODE=pending; return 0; fi
+      [ $(( $(now_s) - t0 )) = 0 ] && log "runcatalog : 끝 런 $END_RUN 의 rcterm 이 아직 있거나 phase=${ph:-?} -- 최대 ${T_ENDWAIT} s 기다린다"
+      sleep_s "$POLL"
+   done
+}
+db_where() {             # 표시할 런의 조건 DB_COND.  하한 : 주입했으면 첫 주입 런, 아니면 시작 런 다음.  상한 : 끝 런 (done 일 때만 포함)
+   local lo hix
+   if [ "$INJ" -gt 0 ] && [ -n "$INJ_RUN" ]; then lo=$INJ_RUN; else lo=$(( ${F_RUN:-0} + 1 )); fi
+   end_state
+   hix=$END_RUN; [ "$END_MODE" = done ] && hix=$(( END_RUN + 1 ))
+   DB_LO=$lo; DB_HIX=$hix
+   DB_COND="(runnum >= $lo AND runnum < $hix)"
+}
+db_backup() {            # $1=백업 파일.  sqlite3 .backup (쓰는 도중에도 일관된 사본). 없으면 cp -p (리뷰 R2)
+   sqlite3 -cmd '.timeout 10000' "$DBFILE" ".backup '$1'" 2>/dev/null && [ -s "$1" ] && return 0
+   cp -p "$DBFILE" "$1" 2>/dev/null
 }
 mark_db() {
-   local tag rows bak n out
+   local tag rows bak n out bad sqlend
    [ "$MARKED" = 1 ] && return 0; MARKED=1
    [ "$OWN_FLAG" = 1 ] || return 0           # dry-run · 전제 실패 : 드릴이 아니었다
    db_where
    tag="autonomy drill test run ($(date -d "@$START" '+%F %H:%M' 2>/dev/null)~$(date -d "@$(now_s)" '+%m-%d %H:%M' 2>/dev/null)), excluded from sheet"
    DB_SQL="UPDATE runcatalog SET onlbit=0, runlog = CASE WHEN runlog LIKE 'autonomy drill test run%' THEN runlog ELSE '$tag' || COALESCE(' ; ' || NULLIF(runlog, ''), '') END WHERE $DB_COND;"
+   #  끝 런을 rcterm 이 아직 쥐고 있으면 넣지 않고, 그 런만의 명령을 report 에 남긴다
+   if [ "$END_MODE" = pending ] && [ "$END_RUN" -ge "$DB_LO" ]; then
+      sqlend=${DB_SQL% WHERE*}" WHERE runnum = $END_RUN;"
+      DB_PEND_SQL="sqlite3 $DBFILE \".backup '$DBBAK_DIR/runcatalog.db.bak-\$(date +%Y%m%d%H%M%S)-drill'\" && sqlite3 $DBFILE \"$sqlend\""
+      log "★ 끝 런 $END_RUN 은 rcterm 이 아직 있어(phase=$(hbf phase)) 표시하지 않았다 -- rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. 닫힌 뒤 손으로 : $DB_PEND_SQL"
+   fi
    if [ "$MARKDB" = 0 ]; then
       DB_MSG="--no-mark-db : runcatalog 를 건드리지 않았다. 시트에서 빼려면 손으로 (백업 먼저)"
       log "$DB_MSG : $DB_SQL"; return 0
    fi
    if [ ! -w "$DBFILE" ]; then DB_MSG="★ $DBFILE 에 쓸 수 없다 -- 표시하지 못했다"; log "$DB_MSG"; return 0; fi
+   if [ "$DB_HIX" -le "$DB_LO" ]; then DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0; fi
    rows=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL'), IFNULL(substr(runlog,1,80),'') FROM runcatalog WHERE $DB_COND ORDER BY runnum;" 2>&1) \
       || { DB_MSG="★ DB 를 읽지 못했다 : $(clean "$rows")"; log "$DB_MSG"; return 0; }
    if [ -z "$rows" ]; then DB_MSG="바꿀 런 없음 (조건 $DB_COND)"; log "runcatalog : $DB_MSG"; return 0; fi
    mkdir -p "$DBBAK_DIR" 2>/dev/null
    bak="$DBBAK_DIR/runcatalog.db.bak-$(date +%Y%m%d%H%M%S)-drill"
-   cp -p "$DBFILE" "$bak" 2>/dev/null || { DB_MSG="★ 백업을 만들지 못해 표시하지 않았다 ($bak)"; log "$DB_MSG"; return 0; }
+   db_backup "$bak" || { DB_MSG="★ 백업을 만들지 못해 표시하지 않았다 ($bak)"; log "$DB_MSG"; return 0; }
    if ! out=$(sqlite3 -cmd '.timeout 10000' "$DBFILE" "$DB_SQL" 2>&1); then
       DB_MSG="★ UPDATE 실패 : $(clean "$out") (백업 $bak)"; log "$DB_MSG"; return 0
    fi
@@ -292,6 +325,14 @@ mark_db() {
    DB_MSG="런 $n 개를 onlbit=0 으로 (조건 $DB_COND, 백업 $bak)"
    log "runcatalog : $DB_MSG"
    printf '%s\n' "$rows" | awk -F '|' '{ printf "   run %s  onlbit %s -> 0  runlog(전) %s\n", $1, $2, $3 }' | while IFS= read -r l; do log "$l"; done
+   #  되읽어 대조 (리뷰 R3)
+   bad=$(sqlite3 -separator '|' -cmd '.timeout 10000' "$DBFILE" "SELECT runnum, IFNULL(onlbit,'NULL') FROM runcatalog WHERE $DB_COND AND (onlbit IS NULL OR onlbit != 0) ORDER BY runnum;" 2>&1)
+   if [ -n "$bad" ]; then
+      DB_VERIFY="★ 되읽기 어긋남 : $(clean "$bad") -- onlbit 가 0 이 아니다"
+   else
+      DB_VERIFY="되읽기 : $n 개 모두 onlbit=0"
+   fi
+   log "runcatalog : $DB_VERIFY"
 }
 trap cleanup EXIT
 trap 'ABORTED="신호를 받았다"; log "★ 드릴이 신호로 중단됐다"; exit 1' INT TERM
@@ -424,7 +465,7 @@ s4() {
    guard 4 daq종료 || return
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); p=$(first_pid daq)
    [ -n "$p" ] || { record 4 daq종료 - "daq 프로세스" "pgrep -x daq 가 없다" FAIL ""; return; }
-   t=$(ts); log "주입 : daq pid $p 에 TERM (run $R0)"; INJ=$(( INJ + 1 )); send_sig TERM "$p"
+   t=$(ts); log "주입 : daq pid $p 에 TERM (run $R0)"; inj_mark; send_sig TERM "$p"
    if wait_for "$T_KILL" new_run_up; then
       ev=$(sup_has 'restart #')
       if [ -n "$ev" ]; then record 4 daq종료 "$t" "restart -> 새 런 running + DRAM ${DRAM_LINES}" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -444,7 +485,7 @@ s5() {
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); p=$(first_pid rcterm)
    [ -n "$p" ] || { record 5 stale - "rcterm 프로세스" "pgrep -x rcterm 가 없다" FAIL ""; return; }
    t=$(ts); log "주입 : rcterm pid $p 에 STOP (run $R0). 감시자 check=${SUP_CHECK} s stale=${SUP_STALE} s -> 최대 ${lim} s 기다린다"
-   STOPPED="$STOPPED $p"; INJ=$(( INJ + 1 )); send_sig STOP "$p"
+   STOPPED="$STOPPED $p"; inj_mark; send_sig STOP "$p"
    if wait_for "$lim" new_run_up; then
       ev=$(sup_has 'heartbeat stale')
       if [ -n "$ev" ]; then record 5 stale "$t" "heartbeat stale -> 재시작 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -491,7 +532,7 @@ s7() {
       record 7 SIGUSR1 - "감시자가 USR1 을 받는다" "SigCgt=$m -- 옛 감시자(USR1 이면 죽는다). 보내지 않았다" SKIP "/proc/$sp/status"; return
    fi
    R0=$(hb_run); SOFF=$(fsize "$SUPLOG"); t=$(ts); log "주입 : 감시자 pid $sp 에 USR1 (run $R0)"
-   INJ=$(( INJ + 1 )); send_sig USR1 "$sp"
+   inj_mark; send_sig USR1 "$sp"
    if wait_for "$T_USR1" new_run_up; then
       ev=$(sup_has 'SIGUSR1 : ending')
       if [ -n "$ev" ]; then record 7 SIGUSR1 "$t" "정상 마감 -> 새 런" "run $R0 -> $NEWRUN, $DRAM_MSG" PASS "$ev"
@@ -538,7 +579,7 @@ s8() {
    t=$(ts); log "주입 : 감시자 pid $sp 에 TERM (run $R0 정상 마감) -> 전원 단계"
    POWER_CMD=$cmd; POWER_DOWN=1          # 여기부터 감시자 재기동까지 수집이 멎는다. 신호로 끝나도 안내가 남게
    drill_hold_set                        # 전원 작업 도중 chainwatch(chain_sup_restart_manual=1)가 감시자를 띄우지 않게
-   INJ=$(( INJ + 1 )); send_sig TERM "$sp"
+   inj_mark; send_sig TERM "$sp"
    all_down() { [ -z "$(first_pid rcsupervisor)$(first_pid rcterm)$(first_pid daq)$(first_pid tcb)$(first_pid merger)" ]; }
    if ! wait_for 600 all_down; then
       drill_hold_rm
@@ -645,14 +686,25 @@ REPORTED=1
    echo "## runcatalog 표시"
    echo
    if [ "$OWN_FLAG" = 1 ] || [ -n "$DB_MSG" ]; then
-      echo "- 시작 런 ${F_RUN:-?} · 끝 런 $(hb_run) ($(hb_running && echo 'running -> 뺐다' || echo 'running 아님 -> 넣었다')) · 주입 $INJ 회"
+      case "$END_MODE" in
+         running) em="running -> 뺐다 (정상 런으로 계속 돈다)" ;;
+         done)    em="rcterm 이 닫았다 -> 넣었다" ;;
+         pending) em="★ rcterm 이 아직 있다 -> 넣지 않았다 (아래 명령으로 손으로)" ;;
+         *)       em="-" ;;
+      esac
+      echo "- 시작 런 ${F_RUN:-?} · 첫 주입 런 ${INJ_RUN:-없음} · 끝 런 ${END_RUN:-$(hb_run)} ($em) · 주입 $INJ 회"
       echo "- ${DB_MSG:-표시하지 않았다}"
+      [ -n "$DB_VERIFY" ] && echo "- $DB_VERIFY"
+      if [ -n "$DB_PEND_SQL" ]; then
+         echo "- ★ 끝 런 $END_RUN 은 rcterm 이 런을 닫으며 onlbit 를 다시 쓴다. rcterm 이 끝난 뒤(phase=ended) 손으로 :"
+         echo; echo '```'; echo "$DB_PEND_SQL"; echo '```'
+      fi
       if [ -s "$LOGDIR/db-mark.tsv" ]; then
          echo
          echo "| 런 | onlbit 전 | 후 | runlog (전) |"; echo "|---|---|---|---|"
          tail -n +2 "$LOGDIR/db-mark.tsv" | awk -F '\t' '{ printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4 }'
       elif [ "$MARKDB" = 0 ] && [ -n "$DB_SQL" ]; then
-         echo; echo '```'; printf 'cp -p %s %s/runcatalog.db.bak-$(date +%%Y%%m%%d%%H%%M%%S)-drill && sqlite3 %s "%s"\n' "$DBFILE" "$DBBAK_DIR" "$DBFILE" "$DB_SQL"; echo '```'
+         echo; echo '```'; printf 'sqlite3 %s ".backup %s/runcatalog.db.bak-$(date +%%Y%%m%%d%%H%%M%%S)-drill" && sqlite3 %s "%s"\n' "$DBFILE" "$DBBAK_DIR" "$DBFILE" "$DB_SQL"; echo '```'
       fi
    else
       echo "- 드릴 플래그를 잡지 않았다 (dry-run · 전제 실패) -- runcatalog 무접촉"
