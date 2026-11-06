@@ -19,6 +19,20 @@
 
 하나라도 아니면 드릴은 **아무것도 주입하지 않고** 단계 0 FAIL 로 끝난다.
 
+## 드릴 플래그와 runcatalog 표시 (2026-11-06)
+
+11-05 드릴에서 둘이 어긋났다 : ① 2 단계 망 차단이 확인되지 않았는데 주입을 계속해, 망이 산 채로 전문가 목록 13 명에게
+2 시간 동안 메일 10 통이 나갔다. ② 드릴 런을 onlbit=0 으로 빼는 일이 사람 몫이었는데 안 됐고, 11-06 09:35 망 복귀 때
+netsync 가 `sheetlog-auto --force` 를 불러 시험 런 4435·4436 이 GoodRuns 에 그 자리에서 실렸다. 그래서 :
+
+| 무엇 | 어떻게 |
+|---|---|
+| 드릴 플래그 | 전제(0) 통과 직후 `drill_flag` (notify.params, 기본 `/Data_ssd/LOG/drill.active`) 에 `pid= start= run= plan=` 을 쓰고, 끝(정상 · 중단 · 신호)에 지운다. `--dry-run` 은 안 만든다. 남의 살아 있는 플래그면 단계 0 FAIL, 죽은 것이면 지우고 진행 |
+| 플래그가 있는 동안 | `daq-notify` : 모든 사건을 **책임자에게만**, 제목 `[DRILL]`, 본문 머리 '드릴 중 발생', **알람 없음**, 로그 `drill=1`. `netsync` 복귀 flush : 메일 큐만 내보내고 `sheetlog-auto` · `websummary` 는 건너뜀. `sheetlog-auto` : `--force` 여도 `[SKIP] drill` |
+| 죽은 플래그 | pid 가 없거나 24 h 를 넘긴 플래그는 '드릴 아님' — 전문가 메일을 영영 막지 않는다 |
+| runcatalog 표시 (기본 켬, `--no-mark-db` 로 끔) | 끝날 때 DB 를 `/Data_ssd/LOG/harness/runcatalog.db.bak-<시각>-drill` 로 백업한 뒤 **시작 런 < 런 < 끝 런** 과, 주입을 한 번이라도 했으면 **시작 런 자신**(첫 주입이 그 런을 끝낸다)을 `onlbit=0`, runlog 앞에 `autonomy drill test run (<시작>~<끝>), excluded from sheet` (옛 runlog 는 ` ; ` 뒤에 보존). **끝 런은 heartbeat 가 running 이면 뺀다** — 정상 설정으로 계속 도는 런이다 (11-05 의 4437 은 9.6 h 돌았다). running 이 아니면(수집이 멎은 채, 또는 STOP 중에 끝남) 끝 런도 넣는다. 바꾼 행은 `db-mark.tsv` · `report.md` · `drill.log` 에 표로 |
+| 2 단계 멈춤 | 망 차단이 확인되지 않으면(FAIL) **기본은 거기서 멈춘다** — 4~8 주입 0, report 에 '망을 끊지 않아 중단'. 망이 산 채로 돌리려면 `--continue-online` (그래도 알림은 플래그로 책임자에게만) |
+
 ## 사용자가 밟을 순서
 
 ```bash
@@ -30,8 +44,8 @@ scripts/autonomy-drill.sh --plan offline-full --dry-run --confirm-test-run
 # 1) 시험 런을 띄운다 (설정은 평소대로. rundesc 에 '드릴 시험 런' 이라고 적어 두면 나중에 가르기 쉽다)
 #    tmux daq:1.2 에서 평소 감시자 명령
 
-# 2) 전문가 목록에 미리 알린다 — 드릴 동안 restart · stale · chain_down 메일이 진짜로 나간다
-#    (망이 끊긴 동안은 큐에 쌓였다가 망이 돌아오면 한꺼번에 나간다)
+# 2) 드릴 동안의 restart · stale · chain_down 메일은 드릴 플래그 때문에 책임자에게만 [DRILL] 로 간다
+#    (망이 끊긴 동안은 큐에 쌓였다가 망이 돌아오면 나간다). 전문가 목록에 따로 알릴 필요는 없다
 
 # 3) 콘솔(현장 키보드)에서 드릴을 띄운다. 원격 세션은 2 단계에서 끊긴다
 #    ★ 콘솔 셸에서 직접(전경으로) 띄우지 말 것 — 터미널이 닫히면 드릴도 죽는다. 반드시 setsid nohup
@@ -42,14 +56,14 @@ tail -f /Data_ssd/LOG/autonomy-drill/console.log
 
 # 4) '★ 사람 차례 : 지금 바깥 망을 끊어라' 가 나오면 (root)
 sudo nmcli connection down enp0s31f6
-#    또는 (더 실전에 가깝다) 벽 쪽 랜 케이블(enp0s31f6 포트)을 뽑는다. 둘 중 하나만
+#    ★ 케이블을 뽑기보다 nmcli 로 끊을 것 — 11-06 09:18 케이블을 뽑다 FADC USB 가 빠져 run 4437 이 죽었다
+#    ★ 15 분 안에 net=down 이 확인되지 않으면 드릴은 거기서 멈춘다 (주입 0). 망이 산 채로 돌리려면 --continue-online
 #    ★ daq_gateway 가 아니다 — 그 프로파일은 케이블 없는 enp3s0f0 에 묶여 비활성이라 down 해도 아무것도 안 끊긴다
 #      (실측 11-05 : 활성 프로파일 enp0s31f6 = 장치 enp0s31f6, 203.230.111.71)
 #    netsync 가 net=down 을 적을 때까지 최대 15 분. 드릴이 혼자 3~8 단계를 진행한다 (1~2 시간)
 
-# 5) '★ 사람 차례 1' 이 나오면 : 망을 되살리기 *전에* 배너에 찍힌 onlbit=0 명령(백업 + sqlite3 한 줄)을 친다.
-#    망이 돌아오는 순간 netsync 가 sheetlog-auto --force 로 onlbit=1 런을 GoodRuns 에 싣기 때문이다
-#    '★ 사람 차례 2 : 바깥 망을 되살려라' 가 나오면 (root)
+# 5) '★ 사람 차례 : 바깥 망을 되살려라' 가 나오면 (root). 드릴 런의 onlbit=0 은 드릴이 끝날 때 스스로 한다
+#    (드릴이 도는 동안은 플래그 때문에 netsync 가 시트를 건너뛴다)
 sudo nmcli connection up enp0s31f6      # 케이블을 뽑았으면 다시 꽂는다
 #    ★ daq_gateway 를 up 하지 말 것 — .71 을 다른 포트에 올리려 해 충돌한다 (CLAUDE.md 11.132)
 
@@ -74,11 +88,12 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
 | 7 SIGUSR1 | 감시자에 USR1 (`/proc/<pid>/status` SigCgt 에 0x200 이 있을 때만) | 감시자 로그 `SIGUSR1 : ending` + 새 런 + DRAM 8 | 900 s |
 | 8 전원 (기본) | `usb-recover.sh --force-power-cycle --dry-run` | rc 3 (수집 중이라 게이트가 막음) 또는 0 — 하드웨어 0 | — |
 | 8 전원 (`--with-power`) | 감시자 TERM → DAQ 전부 내려감 확인 → `usb-recover --force-power-cycle` 실물 → supervisor pane 에 `daq-tmux.sh --print-cmd supervisor` 명령 | usb-recover rc 0 + 새 런 + DRAM 8 | 2400 s |
-| 9 [사람] 망 복귀 | 먼저 드릴 런 onlbit=0 명령을 배너에 찍고, 그다음 망 복귀 안내 | `net=up` → `netsync.log` 의 `sheetlog-auto --force rc=0` (이번 오프셋 이후) → 두 메일 큐 0. flush 뒤 완결된 런은 판정에서 뺀다 | 1800 + 1500 + 900 s |
+| 9 [사람] 망 복귀 | 망 복귀 안내 (2 단계에서 멈췄으면 SKIP) | `net=up` → `netsync.log` 의 `sheetlog-auto 건너뜀 (드릴 중` (이번 오프셋 이후) → 두 메일 큐 0. `sheetlog-auto rc=` 줄이 오면 FAIL (드릴 중에 시트를 돌렸다 — 옛 netsync 이거나 플래그 경로가 다르다) | 1800 + 1500 + 900 s |
+| 10 runcatalog | 드릴 런을 onlbit=0 (위 표). `--no-mark-db` 면 report 에 손으로 칠 명령만 | 바꾼 행 표 | — |
 
 매 주입(4~8) 전에 멈춤 파일과 heartbeat 를 다시 읽는다. 멈춤 파일이 새로 생겼으면 남은 주입을 모두 건너뛴다. `phase=running` 이 아니거나 heartbeat 가 오래됐으면
 그 단계를 FAIL 로 적고 **남은 주입을 모두 건너뛴다.** 기다리는 동안 멈춤 파일이 생겨도 같다
-(사람이 작업 중이라고 본다). 망 복귀 안내(9)는 중단돼도 그대로 한다.
+(사람이 작업 중이라고 본다). 망 복귀 안내(9)는 중단돼도 그대로 한다 — 단 2 단계에서 망이 끊기지 않아 멈춘 경우는 SKIP.
 
 `--confirm-test-run` 이 없으면 4~8 의 실물 주입은 SKIP 이다 (8 의 dry-run 만 돈다).
 제한 시간은 `DRILL_T_KILL` · `DRILL_T_STALE` · `DRILL_T_POSTRUN` · `DRILL_T_USR1` · `DRILL_T_POWER` ·
@@ -92,6 +107,7 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
    result.tsv           step · name · injected · expected · observed · verdict(PASS/FAIL/SKIP) · evidence(근거 로그 줄)
    report.md            사람이 읽는 표 + PASS/FAIL/SKIP 수
    baseline.txt         1 단계 기준선
+   db-mark.tsv          runcatalog 에서 onlbit=0 으로 바꾼 런 (전 값 · 옛 runlog)
    usb-recover-*.txt    8 단계 출력
 ```
 
@@ -111,18 +127,9 @@ cat /Data_ssd/LOG/autonomy-drill/<시각>/report.md
 | 8 (`--with-power`) | `usb-recover-power.txt` · `scripts/pdu-power.sh status` | 수집이 멎어 있다. §11.224 순서 (PDU → NOTICE → usbreset 2 회 → 더미 런 → 확인 런) 뒤 tmux daq:1.2 에서 감시자 |
 | 9 | `scripts/mailq-send.sh --status` · `scripts/sheetlog-auto.sh --status` · `scripts/netsync.sh --status` | `scripts/mailq-send.sh` · `scripts/sheetlog-auto.sh --force` 를 손으로 |
 
-드릴이 낸 시험 런(시험 런과 4~8 에서 생긴 런들)은 DB 에서 `onlbit=0` + runlog `autonomy drill` 로 표시해
-시트 등재에서 빼는 것을 잊지 말 것 (드릴은 DB 를 건드리지 않는다). 런 번호는 `result.tsv` 의 관측 열(`run A -> B`)과
-`baseline.txt` 의 `run=` 에 있다. offline-full 은 드릴이 9 단계에서 이 명령을 범위까지 채워 배너로 찍고(망 복귀 *전에* 칠 것),
-report.md 끝에도 남긴다. 백업 먼저, 그다음 한 줄 (예 : 4440 ~ 4445) :
-
-```bash
-cp -p /Data_ssd/runcatalog.db /Data_ssd/LOG/harness/runcatalog.db.bak-$(date +%Y%m%d%H%M)-before-drill && \
-sqlite3 /Data_ssd/runcatalog.db "UPDATE runcatalog SET onlbit=0, runlog='autonomy drill test run, excluded from sheet' || COALESCE(' ; ' || runlog, '') WHERE runnum BETWEEN 4440 AND 4445;"
-```
-
-offline-full 은 **망을 되살리기 전에** (복귀 순간 netsync 의 `sheetlog-auto --force` 가 싣는다), quick 은 드릴이 끝나자마자
-(매시 07 분 cron 전에) 할 것. 이미 시트에 실렸으면 우리 행이라 고칠 수 있다 (CLAUDE.md 11.5).
+드릴이 낸 시험 런은 드릴이 끝날 때 스스로 `onlbit=0` 으로 뺀다 (위 'runcatalog 표시'). 무엇을 바꿨는지는 `db-mark.tsv`,
+되돌리려면 그 백업(`/Data_ssd/LOG/harness/runcatalog.db.bak-<시각>-drill`)을 본다. `--no-mark-db` 로 돌렸으면 report.md 끝의
+명령(백업 + UPDATE 한 줄)을 **매시 07 분 cron 전에** 친다. 이미 시트에 실렸으면 우리 행이라 고칠 수 있다 (CLAUDE.md 11.5).
 
 ## 시험
 

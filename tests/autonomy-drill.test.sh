@@ -31,7 +31,7 @@ sleep_s() {
    #  netsync 실물 순서 : up 을 먼저 적고, flush 안에서 mailq-send -> sheetlog-auto --force (SC_FLUSH_DELAY 초 뒤 줄이 생긴다)
    [ -n "${SC_NETUP:-}" ] && grep -q '되살려라' "$LOGDIR/drill.log" 2>/dev/null && { set_net up; echo 3 > "$W/sheetleft"
       at 60 "rm -f $DRILL_LOCALQ/*.mail $DRILL_NFSQ/*.mail; echo '2026-11-05 12:00:00   mailq-send rc=0' >> $DRILL_NSLOG"
-      at "${SC_FLUSH_DELAY:-300}" "echo '2026-11-05 12:05:00   sheetlog-auto --force rc=${SC_SHEET_RC:-0} 등재 2 런' >> $DRILL_NSLOG; echo 0 > $W/sheetleft"
+      at "${SC_FLUSH_DELAY:-300}" "echo '2026-11-05 12:05:00   ${SC_FLUSH_LINE:-sheetlog-auto 건너뜀 (드릴 중 : drill.active pid 1)}' >> $DRILL_NSLOG; echo 0 > $W/sheetleft"
       SC_NETUP=""; }
    [ -n "${SC_INT_AT:-}" ] && [ "$FAKE_NOW" -ge "$SC_INT_AT" ] && { SC_INT_AT=""; kill -INT $$; }
    return 0
@@ -59,6 +59,7 @@ tmux_c() {
 }
 send_sig() {
    echo "$1 $2" >> "$W/sigs"
+   [ -e "$W/flag.snap" ] || cp "$DRILL_FLAG" "$W/flag.snap" 2>/dev/null     # 첫 주입 때의 드릴 플래그
    case "$1:$2" in
       TERM:$(proc daq))
          [ -n "${SC_DAQ:-}" ] && at 40 "suplog 'restart #1 (consecutive failures 1/5); next run will be new'; new_run $SC_DAQ ${SC_DAQ_DRAM:-8}"
@@ -95,7 +96,12 @@ new_world() {
    export DRILL_W=$W DRILL_TEST_HOOK=$TOP/hook.sh DRILL_HB=$T/rcterm.hb DRILL_SUPLOG=$T/rcsupervisor.log \
           DRILL_CWLOG=$T/chainwatch.log DRILL_NSSTATE=$T/netsync.state DRILL_HOLD=$T/chainwatch.hold \
           DRILL_LOCALQ=$T/q DRILL_NFSQ=$T/nq DRILL_DAQLOG=$T/log/daq DRILL_ROOT=$T/root DRILL_SSD=$T DRILL_NFS=$T \
-          DRILL_NETSYNC=$T/netsync.sh DRILL_NSLOG=$T/netsync.log DRILL_DBFILE=$T/runcatalog.db DRILL_POLL=10 FAKE_NOW=1793900000
+          DRILL_NETSYNC=$T/netsync.sh DRILL_NSLOG=$T/netsync.log DRILL_DBFILE=$T/runcatalog.db DRILL_POLL=10 FAKE_NOW=1793900000 \
+          DRILL_FLAG=$T/drill.active DRILL_DBBAK_DIR=$T/bak DRILL_PARAMS=$T/none.params
+   #  runcatalog : 실물 스키마 (sqlite3 /Data_ssd/runcatalog.db .schema). stime·etime 은 텍스트, 4441 은 옛 runlog 가 있다
+   sqlite3 "$DRILL_DBFILE" "CREATE TABLE runcatalog (runnum INTEGER PRIMARY KEY AUTOINCREMENT,runtype TEXT,rundesc TEXT,shift TEXT,config TEXT,stime TEXT,etime TEXT,onlbit INTEGER,offbit INTEGER,runlog TEXT, nfadc INTEGER, tfadc REAL, nsadc INTEGER, tsadc REAL);"
+   for r in 4438 4439 4440 4441 4442 4443 4444 4445; do sqlite3 "$DRILL_DBFILE" "INSERT INTO runcatalog (runnum,stime,etime,onlbit) VALUES ($r,'2026-11-05 22:37:00','2026-11-05 22:40:00',1);"; done
+   sqlite3 "$DRILL_DBFILE" "UPDATE runcatalog SET runlog='aborted;' WHERE runnum=4441; UPDATE runcatalog SET onlbit=NULL, stime=NULL, etime=NULL WHERE runnum=4445;"
    printf 'time=1793900000\npid=3897166\nphase=running\nrun=4440\nsubrun=12\nstate=Running\ndaqtime=720.0\nndaq=2\ndaq0=FADCDAQ n=4600000 sr=6396.74 ar=6400.10\ndaq1=SADCDAQ n=4600000 sr=6277.09 ar=6400.04\n' > "$DRILL_HB"
    touch "$W/hb_live"
    printf '%s\n' "2026-11-05 09:00:00 [SUP] rotation=24.0000 h  check=600 s  stale=300 s  grace=180 s  maxCycles=0" \
@@ -113,8 +119,10 @@ new_world() {
    printf '%06d' 4440 >/dev/null
    for i in 1 2 3 4 5 6 7 8; do echo "DRAM($i) is aligned" >> "$T/log/daq/TCB_004440.log"; done
    echo '2026-11-05 08:00:00 검사 : dns=ok' > "$T/netsync.log"
-   unset SC_DAQ SC_DAQ_DRAM SC_STALE SC_PR SC_USR1 SC_AFTER4 SC_NETUP SC_POWER_NEW SC_SUPDOWN SC_INT_AT SC_FLUSH_DELAY SC_SHEET_RC SC_DAQ_HOLD
+   unset SC_DAQ SC_DAQ_DRAM SC_STALE SC_PR SC_USR1 SC_AFTER4 SC_NETUP SC_POWER_NEW SC_SUPDOWN SC_INT_AT SC_FLUSH_DELAY SC_FLUSH_LINE SC_DAQ_HOLD
 }
+ob() { sqlite3 "$DRILL_DBFILE" "SELECT IFNULL(onlbit,'N') FROM runcatalog WHERE runnum=$1"; }
+rl() { sqlite3 "$DRILL_DBFILE" "SELECT IFNULL(runlog,'') FROM runcatalog WHERE runnum=$1"; }
 nsig() { [ -f "$W/sigs" ] && grep -c . "$W/sigs" || echo 0; }
 verdict() { awk -F '\t' -v s="$1" '$1 == s { print $6 }' "$T/out/result.tsv" | tail -1; }
 drill() { bash "$D" --log "$T/out" "$@" > "$T/stdout" 2>&1; echo $?; }
@@ -206,15 +214,25 @@ rc=$(drill --plan offline-full --confirm-test-run)
 chk "rc 0" "[ $rc = 0 ]"
 for s in 0 1 2 3 4 5 6 7 8 9; do chk "단계 $s PASS" "[ \"\$(verdict $s)\" = PASS ]"; done
 chk "chainwatch 1 회" "[ \$(grep -c '^chainwatch' $W/calls) = 1 ]"
-chk "9 근거는 sheetlog --force rc=0 줄" "grep -q 'sheetlog-auto --force rc=0 등재 2 런' $T/out/result.tsv"
-chk "망 복귀 전에 onlbit=0 명령 (런 4440~4443, 백업 먼저)" "grep -q 'BETWEEN 4440 AND 4443' $T/stdout && grep -q 'before-drill' $T/stdout"
-chk "onlbit 안내가 '되살려라' 보다 먼저" "[ \$(grep -n 'onlbit=0' $T/out/drill.log | head -1 | cut -d: -f1) -lt \$(grep -n '되살려라' $T/out/drill.log | head -1 | cut -d: -f1) ]"
-chk "report 에도 onlbit 명령" "grep -q 'BETWEEN 4440 AND' $T/out/report.md"; chk "사람 안내 두 번 (끊어라·되살려라)" "grep -q '끊어라' $T/stdout && grep -q '되살려라' $T/stdout"
+chk "9 근거는 flush 의 '시트 건너뜀 (드릴 중)' 줄" "grep -q 'sheetlog-auto 건너뜀 (드릴 중' $T/out/result.tsv"
+chk "사람 차례 1 (손으로 onlbit) 안내는 없다" "! grep -q '사람 차례 1' $T/stdout && ! grep -q 'before-drill' $T/stdout"
+chk "자동 표시 : 4440·4441·4442 onlbit 0, 끝 런 4443 은 1" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442)\$(ob 4443) = 0001 ]"
+chk "report 에 runcatalog 표" "grep -q '## runcatalog 표시' $T/out/report.md && grep -q '| 4442 | 1 | 0 |' $T/out/report.md"
+chk "사람 안내 두 번 (끊어라·되살려라)" "grep -q '끊어라' $T/stdout && grep -q '되살려라' $T/stdout"
 
-echo "[12] offline-full : 망이 안 끊김 -> 2 FAIL, 3 SKIP, 9 는 안내하고 판정"
+echo "[12] offline-full : 망이 안 끊김 -> 2 FAIL, 기본은 거기서 멈춘다 (주입 0)"
 new_world; printf 'net=up\nsince=1793800000\nchecked=1793900000\n' > "$DRILL_NSSTATE"; touch "$W/ns_live"
 export DRILL_TEST_HOOK=$TOP/hook.sh DRILL_T_NETDOWN=300 SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
 rc=$(drill --plan offline-full --confirm-test-run)
+chk "rc 1" "[ $rc = 1 ]"; chk "2 FAIL" "[ \"\$(verdict 2)\" = FAIL ]"; chk "3 SKIP" "[ \"\$(verdict 3)\" = SKIP ]"
+chk "kill 0 회 (주입 0)" "[ $(nsig) = 0 ]"; chk "usb-recover 0 회" "! grep -q usb-recover $W/calls"
+for s in 4 5 6 7 8 9; do chk "단계 $s SKIP" "[ \"\$(verdict $s)\" = SKIP ]"; done
+chk "report : 망을 끊지 않아 중단" "grep -q '망을 끊지 않아 중단' $T/out/report.md"; chk "안내에 nmcli 권고 (4437)" "grep -q 'run 4437' $T/stdout"
+chk "runcatalog 그대로 (주입 0)" "[ \$(ob 4440)\$(ob 4441) = 11 ] && grep -q '바꿀 런 없음' $T/out/report.md"
+echo "[12b] --continue-online 이면 망이 산 채로 계속 (옛 동작)"
+new_world; printf 'net=up\nsince=1793800000\nchecked=1793900000\n' > "$DRILL_NSSTATE"; touch "$W/ns_live"
+export DRILL_TEST_HOOK=$TOP/hook.sh DRILL_T_NETDOWN=300 SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan offline-full --confirm-test-run --continue-online)
 chk "rc 1" "[ $rc = 1 ]"; chk "2 FAIL" "[ \"\$(verdict 2)\" = FAIL ]"; chk "3 SKIP" "[ \"\$(verdict 3)\" = SKIP ]"
 chk "4 는 그대로 진행 (PASS)" "[ \"\$(verdict 4)\" = PASS ]"; chk "9 안내" "grep -q '되살려라' $T/stdout"
 unset DRILL_T_NETDOWN
@@ -282,8 +300,10 @@ nf() { new_world; printf 'net=up\nsince=1793800000\nchecked=1793900000\n' > "$DR
        export HOOK1=$TOP/hook.sh DRILL_TEST_HOOK=$TOP/hook2.sh SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443 SC_NETUP=1; }
 nf; export SC_FLUSH_DELAY=900; rc=$(drill --plan offline-full --confirm-test-run)
 chk "9 PASS" "[ \"\$(verdict 9)\" = PASS ]"; chk "rc 0" "[ $rc = 0 ]"
-nf; export SC_SHEET_RC=1; rc=$(drill --plan offline-full --confirm-test-run)
-chk "sheetlog rc 1 이면 9 FAIL" "[ \"\$(verdict 9)\" = FAIL ] && grep -q 'rc=1' $T/out/result.tsv"
+nf; export SC_FLUSH_LINE='sheetlog-auto rc=0 등재 2 런'; rc=$(drill --plan offline-full --confirm-test-run)
+chk "드릴 중인데 flush 가 sheetlog 를 돌렸으면 9 FAIL" "[ \"\$(verdict 9)\" = FAIL ] && grep -q '드릴 플래그' $T/out/result.tsv"
+nf; export SC_FLUSH_LINE='sheetlog-auto --force rc=0 등재 2 런'; rc=$(drill --plan offline-full --confirm-test-run)
+chk "옛 netsync 의 --force 줄도 9 FAIL" "[ \"\$(verdict 9)\" = FAIL ]"; unset SC_FLUSH_LINE
 nf; export SC_FLUSH_DELAY=99999 DRILL_T_SHEET=300; rc=$(drill --plan offline-full --confirm-test-run)
 chk "flush 기록 없으면 9 FAIL" "[ \"\$(verdict 9)\" = FAIL ] && grep -q 'flush 기록 없음' $T/out/result.tsv"
 unset DRILL_T_SHEET; export DRILL_TEST_HOOK=$TOP/hook.sh
@@ -311,6 +331,45 @@ rc=$(drill --plan quick --confirm-test-run --with-power)
 chk "8 FAIL" "[ \"\$(verdict 8)\" = FAIL ]"; chk "손으로 띄울 명령" "grep -q '손으로 띄울 것 : install/bin/rcsupervisor' $T/out/result.tsv"
 chk "usb-recover 실물 0" "! grep -qx 'usb-recover --force-power-cycle' $W/calls"; chk "send-keys 0" "! grep -q send-keys $W/calls"
 unset DRILL_PANE_IDLE
+
+echo "[23] 드릴 플래그 : 전제 뒤에 만들고 끝에 지운다 · dry-run 은 안 만든다 · 죽은 것은 치우고 산 것이면 멈춘다"
+new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan quick --confirm-test-run)
+chk "첫 주입 때 플래그가 있었다 (pid·run·plan)" "grep -q '^pid=[0-9]' $W/flag.snap && grep -qx 'run=4440' $W/flag.snap && grep -qx 'plan=quick' $W/flag.snap && grep -q '^start=1793900' $W/flag.snap"
+chk "끝나면 지웠다" "[ ! -e $DRILL_FLAG ]"; chk "운영 자리에 안 썼다" "! grep -q '/Data_ssd/LOG/drill.active' $T/out/drill.log"
+new_world; rc=$(drill --plan quick --dry-run --confirm-test-run); chk "dry-run : 플래그 없음" "[ ! -e $DRILL_FLAG ] && ! grep -q '드릴 플래그를 만들었다' $T/stdout"
+new_world; printf 'pid=999999\nrun=4400\n' > "$DRILL_FLAG"; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan quick --confirm-test-run); chk "죽은 플래그는 지우고 진행 (rc 0)" "[ $rc = 0 ] && grep -q '죽은 드릴 플래그' $T/stdout && [ ! -e $DRILL_FLAG ]"
+new_world; echo 777777 > "$W/alive"; printf 'pid=777777\nrun=4400\n' > "$DRILL_FLAG"; export SC_DAQ=4441
+rc=$(drill --plan quick --confirm-test-run)
+chk "산 남의 플래그면 rc 1 · 주입 0 · 플래그 그대로" "[ $rc = 1 ] && [ $(nsig) = 0 ] && grep -qx 'pid=777777' $DRILL_FLAG"
+chk "남의 플래그면 runcatalog 무접촉" "[ \$(ob 4440) = 1 ] && [ ! -d $T/bak ]"
+new_world; unset DRILL_FLAG; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan quick --confirm-test-run); chk "시험 훅인데 DRILL_FLAG 없으면 ROOT 밑에" "grep -q '$T/root/drill.active' $T/out/drill.log && ! grep -q '/Data_ssd/LOG' $T/out/drill.log"
+
+echo "[24] runcatalog 표시 범위 : 시작 런 포함(주입했으면) · 사이 런 · 끝 런(running) 제외 · 백업 먼저"
+new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan quick --confirm-test-run)
+chk "4439 (드릴 전) 그대로" "[ \$(ob 4439) = 1 ]"; chk "4440 (시작 런, 주입으로 끝남) 0" "[ \$(ob 4440) = 0 ]"
+chk "4441 4442 0" "[ \$(ob 4441)\$(ob 4442) = 00 ]"; chk "4443 (끝 런, running) 그대로 1" "[ \$(ob 4443) = 1 ]"; chk "4444 그대로" "[ \$(ob 4444) = 1 ]"
+chk "runlog 앞에 태그, 옛 runlog 는 ' ; ' 뒤에" "rl 4441 | grep -q '^autonomy drill test run (.*), excluded from sheet ; aborted;\$'"
+chk "옛 runlog 없으면 태그만" "rl 4440 | grep -q 'excluded from sheet\$'"
+chk "백업 runcatalog.db.bak-*-drill (바꾸기 전 내용)" "f=\$(ls $T/bak/runcatalog.db.bak-*-drill) && [ \$(sqlite3 \$f 'select onlbit from runcatalog where runnum=4440') = 1 ]"
+chk "db-mark.tsv 3 줄" "[ \$(tail -n +2 $T/out/db-mark.tsv | grep -c .) = 3 ]"; chk "drill.log 에 표" "grep -q 'run 4442  onlbit 1 -> 0' $T/out/drill.log"
+echo "[24b] 끝 런이 running 이 아니면 (주입 뒤 수집이 멎음) 끝 런도 넣는다"
+new_world; export SC_DAQ="" SC_AFTER4="set_phase ended; rm -f $W/hb_live" DRILL_T_KILL=100
+rc=$(drill --plan quick --confirm-test-run)
+chk "4440 0 (시작=끝 런, 멎었다)" "[ \$(ob 4440) = 0 ]"; chk "4441 은 그대로" "[ \$(ob 4441) = 1 ]"; unset DRILL_T_KILL
+echo "[24c] --no-mark-db : 무접촉, report 에 손으로 칠 명령"
+new_world; export SC_DAQ=4441 SC_STALE=4442 SC_PR=1 SC_USR1=4443
+rc=$(drill --plan quick --confirm-test-run --no-mark-db)
+chk "전부 그대로" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 111 ] && [ ! -d $T/bak ]"
+chk "report 에 백업 + UPDATE 명령" "grep -q 'runcatalog.db.bak-' $T/out/report.md && grep -q 'UPDATE runcatalog SET onlbit=0' $T/out/report.md"
+echo "[24d] 중간에 INT 로 끝나도 표시한다 (trap)"
+new_world; export SC_DAQ=4441 SC_INT_AT=1793900200
+rc=$(drill --plan quick --confirm-test-run)
+chk "4440 0 · STOP 중이라 heartbeat 가 멎은 끝 런 4441 도 0 · 4442 그대로 · 플래그 지움" "[ \$(ob 4440)\$(ob 4441)\$(ob 4442) = 001 ] && [ ! -e $DRILL_FLAG ]"; unset SC_INT_AT
+chk "운영 DB·로그 무접촉 (경로가 sandbox)" "! grep -rq '/Data_ssd/runcatalog.db' $T/out/drill.log"
 
 if [ -n "${KEEP:-}" ]; then echo "남김 $TOP"; else rm -rf -- "${TOP:?}"; fi
 echo "통과 $pass / 실패 $fail"
