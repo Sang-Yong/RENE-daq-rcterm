@@ -21,7 +21,7 @@ P
 chmod +x "$T/probe"
 mk() { printf '#!/bin/bash\necho "%s $*" >> "%s/actions"\n%s\nexit 0\n' "$1" "$T" "${2:-}" > "$T/$1"; chmod +x "$T/$1"; }
 mk mailq      'rm -f '"$T"'/Q/*.mail'
-mk sheetlog   'echo "2026-11-05 16:07:04 [OK] 등재 3 런 -> A404:S406  (3행)  (--force)"'
+mk sheetlog   'echo "2026-11-05 16:07:04 [OK] 등재 3 런 -> A404:S406  (3행)  (일일 등재 (25시간 경과))"'
 mk backupsheet; mk reactor; mk websummary
 #  가짜 daq-notify : 사건을 적고, netsync-lib 로 망 단절이면 '큐' 라고 적는다 (진짜 daq-notify 의 동작을 흉내)
 cat > "$T/notify" <<N
@@ -34,7 +34,7 @@ chmod +x "$T/notify"; mkdir -p "$T/Q"
 export NETSYNC_PROBE=$T/probe NETSYNC_STATE=$T/state NETSYNC_LOG=$T/log NETSYNC_LOCK=$T/.lock \
        NETSYNC_NOTIFY=$T/notify NETSYNC_MAILQ_CMD=$T/mailq NETSYNC_SHEETLOG_CMD=$T/sheetlog \
        NETSYNC_BACKUPSHEET_CMD=$T/backupsheet NETSYNC_REACTOR_CMD=$T/reactor NETSYNC_WEBSUMMARY_CMD=$T/websummary \
-       NETSYNC_QUEUES=$T/Q NETSYNC_BG=0
+       NETSYNC_QUEUES=$T/Q NETSYNC_BG=0 DRILL_FLAG=$T/drill.active
 run() { bash "$SUT" "$@" >"$T/out" 2>&1; }
 net() { sed -n 's/^net=//p' "$T/state"; }
 
@@ -64,13 +64,14 @@ sed -i "s/^since=.*/since=$(( $(date +%s) - 5400 ))/" "$T/state"
 touch "$T/net"; run
 check "net=up"                   '[ "$(net)" = up ]'
 check "mailq-send 불림"          'grep -q "^mailq" "$T/actions"'
-check "sheetlog-auto --force"    'grep -q "^sheetlog --force" "$T/actions"'
+check "sheetlog-auto 는 보통 게이트 (--force 아님)" 'grep -qx "sheetlog " "$T/actions"'
+check "로그 : sheetlog-auto rc=0 등재 3 런" 'grep -q "  sheetlog-auto rc=0 등재 3 런" "$T/log"'
 check "backup-sheetlog · reactor · websummary" 'grep -q "^backupsheet" "$T/actions" && grep -q "^reactor" "$T/actions" && grep -q "^websummary" "$T/actions"'
 check "순서 : 메일 큐가 먼저"    '[ "$(head -1 "$T/actions" | cut -d" " -f1)" = mailq ]'
 check "복귀 메일은 바로 (큐 아님)" 'grep -q "^net_restored sent" "$T/notify.calls"'
 check "본문 : 단절 1시간 30분"   'grep "^net_restored" "$T/notify.calls" | grep -q "단절 1시간 30분"'
 check "본문 : 밀린 메일 2 통 중 2 통" 'grep "^net_restored" "$T/notify.calls" | grep -q "밀린 메일 2 통 중 2 통 보냄"'
-check "본문 : 시트 등재 3 런"    'grep "^net_restored" "$T/notify.calls" | grep -q "시트 등재 3 런"'
+check "본문 : 시트 등재 3 런 (보통 게이트)" 'grep "^net_restored" "$T/notify.calls" | grep -q "시트 등재 3 런 (보통 게이트"'
 check "netsync_is_down 거짓"     '! netsync_is_down'
 : > "$T/actions"; run
 check "계속 up 이면 내보내기 없음" '[ ! -s "$T/actions" ]'
@@ -122,6 +123,26 @@ NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np NETSYNC_KHU_EVERY=0 run
 check "주기가 지나면 다시 붙는다"              '[ "$(grep -c "^khu" "$T/probe3.calls")" = 2 ]'
 rm -f "$T/np"; NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np run
 check "params 가 없으면 smtp.gmail.com 587"    'grep -qx "smtp smtp.gmail.com 587" "$T/probe3.calls"'
+
+echo "[11] 드릴 중 복귀 : 메일 큐는 내보내고 시트·웹은 건너뛴다"
+printf 'net=down\nsince=%s\nfails=2\nfirst_fail=\nchecked=%s\n' "$(( $(date +%s) - 600 ))" "$(date +%s)" > "$T/state"
+printf 'pid=%s\nrun=4440\nplan=offline-full\n' "$$" > "$T/drill.active"
+out=$(bash "$SUT" --status 2>&1)
+check "--status 에 드릴 중"      'printf "%s" "$out" | grep -q "자율 복구 드릴 중 (pid $$"'
+touch "$T/net"; cp "$T/state" "$T/s.dry"; bash "$SUT" --dry-run > "$T/out" 2>&1
+check "dry : 드릴 중 문구 · 상태 그대로" 'grep -q "드릴 중 : sheetlog-auto · websummary 건너뜀" "$T/out" && cmp -s "$T/state" "$T/s.dry"'
+: > "$T/actions"; : > "$T/notify.calls"; touch "$T/Q/c.mail"; run
+check "mailq-send 는 돌았다"     'grep -q "^mailq" "$T/actions"'
+check "sheetlog-auto 0 회"       '! grep -q "^sheetlog" "$T/actions"'
+check "websummary 0 회"          '! grep -q "^websummary" "$T/actions"'
+check "backup-sheetlog · reactor 는 돌았다" 'grep -q "^backupsheet" "$T/actions" && grep -q "^reactor" "$T/actions"'
+check "로그에 사유"              'grep -q "sheetlog-auto 건너뜀 (드릴 중 : $T/drill.active pid $$)" "$T/log" && grep -q "websummary 건너뜀 (드릴 중)" "$T/log"'
+check "복귀 메일 : 시트 등재 건너뜀" 'grep "^net_restored" "$T/notify.calls" | grep -q "시트 등재 건너뜀 (드릴 중)"'
+rm -f "$T/drill.active"
+printf 'net=down\nsince=%s\nfails=2\nfirst_fail=\nchecked=%s\n' "$(( $(date +%s) - 600 ))" "$(date +%s)" > "$T/state"
+printf 'pid=999999\n' > "$T/drill.active"; : > "$T/actions"; run
+check "죽은 플래그면 시트 등재를 한다" 'grep -qx "sheetlog " "$T/actions"'
+rm -f "$T/drill.active"
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]
