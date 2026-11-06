@@ -33,7 +33,7 @@ PY
 printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s/notify.calls"\nexit 0\n' "$T" > "$T/notify"; chmod +x "$T/notify"
 export SHEETLOG_TOOL=$T/fake_append.py SHEETLOG_NOTIFY=$T/notify SHEETLOG_STATE=$T/state SHEETLOG_LOG=$T/log \
        SHEETLOG_LOCK=$T/.lock SHEETLOG_FAILSTATE=$T/failstate SHEETLOG_ROOTS=$T/RAW \
-       NETSYNC_STATE=$T/netsync.state TCALLS=$T/tool.calls
+       NETSYNC_STATE=$T/netsync.state TCALLS=$T/tool.calls DRILL_FLAG=$T/drill.active
 nmail() { [ -r "$T/notify.calls" ] && grep -c ' sheetlog ' "$T/notify.calls" || echo 0; }
 go() { FAKE_COMMIT=$1 bash "$SUT" --force >/dev/null 2>&1; }
 
@@ -79,6 +79,20 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" SHEETLOG_TOOL=$T/fake_append.
    SHEETLOG_ROOTS=$T/RAW NETSYNC_STATE=$T/netsync.state TCALLS=$T/tool.calls FAKE_COMMIT=ok bash "$SUT" --force >/dev/null 2>&1; rc=$?
 check "rc 0 (성공)"               '[ "$rc" -eq 0 ]'
 check "등재함"                    'grep -q "\[OK\] 등재 1 런" "$T/log"'
+
+echo "[8] 드릴 중이면 --force 여도 쓰지 않는다 ([SKIP] drill)"
+rm -f "$T/netsync.state"; printf 'pid=%s\nrun=4440\nplan=offline-full\n' "$$" > "$T/drill.active"
+: > "$T/tool.calls"; n0=$(nmail); FAKE_COMMIT=ok bash "$SUT" --force >/dev/null 2>&1; rc=$?
+check "rc 0"                      '[ "$rc" -eq 0 ]'
+check "도구 호출 0 · 메일 0"       '[ ! -s "$T/tool.calls" ] && [ "$(nmail)" = "$n0" ]'
+check "로그에 [SKIP] drill"       'grep -q "\[SKIP\] drill -- 자율 복구 드릴 중 (pid $$" "$T/log"'
+FAKE_COMMIT=ok bash "$SUT" --dry-run >/dev/null 2>&1
+check "--dry-run 도 건너뛴다"      '[ ! -s "$T/tool.calls" ]'
+out=$(bash "$SUT" --status 2>&1)
+check "--status 에 드릴 표시"     'printf "%s" "$out" | grep -q "★ 드릴 중       : pid $$ plan offline-full"'
+printf 'pid=999999\n' > "$T/drill.active"; : > "$T/tool.calls"; go ok
+check "죽은 플래그면 등재한다"     'grep -q -- "--commit" "$T/tool.calls"'
+rm -f "$T/drill.active"
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

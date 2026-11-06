@@ -20,7 +20,9 @@
 #  ★ 실패 메일은 같은 사유로 한 번만 (2026-11-05). 예전에는 매시 실패할 때마다 메일이 나갔다
 #    (2026-10-16 시트 그리드가 차서 20 시간 동안 매시, §11.220). 사유가 바뀌거나 한 번 성공하면 다시 알린다.
 #  ★ netsync.sh 가 망 단절(net=down)이라고 적어 두었으면 시도 자체를 건너뛴다 (로그만).
-#    망이 돌아오면 netsync 가 이것을 --force 로 부른다.
+#    망이 돌아오면 netsync 가 이것을 (보통 게이트로) 부른다.
+#  ★ 자율 복구 드릴 중(drill_flag, 기본 /Data_ssd/LOG/drill.active)이면 --force 여도 쓰지 않는다 ([SKIP] drill).
+#    11-06 09:35 망 복귀 때 드릴 시험 런 4435·4436 이 GoodRuns 에 실렸다. 드릴은 끝날 때 그 런들을 onlbit=0 으로 뺀다.
 #
 #  ★ 기존 행은 절대 건드리지 않는다. append_runs.py 가 마지막 Run 행
 #    아래에 무엇이든 있으면 스스로 멈춘다.
@@ -43,6 +45,7 @@ FAILSTATE=${SHEETLOG_FAILSTATE:-/Data_ssd/LOG/sheetlog-auto.failstate}
 ROOTS=${SHEETLOG_ROOTS:-"/Data_ssd/RAW /data/RAW /scratch/RAW"}
 # shellcheck source=/dev/null
 . "$DIR/scripts/netsync-lib.sh" 2>/dev/null || netsync_is_down() { return 1; }
+type drill_active >/dev/null 2>&1 || { drill_active() { return 1; }; drill_flag_param() { :; }; }
 
 THRESHOLD=5
 INTERVAL_H=24
@@ -75,6 +78,13 @@ run_complete() {
    done
    return 1
 }
+
+[ -r "$PARAMS" ] && drill_flag_param "$(sed -n 's/^[[:space:]]*drill_flag[[:space:]]*=[[:space:]]*//p' "$PARAMS" 2>/dev/null | sed 's/[[:space:]]*#.*//; s/[[:space:]]*$//' | head -1)"
+#  드릴 중이면 쓰지 않는다 (--force · --dry-run 도). --status 는 그래도 보여 준다
+if [ $STATUS -eq 0 ] && drill_active; then
+   log "[SKIP] drill -- 자율 복구 드릴 중 (pid $(drill_flag_get pid), $DRILL_FLAG). 드릴 시험 런을 싣지 않는다"
+   exit 0
+fi
 
 #  망이 끊긴 것을 이미 안다 -- 구글에 붙어 보지도 않는다 (--status 는 그래도 보여 준다)
 if [ $STATUS -eq 0 ] && netsync_is_down; then
@@ -116,6 +126,7 @@ if [ $STATUS -eq 1 ]; then
    [ -n "$blocked" ] && echo "대기            : run $blocked 부터 (후처리 미완)"
    echo "마지막 등재     : $( [ "$last_ts" -gt 0 ] && date -d "@$last_ts" '+%F %T' || echo '기록 없음' )  (${elapsed_h}시간 전)"
    echo "문턱 / 주기     : $THRESHOLD 개 / ${INTERVAL_H}시간"
+   drill_active && echo "★ 드릴 중       : pid $(drill_flag_get pid) plan $(drill_flag_get plan) ($DRILL_FLAG) -- 등재하지 않는다"
    exit 0
 fi
 
