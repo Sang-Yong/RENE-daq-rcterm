@@ -80,8 +80,9 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" SHEETLOG_TOOL=$T/fake_append.
 check "rc 0 (성공)"               '[ "$rc" -eq 0 ]'
 check "등재함"                    'grep -q "\[OK\] 등재 1 런" "$T/log"'
 
+pst() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat"; }    # 플래그의 pstart (drill_proc_start 와 같은 값)
 echo "[8] 드릴 중이면 --force 여도 쓰지 않는다 ([SKIP] drill)"
-rm -f "$T/netsync.state"; printf 'pid=%s\nrun=4440\nplan=offline-full\n' "$$" > "$T/drill.active"
+rm -f "$T/netsync.state"; printf 'pid=%s\npstart=%s\nrun=4440\nplan=offline-full\n' "$$" "$(pst $$)" > "$T/drill.active"
 : > "$T/tool.calls"; n0=$(nmail); FAKE_COMMIT=ok bash "$SUT" --force >/dev/null 2>&1; rc=$?
 check "rc 0"                      '[ "$rc" -eq 0 ]'
 check "도구 호출 0 · 메일 0"       '[ ! -s "$T/tool.calls" ] && [ "$(nmail)" = "$n0" ]'

@@ -124,9 +124,10 @@ check "주기가 지나면 다시 붙는다"              '[ "$(grep -c "^khu" "
 rm -f "$T/np"; NETSYNC_PROBE=$T/probe3 NETSYNC_PARAMS=$T/np run
 check "params 가 없으면 smtp.gmail.com 587"    'grep -qx "smtp smtp.gmail.com 587" "$T/probe3.calls"'
 
+pst() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat"; }    # 플래그의 pstart (drill_proc_start 와 같은 값)
 echo "[11] 드릴 중 복귀 : 메일 큐는 내보내고 시트·웹은 건너뛴다"
 printf 'net=down\nsince=%s\nfails=2\nfirst_fail=\nchecked=%s\n' "$(( $(date +%s) - 600 ))" "$(date +%s)" > "$T/state"
-printf 'pid=%s\nrun=4440\nplan=offline-full\n' "$$" > "$T/drill.active"
+printf 'pid=%s\npstart=%s\nrun=4440\nplan=offline-full\n' "$$" "$(pst $$)" > "$T/drill.active"
 out=$(bash "$SUT" --status 2>&1)
 check "--status 에 드릴 중"      'printf "%s" "$out" | grep -q "자율 복구 드릴 중 (pid $$"'
 touch "$T/net"; cp "$T/state" "$T/s.dry"; bash "$SUT" --dry-run > "$T/out" 2>&1
