@@ -221,6 +221,7 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" CHAINWATCH_LOCK=$T/.lock CHAI
    CHAINWATCH_PGREP=$T/bin/pgrep CHAINWATCH_KILL=$T/bin/kill CHAINWATCH_MOUNTPOINT=$T/bin/mountpoint \
    CHAINWATCH_PS=$T/ps.txt CHAINWATCH_DF_FILE=$T/df.txt CHAINWATCH_SUPLOG=$T/sup.log CHAINWATCH_PROC=$T/proc \
    CHAINWATCH_DAQTMUX=$T/bin/daqtmux CHAINWATCH_RCTERM_PARAMS=$T/rcterm.params CHAINWATCH_IDLE_PIDS="103 105" \
+   CHAINWATCH_HOLD=$T/hold CHAINWATCH_BTIME=0 NETSYNC_STATE=$T/netsync.state \
    bash "$CW" --params "$P" --gate on --heartbeat "$HB" --state "$ST" --log "$LOG" --dbfile /nonexistent.db \
    --notify "$T/bin/notify" >/dev/null 2>&1; rc=$?
 check "rc 0"                                       '[ "$rc" = 0 ]'
