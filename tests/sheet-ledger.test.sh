@@ -288,6 +288,37 @@ PY2
 )
 check "[WARN] 줄 · 새로 1 그대로 1"              'printf "%s" "$out" | grep -q "^\[WARN\].*4450" && printf "%s" "$out" | grep -q "(1, 0, 1)"' "$out"
 
+echo "[16d] 원장이 없어도 --pull 이 탭의 기본 sheet_id/gid 로 씨앗을 만든다 (리뷰 필수 2a)"
+SEED=$T/seed; mkdir -p "$SEED"
+out=$(RENE_SHEET_LEDGER_DIR=$SEED python3 "$LED" --status 2>&1)
+check "--status : 원장 없는 탭마다 '씨앗 필요'"  '[ "$(printf "%s\n" "$out" | grep -c "원장 없음 (씨앗 필요")" = 3 ]' "$out"
+RENE_SHEET_LEDGER_DIR=$SEED python3 "$LED" --pull --tab Y2026B > "$T/pull.out" 2>&1; rc=$?
+check "--pull Y2026B rc 0 · 원장 생김"           '[ "$rc" = 0 ] && [ -s "$SEED/Y2026B.tsv" ]' "$(cat "$T/pull.out")"
+check "원장 머리 : 기본 sheet_id · gid 0 · key Run" 'head -1 "$SEED/Y2026B.tsv" | grep -q "sheet_id=1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0" && head -1 "$SEED/Y2026B.tsv" | grep -q "gid=0" && head -1 "$SEED/Y2026B.tsv" | grep -q "key=Run"'
+check "남의 행 foreign · 시트는 그대로"          '[ "$(RENE_SHEET_LEDGER_DIR=$SEED st Y2026B 3785)" = foreign ] && ! grep -q pending "$SEED/Y2026B.tsv"'
+RENE_SHEET_LEDGER_DIR=$SEED RENE_SHEET_FAKE_DIR=$T/fakeseed python3 "$LED" --pull --tab back_up_hdd_log > "$T/pull.out" 2>&1; rc=$?
+check "빈 탭이면 rc 0 · 원장을 만들지 않는다"   '[ "$rc" = 0 ] && grep -q "비어 있다" "$T/pull.out" && [ ! -e "$SEED/back_up_hdd_log.tsv" ]' "$(cat "$T/pull.out")"
+mkdir -p "$T/fakeseed"; cp "$FX/sheet_backup_hdd_log_20261021.tsv" "$T/fakeseed/back_up_hdd_log.tsv"
+RENE_SHEET_LEDGER_DIR=$SEED RENE_SHEET_FAKE_DIR=$T/fakeseed python3 "$LED" --pull --tab back_up_hdd_log > "$T/pull.out" 2>&1; rc=$?
+check "--pull back_up_hdd_log rc 0 · gid 219954027 · 키 3 열" '[ "$rc" = 0 ] && head -1 "$SEED/back_up_hdd_log.tsv" | grep -q "gid=219954027" && head -1 "$SEED/back_up_hdd_log.tsv" | grep -q "key=Run|Backup%20Date|Backup%20Time\|key=Run|Backup Date"' "$(cat "$T/pull.out"; head -1 "$SEED/back_up_hdd_log.tsv")"
+out=$(RENE_SHEET_LEDGER_DIR=$SEED python3 "$LED" --pull --tab DAQ_runsummary --dry-run 2>&1); rc=$?
+check "DAQ_runsummary 기본 gid 511745186 (빈 탭이면 rc 0)" '[ "$rc" = 0 ] && ! printf "%s" "$out" | grep -q "sheet_id 가 없다"' "$out"
+
+echo "[16e] 원장 없이 망이 끊긴 채 sheetlog-auto 가 돌면 '밀린 런 없음' 이 아니라 실패 · 메일 한 번 (리뷰 필수 2c)"
+E=$T/empty; mkdir -p "$E"
+printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> "%s/notify.calls"\nexit 0\n' "$E" > "$E/notify"; chmod +x "$E/notify"
+echo "net=down" > "$E/netsync.state"
+sa() { (cd "$DIR" && RENE_SHEET_LEDGER_DIR=$E/led SHEETLOG_NOTIFY=$E/notify SHEETLOG_STATE=$E/state SHEETLOG_LOG=$E/log \
+        SHEETLOG_LOCK=$E/.lock SHEETLOG_FAILSTATE=$E/failstate SHEETLOG_ROOTS=$T/RAW NETSYNC_STATE=$E/netsync.state \
+        SHEETLOG_LEDGER_TOOL=$E/none.py bash "$DIR/scripts/sheetlog-auto.sh" --force) > "$E/out" 2>&1; echo $?; }
+rc=$(sa)
+check "rc 0 이 아니다"                           '[ "$rc" != 0 ]' "$(cat "$E/out")"
+check "로그에 [FAIL] 미리보기 · '밀린 런 없음' 아님" 'grep -q "\[FAIL\] 미리보기" "$E/log" && ! grep -q "밀린 런 없음" "$E/log"' "$(cat "$E/log")"
+check "메일 1"                                   '[ "$(grep -c " sheetlog " "$E/notify.calls" 2>/dev/null)" = 1 ]'
+rc=$(sa)
+check "같은 사유 두 번째 -> 메일 그대로 1"       '[ "$rc" != 0 ] && [ "$(grep -c " sheetlog " "$E/notify.calls")" = 1 ]'
+check "원장은 안 생긴다"                         '[ ! -e "$E/led/Y2026B.tsv" ]'
+
 echo "[17] cron 환경 (env -i, cd /) : --status · --flush"
 out=$(cd / && env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" RENE_SHEET_LEDGER_DIR=$T/led RENE_SHEET_FAKE_DIR=$T/fake \
       DRILL_FLAG=$T/none REACTOR_LOG_DIR=$T/reactor python3 "$LED" --status 2>&1); rc=$?

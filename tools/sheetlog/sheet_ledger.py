@@ -34,7 +34,9 @@
 CLI
     sheet_ledger.py --status [--tab X]          읽기 전용. pending / sent / failed 수, 가장 오래된 pending
     sheet_ledger.py --flush  [--tab X] [--dry-run]   망이 되면 pending 을 시트로 (dry-run 은 망·시트·원장 무접촉)
-    sheet_ledger.py --pull   --tab X             시트를 읽어 원장을 채운다/갱신한다 (첫 배포의 씨앗). 시트는 안 쓴다
+    sheet_ledger.py --pull   --tab X [--dry-run] [--sheet-id ID --gid N]
+                                                시트를 읽어 원장을 채운다/갱신한다 (첫 배포의 씨앗). 시트는 안 쓴다.
+                                                원장이 없으면 탭의 기본 sheet_id · gid · 키(TABS)로 연다
 시험
     RENE_SHEET_FAKE_DIR=<폴더>  구글 대신 <폴더>/<탭>.tsv 를 시트로 쓴다 (TsvSheet)
     RENE_SHEET_FAKE_NET=down    시트를 열려고 하면 ConnectionError (망 단절 흉내)
@@ -64,13 +66,16 @@ def _ours_goodruns(key):
     return append_runs.is_ours(run)
 
 
+GOODRUNS_SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"     # RENE Offline Data GoodRuns 문서 (§11.5)
+#  sheet_id · gid · key 는 원장이 아직 없을 때 --pull 씨앗이 쓰는 기본값이다 (쓰는 도구의 상수와 같다 :
+#  append_runs.SHEET_ID/GID · append_backup_rows.SHEET_ID/GID · websummary.params 의 sheet_id/sheet_gid, §11.176)
 TABS = {
-    "Y2026B": dict(header="runmax", anchor="lastkey", value_input="USER_ENTERED", ours=_ours_goodruns,
+    "Y2026B": dict(sheet_id=GOODRUNS_SHEET_ID, gid=0, key=["Run"], header="runmax", anchor="lastkey", value_input="USER_ENTERED", ours=_ours_goodruns,
                    protect=["Detector", "Source", "PMT-A HV (V)", "PMT-B HV (V)", "THR (mV)", "Coincidence (ns)",
                             "Record length", "Time after HV ON", "TLT"]),
-    "back_up_hdd_log": dict(header="first", anchor="lastrow", value_input="RAW", ours=None,
+    "back_up_hdd_log": dict(sheet_id=GOODRUNS_SHEET_ID, gid=219954027, key=["Run", "Backup Date", "Backup Time"], header="first", anchor="lastrow", value_input="RAW", ours=None,
                             protect=["Also at KHU", "Storage Location"]),
-    "DAQ_runsummary": dict(header="first", anchor="lastrow", value_input="RAW", ours=None, protect=[]),
+    "DAQ_runsummary": dict(sheet_id=GOODRUNS_SHEET_ID, gid=511745186, key=["Run"], header="first", anchor="lastrow", value_input="RAW", ours=None, protect=[]),
 }
 EXTERNAL = {   # 자기 TSV 를 정본으로 쓰는 탭 (원장 형식이 아니다). --flush/--status 가 그 도구에 맡긴다
     "KHNP_daily_power": "reactor",
@@ -730,7 +735,7 @@ def status_tab(tab, dir=None):
         return rp.sheet_status()
     lg = Ledger(tab, dir=dir)
     if not lg.exists():
-        return f"{tab:16s} 원장 없음"
+        return f"{tab:16s} 원장 없음 (씨앗 필요 : sheet_ledger.py --pull --tab {tab} -- 망이 있을 때 한 번)"
     c = lg.counts(); p = lg.pending()
     old = min((r["added"] for r in p), default="")
     s = f"{tab:16s} pending {c.get('pending', 0)} · sent {c.get('sent', 0)} · foreign {c.get('foreign', 0)} · removed {c.get('removed', 0)} · failed {c.get('failed', 0)}"
@@ -742,7 +747,8 @@ def status_tab(tab, dir=None):
 def all_tabs(dir=None):
     d = ledger_dir(dir)
     found = [os.path.basename(p)[:-4] for p in sorted(glob.glob(os.path.join(d, "*.tsv")))]
-    return found + [t for t in EXTERNAL if t not in found]
+    #  원장이 아직 없는 탭도 보인다 (--status 가 '씨앗 필요' 를 알린다. --flush 는 '[SKIP] 원장 없음')
+    return found + [t for t in list(TABS) + list(EXTERNAL) if t not in found]
 
 
 def main():
@@ -751,6 +757,8 @@ def main():
     g.add_argument("--status", action="store_true"); g.add_argument("--flush", action="store_true")
     g.add_argument("--pull", action="store_true")
     ap.add_argument("--tab"); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--dir")
+    ap.add_argument("--sheet-id", help="--pull : 원장 머리의 sheet_id 대신 (원장이 없으면 탭의 기본값)")
+    ap.add_argument("--gid", help="--pull : 원장 머리의 gid 대신 (원장이 없으면 탭의 기본값)")
     a = ap.parse_args()
     tabs = [a.tab] if a.tab else all_tabs(a.dir)
     if a.status:
@@ -761,9 +769,17 @@ def main():
     if a.pull:
         if not a.tab or a.tab not in TABS:
             print("--pull 은 --tab 하나 (" + " ".join(TABS) + ")"); return RC_OTHER
+        cfg = TABS[a.tab]
         lg = Ledger(a.tab, dir=a.dir)
-        if not lg.meta.get("sheet_id"):
-            print(f"원장에 sheet_id 가 없다 -- 쓰는 도구가 처음 한 번 돌아야 한다 ({lg.path})"); return RC_OTHER
+        #  씨앗 (원장이 아직 없다) : 탭의 기본 sheet_id · gid · 키로 연다 (리뷰 필수 2a, 2026-11-09)
+        if a.sheet_id or not lg.meta.get("sheet_id"):
+            lg.meta["sheet_id"] = a.sheet_id or cfg["sheet_id"]
+        if a.gid is not None or not lg.meta.get("gid"):
+            lg.meta["gid"] = str(a.gid if a.gid is not None else cfg["gid"])
+        if not lg.key_cols():
+            lg.meta["key"] = "|".join(cfg["key"])
+        if not lg.exists():
+            print(f"[SEED] {a.tab} : 원장 없음 -- 시트(sheet_id {lg.meta['sheet_id'][:12]}… gid {lg.meta['gid']})를 읽어 씨앗을 만든다 ({lg.path})")
         try:
             ws = open_ws(lg.meta["sheet_id"], lg.meta.get("gid", "0"), a.tab)
             grid = ws.get_all_values()
@@ -771,6 +787,9 @@ def main():
             print(f"[SHEET] 읽기 실패 rc {rc_of(e)} : {e}"); return rc_of(e)
         if a.dry_run:
             pull(lg, grid, TABS[a.tab]); print(status_tab(a.tab, a.dir) + "  (미리보기, 원장 안 바꿈)")
+            return 0
+        if not any(any(str(c).strip() for c in r) for r in grid):
+            print(f"[SEED] {a.tab} : 시트 탭이 비어 있다 -- 원장을 만들지 않는다 (쓰는 도구의 첫 등재가 헤더부터 쓴다)")
             return 0
         with lg.locked():
             pull(lg, grid, TABS[a.tab]); lg.save()
