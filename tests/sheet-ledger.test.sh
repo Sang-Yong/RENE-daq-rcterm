@@ -319,6 +319,18 @@ rc=$(sa)
 check "같은 사유 두 번째 -> 메일 그대로 1"       '[ "$rc" != 0 ] && [ "$(grep -c " sheetlog " "$E/notify.calls")" = 1 ]'
 check "원장은 안 생긴다"                         '[ ! -e "$E/led/Y2026B.tsv" ]'
 
+echo "[16f] --drop : pending 행 하나를 원장에서 뺀다. sent 는 거부 (리뷰 참고 ②)"
+adddb 4460
+RENE_SHEET_FAKE_NET=down ar --commit > /dev/null
+check "4460 pending"                             '[ "$(st Y2026B 4460)" = pending ]'
+python3 "$LED" --drop 4460 --tab Y2026B --dry-run > "$T/drop.out" 2>&1; rc=$?
+check "--dry-run : rc 0 · 원장 그대로"           '[ "$rc" = 0 ] && [ "$(st Y2026B 4460)" = pending ]' "$(cat "$T/drop.out")"
+python3 "$LED" --drop 4460 --tab Y2026B > "$T/drop.out" 2>&1; rc=$?
+check "rc 0 · 원장에서 빠짐"                     '[ "$rc" = 0 ] && [ "$(st Y2026B 4460)" = - ] && grep -q "^\[DROP\]" "$T/drop.out"' "$(cat "$T/drop.out")"
+python3 "$LED" --drop 4439 --tab Y2026B > "$T/drop.out" 2>&1; rc=$?
+check "sent(4439) 는 거부 · 그대로"              '[ "$rc" != 0 ] && [ "$(st Y2026B 4439)" = sent ]' "$(cat "$T/drop.out")"
+python3 -c "import sqlite3; db=sqlite3.connect('$T/run.db'); db.execute('update runcatalog set onlbit=0 where runnum=4460'); db.commit()"
+
 echo "[17] cron 환경 (env -i, cd /) : --status · --flush"
 out=$(cd / && env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" RENE_SHEET_LEDGER_DIR=$T/led RENE_SHEET_FAKE_DIR=$T/fake \
       DRILL_FLAG=$T/none REACTOR_LOG_DIR=$T/reactor python3 "$LED" --status 2>&1); rc=$?

@@ -34,6 +34,7 @@
 CLI
     sheet_ledger.py --status [--tab X]          읽기 전용. pending / sent / failed 수, 가장 오래된 pending
     sheet_ledger.py --flush  [--tab X] [--dry-run]   망이 되면 pending 을 시트로 (dry-run 은 망·시트·원장 무접촉)
+    sheet_ledger.py --drop KEY --tab X [--dry-run]   pending/failed 행 하나를 원장에서 뺀다 (키가 여럿이면 '|')
     sheet_ledger.py --pull   --tab X [--dry-run] [--sheet-id ID --gid N]
                                                 시트를 읽어 원장을 채운다/갱신한다 (첫 배포의 씨앗). 시트는 안 쓴다.
                                                 원장이 없으면 탭의 기본 sheet_id · gid · 키(TABS)로 연다
@@ -751,11 +752,37 @@ def all_tabs(dir=None):
     return found + [t for t in list(TABS) + list(EXTERNAL) if t not in found]
 
 
+def drop_row(tab, key, dry=False, dir=None, log=print):
+    """시트에 아직 안 간(pending) 또는 못 간(failed) 행 하나를 원장에서 뺀다 (리뷰 참고 ②).
+    예 : 망이 없던 동안 원장에 등재된 런을 나중에 onlbit=0 으로 뺄 때.  sent/foreign/removed 는 거부한다 --
+    시트에 있는 행은 시트에서 지우는 것이 먼저다 (그러면 다음 pull 이 removed 로 둔다)."""
+    if tab not in TABS:
+        log("--drop 은 --tab 하나 (" + " ".join(TABS) + ")"); return RC_OTHER
+    lg = Ledger(tab, dir=dir)
+    if not lg.exists():
+        log(f"원장 없음 ({lg.path})"); return RC_OTHER
+    k = key.replace("|", "\x1f")
+    with lg.locked():
+        r = lg.by_key().get(k)
+        if r is None:
+            log(f"[FAIL] {tab} : 키 {key!r} 가 원장에 없다"); return RC_OTHER
+        if r["state"] not in ("pending", "failed"):
+            log(f"[FAIL] {tab} : 키 {key!r} 는 {r['state']} -- pending/failed 만 뺀다 (시트에 있으면 시트에서 먼저 지울 것)")
+            return RC_OTHER
+        if dry:
+            log(f"[DRY] {tab} : 키 {key!r} ({r['state']}) 를 뺄 것이다"); return RC_OK
+        lg.rows = [x for x in lg.rows if x is not r]
+        lg.save()
+    log(f"[DROP] {tab} : 키 {key!r} ({r['state']}, 등재 {r['added']}) 를 원장에서 뺐다")
+    return RC_OK
+
+
 def main():
     ap = argparse.ArgumentParser(description="시트 로컬 원장")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--status", action="store_true"); g.add_argument("--flush", action="store_true")
     g.add_argument("--pull", action="store_true")
+    g.add_argument("--drop", metavar="KEY", help="pending/failed 행 하나를 원장에서 뺀다 (키 열이 여럿이면 '|' 로 잇는다)")
     ap.add_argument("--tab"); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--dir")
     ap.add_argument("--sheet-id", help="--pull : 원장 머리의 sheet_id 대신 (원장이 없으면 탭의 기본값)")
     ap.add_argument("--gid", help="--pull : 원장 머리의 gid 대신 (원장이 없으면 탭의 기본값)")
@@ -766,6 +793,8 @@ def main():
         for t in tabs:
             print("  " + status_tab(t, a.dir))
         return 0
+    if a.drop is not None:
+        return drop_row(a.tab, a.drop, a.dry_run, a.dir)
     if a.pull:
         if not a.tab or a.tab not in TABS:
             print("--pull 은 --tab 하나 (" + " ".join(TABS) + ")"); return RC_OTHER
