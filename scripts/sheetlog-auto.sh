@@ -108,6 +108,9 @@ if [ $rc -ne 0 ] && ! printf '%s' "$preview" | grep -q '추가 대상'; then
    exit 1
 fi
 
+#  이벤트 0 인 런은 append_runs.py 가 후보에서 뺀다 (2026-11-08 run 4441~4445). 무엇을 뺐는지 남긴다
+zskip=$(printf '%s' "$preview" | grep '^건너뜀(0 사건)' | head -1)
+[ -n "$zskip" ] && [ $STATUS -eq 0 ] && log "$zskip -- 시트에 싣지 않는다"
 pending=$(printf '%s' "$preview" | sed -n 's/.*추가 대상 : \([0-9]\+\) 런.*/\1/p' | head -1)
 case "$pending" in ''|*[!0-9]*) pending=0 ;; esac
 cands=$(printf '%s' "$preview" | sed -n "s/^\['\([0-9]\+\)'.*/\1/p")
@@ -123,6 +126,7 @@ done
 if [ $STATUS -eq 1 ]; then
    echo "밀린 런        : $pending 개  [$(echo $cands | tr '\n' ' ')]"
    echo "완결돼 쓸 수 있는 것 : $ok 개"
+   [ -n "$zskip" ] && echo "$zskip  (onlbit=1 이나 nfadc=0 -- 싣지 않는다)"
    [ -n "$blocked" ] && echo "대기            : run $blocked 부터 (후처리 미완)"
    echo "마지막 등재     : $( [ "$last_ts" -gt 0 ] && date -d "@$last_ts" '+%F %T' || echo '기록 없음' )  (${elapsed_h}시간 전)"
    echo "문턱 / 주기     : $THRESHOLD 개 / ${INTERVAL_H}시간"

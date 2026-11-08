@@ -495,6 +495,12 @@ def main():
             print("제외 %d 런 (onlbit!=1 또는 stime 없음) : %s"
                   % (len(drop), " ".join(str(d[0]) for d in drop)))
         rows = keep
+        # ★ 이벤트 0 인 런도 싣지 않는다 (2026-11-08 : HV 가 꺼진 채 끝난 run 4441~4445 가 onlbit=1 로
+        #   마감돼 시트에 올라갔다). nfadc 가 NULL 인 옛 행은 그대로 둔다 -- 0 이라고 적힌 것만 뺀다.
+        zero = [r for r in rows if r[6] is not None and r[6] == 0]
+        if zero:
+            print("건너뜀(0 사건) %d 런 : %s" % (len(zero), " ".join(str(z[0]) for z in zero)))
+            rows = [r for r in rows if not (r[6] is not None and r[6] == 0)]
     if a.limit:
         rows = rows[:a.limit]
     print("추가 대상 : %d 런 (%s ~ %s)" % (len(rows), rows[0][0], rows[-1][0]) if rows else "추가할 런이 없다")
