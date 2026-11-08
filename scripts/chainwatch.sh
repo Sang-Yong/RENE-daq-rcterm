@@ -286,9 +286,9 @@ check_rate() {
    [ -n "${minrate:-}" ] || { RATE_MSG=""; return 0; }
    if awk -v r="$minrate" -v m="$MINRATE" 'BEGIN{ exit !(r+0 < m+0) }'; then
       RATE_MSG="ADC 별 계수율($(hb_rate_kind)) 최솟값 ${minrate} Hz (문턱 ${MINRATE} Hz), run $(hb_field run) sub $(hb_field subrun)"
-      #  모든 ADC 가 0 이면 신호가 없는 것이다 -- 보드보다 HV 를 먼저 (CLAUDE.md 11.131 · 11.225)
+      #  모든 ADC 가 0 이면 트리거가 없다 -- HV 를 먼저, 그다음 보드 상태 (CLAUDE.md 11.131 · 11.225 · 2026-11-08)
       if hb_rates | awk '$1+0 != 0 { nz=1 } END{ exit (NR > 0 && !nz) ? 0 : 1 }'; then
-         RATE_MSG="$RATE_MSG ; ★ FADC·SADC 모두 0 Hz (daqtime=$(hb_field daqtime) totev=$(hb_field totev)) -- 신호 없음, PMT HV(GECO) 부터 볼 것 (CLAUDE.md 11.131)"
+         RATE_MSG="$RATE_MSG ; ★ FADC·SADC 모두 0 Hz (daqtime=$(hb_field daqtime) totev=$(hb_field totev)) -- 트리거 0 : PMT HV(GECO) 를 보고, HV 가 켜져 있으면 보드가 트리거를 못 내는 상태일 수 있다 (2026-11-08 은 두 번째 전원 재투입이 풀었다, CLAUDE.md 11.131)"
       fi
       return 1
    fi
