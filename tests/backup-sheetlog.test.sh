@@ -3,7 +3,8 @@
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd); TOOL=$DIR/tools/sheetlog/append_backup_rows.py
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-export BACKUP_DISKS_TSV="$T/disks.tsv" BACKUP_DISKS_MD="$T/disks.md"     # 라벨 정본은 임시 파일 (실제 docs/ 를 건드리지 않는다)
+export BACKUP_DISKS_TSV="$T/disks.tsv" BACKUP_DISKS_MD="$T/disks.md"
+export RENE_SHEET_LEDGER_DIR="$T/ledger" RENE_SHEET_BACKUP_DIR="$T/ledger-backup" DRILL_FLAG="$T/drill.active"   # ★ 운영 원장(/Data_ssd/LOG/sheetledger) 무접촉 (2026-11-09)     # 라벨 정본은 임시 파일 (실제 docs/ 를 건드리지 않는다)
 PASS=0; FAIL=0; ok(){ PASS=$((PASS+1)); echo "  ✅ $1"; }; bad(){ FAIL=$((FAIL+1)); echo "  ❌ $1"; [ $# -gt 1 ] && echo "       $2"; }
 chk(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "기대 '$3' / 실제 '$2'"; fi; }
 col(){ awk -F'\t' -v r="$2" -v c="$3" 'NR==r{print $c}' "$1"; }
