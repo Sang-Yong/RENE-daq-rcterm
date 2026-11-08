@@ -23,6 +23,8 @@ mk() { printf '#!/bin/bash\necho "%s $*" >> "%s/actions"\n%s\nexit 0\n' "$1" "$T
 mk mailq      'rm -f '"$T"'/Q/*.mail'
 mk sheetlog   'echo "2026-11-05 16:07:04 [OK] 등재 3 런 -> A404:S406  (3행)  (일일 등재 (25시간 경과))"'
 mk backupsheet; mk reactor; mk websummary
+#  가짜 시트 원장 (실물은 운영 /Data_ssd/LOG/sheetledger 와 구글에 닿는다)
+mk ledger 'echo "[SHEET] Y2026B : 붙임 2 · 고침 0 · 이미 있음 0 -- 되대조 통과 (백업 x)"'
 #  가짜 daq-notify : 사건을 적고, netsync-lib 로 망 단절이면 '큐' 라고 적는다 (진짜 daq-notify 의 동작을 흉내)
 cat > "$T/notify" <<N
 #!/bin/bash
@@ -34,7 +36,7 @@ chmod +x "$T/notify"; mkdir -p "$T/Q"
 export NETSYNC_PROBE=$T/probe NETSYNC_STATE=$T/state NETSYNC_LOG=$T/log NETSYNC_LOCK=$T/.lock \
        NETSYNC_NOTIFY=$T/notify NETSYNC_MAILQ_CMD=$T/mailq NETSYNC_SHEETLOG_CMD=$T/sheetlog \
        NETSYNC_BACKUPSHEET_CMD=$T/backupsheet NETSYNC_REACTOR_CMD=$T/reactor NETSYNC_WEBSUMMARY_CMD=$T/websummary \
-       NETSYNC_QUEUES=$T/Q NETSYNC_BG=0 DRILL_FLAG=$T/drill.active
+       NETSYNC_QUEUES=$T/Q NETSYNC_BG=0 DRILL_FLAG=$T/drill.active NETSYNC_LEDGER_CMD=$T/ledger
 run() { bash "$SUT" "$@" >"$T/out" 2>&1; }
 net() { sed -n 's/^net=//p' "$T/state"; }
 
@@ -68,6 +70,9 @@ check "sheetlog-auto 는 보통 게이트 (--force 아님)" 'grep -qx "sheetlog 
 check "로그 : sheetlog-auto rc=0 등재 3 런" 'grep -q "  sheetlog-auto rc=0 등재 3 런" "$T/log"'
 check "backup-sheetlog · reactor · websummary" 'grep -q "^backupsheet" "$T/actions" && grep -q "^reactor" "$T/actions" && grep -q "^websummary" "$T/actions"'
 check "순서 : 메일 큐가 먼저"    '[ "$(head -1 "$T/actions" | cut -d" " -f1)" = mailq ]'
+check "시트 원장 flush 가 메일 큐 다음, sheetlog-auto 앞 (2026-11-09)" '[ "$(sed -n 2p "$T/actions")" = "ledger --flush" ]'
+check "로그에 원장 flush 결과"   'grep -q "sheet_ledger --flush rc=0 (시트로 보낸 탭 1)" "$T/log"'
+check "복귀 메일에 원장 flush"   'grep -q "시트 원장 flush rc=0" "$T/notify.calls"'
 check "복귀 메일은 바로 (큐 아님)" 'grep -q "^net_restored sent" "$T/notify.calls"'
 check "본문 : 단절 1시간 30분"   'grep "^net_restored" "$T/notify.calls" | grep -q "단절 1시간 30분"'
 check "본문 : 밀린 메일 2 통 중 2 통" 'grep "^net_restored" "$T/notify.calls" | grep -q "밀린 메일 2 통 중 2 통 보냄"'
@@ -102,7 +107,7 @@ echo "[9] cron 환경 (env -i), 종료코드 0"
 env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" NETSYNC_PROBE=$T/probe NETSYNC_STATE=$T/state NETSYNC_LOG=$T/log \
    NETSYNC_LOCK=$T/.lock NETSYNC_NOTIFY=$T/notify NETSYNC_MAILQ_CMD=$T/mailq NETSYNC_SHEETLOG_CMD=$T/sheetlog \
    NETSYNC_BACKUPSHEET_CMD=$T/backupsheet NETSYNC_REACTOR_CMD=$T/reactor NETSYNC_WEBSUMMARY_CMD=$T/websummary \
-   NETSYNC_QUEUES=$T/Q NETSYNC_BG=0 bash "$SUT" >/dev/null 2>&1; rc=$?
+   NETSYNC_QUEUES=$T/Q NETSYNC_BG=0 NETSYNC_LEDGER_CMD=$T/ledger bash "$SUT" >/dev/null 2>&1; rc=$?
 check "rc 0"                     '[ "$rc" = 0 ]'
 check "점검 시각이 갱신됐다"     '[ "$(sed -n s/^checked=//p "$T/state")" -ge "$(( $(date +%s) - 10 ))" ]'
 
