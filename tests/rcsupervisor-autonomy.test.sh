@@ -433,15 +433,33 @@ chk "recovered 는 totev>0 이 된 뒤 (DRAM 점검보다 늦게)" '[ "$(grep -n
 chk "본문 : 사건이 들어온다" 'grep "^recovered" "$D/notify.log" | grep -q "사건이 들어온다"'
 stop_sup
 
-echo "== [20] 사건이 있던 런의 stall 은 nosignal 이 아니다 (기존 restart 경로)"
+echo "== [20] 사건이 있던 런의 stall 은 no_events 가 아니다 (기존 restart 경로)"
 STALLOPT="--stall-grace 3" start s20 --run-length 1 --max-consec-fail 9
 #  사건이 들어오다가 멈춘 런 : 정상 heartbeat 를 몇 번 쓴 뒤 같은 totev 로 굳힌다
 echo "FREEZE_AFTER=2" > "$D/plan/100"
 waitfor 30 'grep -q "UNHEALTHY : no new events" "$D/sup.log"'
 chk "stall 은 잡힌다" 'grep -q "UNHEALTHY : no new events" "$D/sup.log"'
-chk "nosignal 로 가지 않는다" '! grep -q "nosignal" "$D/sup.log"'
+chk "no_events 로 가지 않는다" '! grep -q "no_events" "$D/sup.log" && ! grep -q "^no_events" "$D/notify.log"'
 waitfor 20 'grep -q "^restart" "$D/notify.log"'
 chk "restart 알림" 'grep -q "^restart" "$D/notify.log"'
+stop_sup
+
+echo "== [21] 대기 recover(not-usb) -> 확인 런에 사건 -> 다음 사건 0 연쇄에서 recover 를 다시 부른다 (리뷰 참고 1)"
+STALLOPT="--stall-grace 3" start s21 --run-length 1 --no-events-limit 1
+echo "ZERO=1" > "$D/plan/100"
+echo "EXIT=0 LIFE=5" > "$D/plan/101"
+echo "ZERO=1" > "$D/plan/102"
+echo 2 > "$D/recover_rc"
+waitfor 30 'grep -q "STANDBY (hardware)" "$D/sup.log"'
+echo 1 > "$D/recover_rc"            # 대기 중 recover : not-usb -> 확인 런 1 개 (how 3)
+waitfor 30 'grep -qx 101 "$D/launches"'
+echo 0 > "$D/recover_rc"
+waitfor 30 'grep -q "^recovered" "$D/notify.log"'
+chk "확인 런 101 에 사건 -> recovered" 'grep -q "^recovered" "$D/notify.log"'
+waitfor 40 '[ "$(grep -c -- "--no-events" "$D/recover.calls" 2>/dev/null)" -ge 3 ] || grep -q "recover not repeated" "$D/sup.log"'
+chk "★ run 102 의 사건 0 에서 recover --no-events 를 다시 부른다 (3 회째)" '[ "$(grep -c -- "--no-events" "$D/recover.calls")" -ge 3 ]'
+chk "★ 'recover not repeated' 로 건너뛰지 않는다" '! grep -q "recover not repeated" "$D/sup.log"'
+chk "★ fatal '자동 복구로 안 풀림' 없음" '! grep -q "^fatal" "$D/notify.log"'
 stop_sup
 
 echo "== [17] --help 에 새 옵션"

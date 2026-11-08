@@ -987,6 +987,10 @@ int main(int argc, char** argv)
       const pid_t  pid    = SpawnRcterm(c, cycle, runNoDB);
       const bool   limitRecoverDone = skipNextLimitRecover;
       skipNextLimitRecover = false;
+      //  대기에서 막 --no-events recover 를 부른 뒤의 확인 런 하나에서만 소비한다.
+      //  확인 런에 사건이 들어와도 남아 있으면 다음 사건 0 연쇄의 recover 를 건너뛴다 (2026-11-08 리뷰)
+      const bool   noEvProbe = noEvRecoverDone;
+      noEvRecoverDone = false;
       if (c.dryRun) {
          Log("dry-run: stopping after showing the first launch");
          break;
@@ -1287,7 +1291,7 @@ int main(int argc, char** argv)
                noEvSent = true;
             }
             int rrc = 1;
-            if (noEvRecoverDone) {
+            if (noEvProbe) {
                Log("no_events on a probe run right after standby recovery - recover not repeated");
             } else if (c.autoRecover && !c.recoverCmd.empty()) {
                rrc = RunRecover(c, " --no-events");
@@ -1295,7 +1299,6 @@ int main(int argc, char** argv)
                         "(0=recovered 1=not-usb 2=failed 3=unsafe)", rrc);
                Log(b);
             }
-            noEvRecoverDone = false;
             if (rrc == 0) {
                Log("automatic recovery succeeded; resuming data taking");
                consecFail = 0; zeroRuns = 0; earlyTried = false;
