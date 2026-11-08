@@ -41,26 +41,31 @@ cat > "$T/bin/notify" <<EOF
 # --params P <event> --msg M --detail-file D
 echo "NOTIFY \$3 | \$5" >> "$T/seq"; exit 0
 EOF
-# 가짜 rcterm : 10 s 더미 런은 흔적만. 확인 런은 $T/scen 의 n 번째 줄대로 로그·파일·heartbeat 를 만든다
-#   줄 형식 : rc 로그묶음(d|a|c|none|stale) FADC바이트 ar목록(쉼표, -는 없음) 고아(y|n)
+# 가짜 rcterm : 더미 런(--desc 에 dummy)은 흔적만. 확인 런은 $T/scen 의 n 번째 줄대로 로그·파일·heartbeat 를 만든다
+#   줄 형식 : rc 로그묶음(d|a|c|none|stale) FADC바이트 ar목록(쉼표, -는 없음) 고아(y|n) [사건수 n= (기본 1)]
+#   ★ 더미 런은 실물 rcterm 처럼 run-length*3600 < split-time*60 이면 FATAL 로 rc 1 (2026-11-08 09:24 실물)
 cat > "$T/bin/rcterm" <<EOF
 #!/usr/bin/env bash
-len=""; hb=""; run=""
-while [ \$# -gt 0 ]; do case "\$1" in --run-length) len=\$2; shift;; --heartbeat) hb=\$2; shift;; --run) run=\$2; shift;; esac; shift; done
-if [ "\$len" = 0.0028 ]; then echo "RCTERM dummy" >> "$T/seq"; exit 0; fi
+len=""; hb=""; run=""; desc=""; split=1
+while [ \$# -gt 0 ]; do case "\$1" in --run-length) len=\$2; shift;; --heartbeat) hb=\$2; shift;; --run) run=\$2; shift;; --desc) desc=\$2; shift;; --split-time) split=\$2; shift;; esac; shift; done
+case "\$desc" in *dummy*)
+   if awk -v l="\$len" -v s="\$split" 'BEGIN{ exit !(l*3600 < s*60) }'; then echo "RCTERM dummy FATAL len=\$len split=\$split" >> "$T/seq"; echo "[FATAL] run length is shorter than split time"; exit 1; fi
+   echo "RCTERM dummy len=\$len split=\$split" >> "$T/seq"; exit 0 ;;
+esac
 n=\$(( \$(cat "$T/rcn" 2>/dev/null || echo 0) + 1 )); echo \$n > "$T/rcn"
 line=\$(sed -n "\${n}p" "$T/scen" 2>/dev/null); [ -n "\$line" ] || line="0 d 2000000 650.5,651.2 n"
 set -- \$line
 echo "RCTERM check \$n (\$2)" >> "$T/seq"
 rp=\$(printf '%06d' "\$run")
 case "\$2" in
-   d|a|c) for k in TCB FADCDAQ SADCDAQ; do cp "$FX/check-\$2-\$k.log" "$T/daqlog/\${k}_\$rp.log"; done ;;
+   d|a|c|z) for k in TCB FADCDAQ SADCDAQ; do cp "$FX/check-\$2-\$k.log" "$T/daqlog/\${k}_\$rp.log"; done ;;
    none)  rm -f "$T/daqlog/"*_"\$rp".log ;;
    stale) : ;;
 esac
 mkdir -p "$T/raw/RAW/\$rp"; truncate -s "\$3" "$T/raw/RAW/\$rp/FADC_\$rp.root.00000"
 : > "\$hb"; i=0
-if [ "\$4" != - ]; then for r in \$(echo "\$4" | tr , ' '); do echo "daq\$i=X n=1 sr=1 ar=\$r" >> "\$hb"; i=\$((i+1)); done; fi
+nev=\${6:-1}
+if [ "\$4" != - ]; then for r in \$(echo "\$4" | tr , ' '); do echo "daq\$i=X n=\$nev sr=\$r ar=\$r" >> "\$hb"; i=\$((i+1)); done; fi
 [ "\$5" = y ] && { echo "daq tcb" > "$T/busy"; echo 3 > "$T/ports"; }
 exit \$1
 EOF
@@ -292,6 +297,32 @@ for kv in "recover_power_max = abc" "recover_power_max = 2.5" "recover_power_win
    chk "$kv -> PDU 0" "reset; usb_case; printf 'recover_enable = 1\nrecover_power_cycle = 1\n$kv\n' > \"\$T/params\"; for i in 1 2 3; do echo '0 c 2000000 650,651 n'; done > \"\$T/scen\"; run --runs 4424; [ \"\$(rc)\" = 2 ] && [ \"\$(n_of PDU)\" = 0 ] && grep -q '정수가 아니다' \"\$T/out\""
 done
 chk "--force-power-cycle 도 막는다" 'reset; printf "recover_enable = 1\nrecover_power_max = x\n" > "$T/params"; run --runs 4500 --force-power-cycle; [ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ]'
+
+echo "[18] 확인 런 '신호 없음' (DRAM 8/8 · USB 0 · 사건 0) -> 하드웨어성 -> 전원 재투입, 상한 안에서 2 회까지 (2026-11-08)"
+#  실물 : 09:23 첫 재투입 뒤 확인 런 3 회 모두 사건 0 (check-z = 그 #3) -> 09:35 recovery_failed 로 멈춰 5 시간 공백.
+#         15:42 두 번째 재투입 뒤 6,788 Hz 로 통과 (/Data_ssd/LOG/harness/20261108_usb-recover-forcepower.log)
+Z="0 z 32628 0,0 n 0"; G="0 d 2000000 6788.0,6790.1 n"
+reset; power_on; usb_case; printf '%s\n%s\n' "$Z" "$G" > "$T/scen"; run --runs 4424
+chk "usbreset 확인 런이 신호 없음 -> 더 걸지 않고 전원 단계, 그 뒤 합격 rc 0" '[ "$(rc)" = 0 ] && [ "$(n_of PDU)" = 1 ] && [ "$(grep -c "^RCTERM check" "$T/seq")" = 2 ]'
+chk "out 에 '신호 없음'"                                'grep -q "신호 없음" "$T/out"'
+reset; power_on; usb_case; printf '%s\n%s\n%s\n%s\n' "$Z" "$Z" "$G" "$G" > "$T/scen"; run --runs 4424
+chk "첫 재투입 뒤에도 신호 없음 -> 두 번째 재투입 -> 합격 (오늘의 경우)" '[ "$(rc)" = 0 ] && [ "$(n_of PDU)" = 2 ] && [ "$(wc -l < "$T/power.state")" = 2 ]'
+chk "recovered 본문에 전원 재투입 2 회"                 'grep -q "^NOTIFY recovered | .*재투입(PDU) 2 회" "$T/seq"'
+chk "전원 뒤 신호 없음이면 그 단계의 추가 usbreset 은 안 한다" '[ "$(grep -c "^RCTERM check" "$T/seq")" = 3 ]'
+reset; power_on; usb_case; for i in 1 2 3 4 5 6 7 8; do echo "$Z"; done > "$T/scen"; run --runs 4424
+chk "두 번 다 신호 없음 -> rc 2, 전원 2 회 (상한 2)"      '[ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 2 ]'
+chk "recovery_failed 본문 '전자계 정상·트리거 0 -- PMT HV·케이블·앞단 전원'" 'grep -q "^NOTIFY recovery_failed | 전자계 정상" "$T/seq" && grep "^NOTIFY recovery_failed" "$T/seq" | grep -q "PMT HV" && grep "^NOTIFY recovery_failed" "$T/seq" | grep -q "재투입 2회"'
+reset; power_on; usb_case; N=$(date +%s); printf '%s a\n' $((N-3600)) > "$T/power.state"; for i in 1 2 3 4 5 6; do echo "$Z"; done > "$T/scen"; run --runs 4424
+chk "6 h 에 이미 1 회 -> 이번엔 1 회만 (상한 유지)"         '[ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 1 ] && grep -q "두 번째 전원 재투입은 하지 않는다" "$T/out"'
+reset; usb_case; printf '%s\n' "$Z" > "$T/scen"; run --runs 4424
+chk "recover_power_cycle=0 이면 전원 0 회, 사유를 본문에"  '[ "$(rc)" = 2 ] && [ "$(n_of PDU)" = 0 ] && grep "^NOTIFY recovery_failed" "$T/seq" | grep -q "전원 재투입 안 함"'
+reset; power_on; usb_case; for i in 1 2 3 4 5 6 7 8; do echo "0 d 32628 0.1,0.1 n 1"; done > "$T/scen"; run --runs 4424
+chk "사건이 조금이라도 있으면 신호 없음이 아니다 (예전 하드웨어성)" '[ "$(n_of PDU)" = 1 ] && ! grep -q "신호 없음" "$T/out"'
+chk "더미 런은 --split-time 1 · 1 분 (FATAL 없음)"          'grep -q "^RCTERM dummy len=0.0167 split=1$" "$T/seq" && ! grep -q "dummy FATAL" "$T/seq"'
+reset; power_on; printf '%s\n' "$G" > "$T/scen"; run --runs 4500
+chk "USB 근거 없으면 (옛 동작) rc 1, 확인 런 없음"           '[ "$(rc)" = 1 ] && [ "$(grep -c "^RCTERM check" "$T/seq")" = 0 ]'
+reset; power_on; printf '%s\n' "$G" > "$T/scen"; run --runs 4500 --no-events
+chk "--no-events : USB 근거 없이도 확인 런 -> 합격 rc 0"   '[ "$(rc)" = 0 ] && [ "$(grep -c "^RCTERM check" "$T/seq")" = 1 ] && grep -q "사건 0 런 연속" "$T/out"'
 
 echo "통과 $PASS / 실패 $FAIL"
 [ "$FAIL" = 0 ]

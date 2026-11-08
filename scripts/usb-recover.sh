@@ -11,6 +11,8 @@
 #     usb-recover.sh [--params <파일>] [--max-try N] [--runs 4424,4425] [--dry-run] [--no-notify]
 #     usb-recover.sh --diagnose          진단만 하고 끝낸다 (읽기 전용, 수집 중에도 안전)
 #     usb-recover.sh --force-power-cycle usbreset 단계를 건너뛰고 바로 전원 단계 (사람·시험 입구)
+#     usb-recover.sh --no-events         감시자가 사건 0 런 연속을 보고 부른다 : USB 근거 없이도 확인 런으로 판정,
+#                                        확인 런이 신호 없음이면 전원 재투입 (상한 안에서 2 회까지, 2026-11-08)
 #
 #  단계
 #     [1] 안전 게이트  rcterm·daq·tcb·merger 가 하나라도 살아 있거나 포트가 열려 있으면 exit 3
@@ -21,7 +23,7 @@
 #     [3] usbreset     시도마다 고아 정리(killdaq) -> usbreset 2 회 연속 -> 확인 런. 최대 recover_max_try 회
 #     [4] 전원 재투입  (recover_power_cycle = 1 일 때, 6 h 에 2 회까지)
 #                      killdaq -> pdu-power.sh cycle --allow-supervisor -> 보드 3 종 대기(90 s)
-#                      -> NOTICE_CODE_RUN.sh (120 s 제한) -> usbreset 2 회 -> 10 s 더미 런
+#                      -> NOTICE_CODE_RUN.sh (120 s 제한) -> usbreset 2 회 -> 1 분 더미 런 (--split-time 1)
 #                      -> 확인 런 (실패하면 usbreset 1 회 + 확인 런을 2 회 더)
 #     확인 런 합격 = rcterm exit 0 · TCB 로그 'is aligned' 8 줄 · 'Fail to align' 0 ·
 #                    TCB/FADCDAQ/SADCDAQ 의 LIBUSB·TIMEOUT·OVERFLOW 0 (마감 포함) ·
@@ -82,9 +84,12 @@ POWER_WINDOW_H=6
 POWER_STATE=/Data_ssd/LOG/usb-recover.power.state
 POWER_USB_WAIT=90        # 전원을 올린 뒤 보드 3 종이 lsusb 에 보일 때까지 [s]
 NOTICE_TIMEOUT=120       # NOTICE_CODE_RUN.sh 제한 [s]. TCB 가 멈췄으면 출력 없이 매달린다 (11.119)
-DUMMYLEN=0.0028          # 더미 런 길이 [시간] = 10 s (11.224)
+DUMMYLEN=0.0167          # 더미 런 길이 [시간] = 1 분. ★ rcterm 은 run-length < split-time(최소 1 분) 이면
+                         #   '[FATAL] run length is shorter than split time' 로 안 돈다 (2026-11-08 09:24 실물,
+                         #   10 s = 0.0028 h 였다). 더미 런에는 --split-time 1 을 같이 준다
 POWER_EXTRA=2            # 전원 뒤 확인 런이 떨어지면 usbreset 1 회 + 확인 런을 몇 번 더
 FORCE_POWER=0
+NOEVENTS=0               # --no-events : 감시자가 사건 0 런 연속을 보고 불렀다 (2026-11-08)
 RUNS_ARG=""
 DRY=0; NOTIFY_ON=1
 CLI_MAXTRY=""
@@ -135,6 +140,7 @@ while [ $# -gt 0 ]; do
       --dry-run)    DRY=1; NOTIFY_ON=0; shift ;;      # 미리보기는 알림도 안 보낸다
       --diagnose)   DIAGNOSE=1; NOTIFY_ON=0; shift ;;
       --force-power-cycle) FORCE_POWER=1; shift ;;
+      --no-events)  NOEVENTS=1; shift ;;     # 감시자 : 사건 0 런(totev 0) 이 연속 -- USB 근거가 없어도 확인 런으로 판정한다
       --no-notify)  NOTIFY_ON=0; shift ;;
       -h|--help)    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
       *)            echo "모르는 인자 : $1" >&2; exit 1 ;;
@@ -295,6 +301,8 @@ else
    note "  NOTICE 보드 셋 다 USB 에 보인다"
 fi
 
+#  사건 0 런 연속 (감시자 --no-events) 은 그 자체가 근거다 -- 로그에 USB 오류가 없어도 확인 런으로 판정한다
+[ -z "$SUSPECT" ] && [ "$NOEVENTS" -eq 1 ] && SUSPECT=" 사건 0 런 연속(감시자)"
 if [ -z "$SUSPECT" ] && [ "$FORCE_POWER" -eq 0 ]; then
    say "USB 오류의 근거가 없다. 다른 원인이므로 usbreset 을 돌리지 않는다."
    say "  (조사한 런의 TCB · FADCDAQ · SADCDAQ 로그와 dmesg 에 USB 오류가 없고 보드 셋 다 보인다)"
@@ -371,6 +379,9 @@ usbreset_n() {            # $1 회 연속 usbreset -> SETTLE 대기
 CHK_N=0
 #  종료 : 0 합격 · 1 하드웨어성 불합격 (rc≠0 · DRAM · USB/TIMEOUT/OVERFLOW · 산출 크기 · 로그 없음)
 #         4 계수율 창만 어긋남 (하한·상한·미기록) -- 보드는 멀쩡할 수 있다. 전원 단계의 근거로 쓰지 않는다
+#         5 신호 없음 : rc 0 · DRAM · USB 0 인데 모든 ADC 사건 0. ★ 하드웨어성으로 친다 -- 2026-11-08 09:23 첫 전원
+#           재투입 뒤 보드가 트리거를 못 내는 상태로 올라왔고 두 번째 재투입(15:42)이 풀었다. usbreset 은 더 걸지
+#           않고 곧바로 전원 단계로 (상한 안에서 한 번 더). 상한을 다 쓰면 PMT HV·케이블·앞단 전원을 사람에게
 check_run() {             # $1 = 시험 이름 (증거 폴더용)
    local hb=$LOGDIR/usb-recover-check.hb
    local rp; rp=$(printf '%06d' "$CHECKRUN")
@@ -425,7 +436,15 @@ check_run() {             # $1 = 시험 이름 (증거 폴더용)
    bytes=$(find "$rawdir" -maxdepth 1 -name 'FADC_*.root.*' -printf '%s\n' 2>/dev/null \
            | awk '{s+=$1} END {print s+0}')
    note "  FADC 산출 : ${bytes:-0} bytes"
-   [ "${bytes:-0}" -lt "$MINBYTES" ] && { note "  ★ 너무 작다. 이벤트가 들어오지 않았다"; return 1; }
+   if [ "${bytes:-0}" -lt "$MINBYTES" ]; then
+      note "  ★ 너무 작다. 이벤트가 들어오지 않았다"
+      #  DRAM·USB 가 멀쩡한데 모든 ADC 의 사건이 0 이면 보드가 아니라 신호가 없는 것이다 (2026-11-08 run 4440 확인 런 3 회)
+      if sed -n 's/^daq[0-9]*=.* n=\([0-9]*\).*/\1/p' "$hb" 2>/dev/null | awk '$1+0 != 0 { nz=1 } END{ exit (NR > 0 && !nz) ? 0 : 1 }'; then
+         note "  ★ 신호 없음 : DRAM ${al}/${DRAMN} · USB 0 인데 모든 ADC 사건 0 -- 보드가 트리거를 못 낸다 (전원 재투입 대상, 2026-11-08)"
+         return 5
+      fi
+      return 1
+   fi
 
    # (d) 계수율. heartbeat 의 daqN= 줄의 ar= (ADC 별 평균).
    #  ★ 최솟값과 최댓값을 따로 본다 -- 한 보드만 죽으면 합·평균은 멀쩡해 보이고,
@@ -499,6 +518,7 @@ fi
 # =====================================================================
 TRY=0; OK=0; HOW=""
 HWFAIL=0                 # 하드웨어성 불합격이 한 번이라도 있었나 (보드 미열거 포함). 전원 단계의 근거
+NOSIG=0                  # 확인 런이 '하드웨어 정상, 신호 없음' 이었나 (check_run 5). 전원 단계를 부르지 않는다
 if [ "$FORCE_POWER" -eq 1 ]; then
    say "[3/5] usbreset 단계 — 건너뜀 (--force-power-cycle)"
 else
@@ -518,6 +538,12 @@ else
          say "  ✓ 확인 런 통과. 복구됐다."
          cleanup_check
          OK=1; HOW="usbreset 시도 ${TRY}회 (시도당 ${RESETS}회)"
+         break
+      fi
+      if [ "$crc" -eq 5 ]; then
+         NOSIG=1; HWFAIL=1
+         say "  확인 런 : DRAM · USB 0 인데 사건 0 (신호 없음). usbreset 은 더 걸지 않고 전원 단계로 간다."
+         cleanup_check
          break
       fi
       if [ "$crc" -eq 4 ]; then say "  확인 런 실패 (계수율 창만 어긋남). 다음 시도로 넘어간다."
@@ -557,9 +583,9 @@ power_stage() {
       return 1
    fi
    usbreset_n 2 || { POWER_FAIL="usbreset 을 실행할 수 없다"; return 1; }
-   note "  10 s 더미 런 (첫 런은 DRAM 이 안 맞는 일이 많다, 11.224)"
+   note "  1 분 더미 런 (첫 런은 DRAM 이 안 맞는 일이 많다, 11.224)"
    run_rcterm --params "$CHECKPARAMS" --no-db --run "$CHECKRUN" --max-runs 1 \
-              --run-length "$DUMMYLEN" --quiet --heartbeat "$LOGDIR/usb-recover-check.hb" \
+              --run-length "$DUMMYLEN" --split-time 1 --quiet --heartbeat "$LOGDIR/usb-recover-check.hb" \
               --desc "usb-recover dummy run" >> "$DETAIL" 2>&1
    note "  더미 런 종료코드 : $? (판정에 쓰지 않는다)"
    cleanup_check
@@ -571,14 +597,19 @@ power_stage() {
       fi
       orphans_clear || { POWER_FAIL="고아를 치우지 못했다"; return 1; }
       boards_present || continue
-      check_run "power-$k" && { cleanup_check; POWER_TRIES=$k; return 0; }
+      check_run "power-$k"; local crc=$?
+      [ "$crc" -eq 0 ] && { cleanup_check; POWER_TRIES=$k; return 0; }
       cleanup_check
+      if [ "$crc" -eq 5 ]; then
+         NOSIG=1; POWER_NOSIG=1; POWER_FAIL="전원 재투입 뒤 확인 런이 신호 없음 (DRAM · USB 0, 사건 0)"
+         return 1
+      fi
    done
    POWER_FAIL="전원 재투입 뒤 확인 런이 $((POWER_EXTRA+1)) 번 모두 불합격"
    return 1
 }
 
-POWER_FAIL=""; POWER_TRIES=0; POWER_DONE=0; POWER_WHY=""; RATE_ONLY=0
+POWER_FAIL=""; POWER_TRIES=0; POWER_DONE=0; POWER_WHY=""; RATE_ONLY=0; POWER_NOSIG=0; POWER_N=0
 if [ "$OK" -eq 0 ] && [ "$FORCE_POWER" -eq 0 ] && [ "$HWFAIL" -eq 0 ]; then
    #  ★ 하드웨어성 불합격 없이 계수율 창만 어긋났으면 보드를 끄지 않는다 -- 정상 보드를 6 h 에 2 번 끄게 된다
    #    (typeB/_mid3 는 40~57 Hz 로 운영 하한 100 아래, 낮 thr100_m2 는 20 kHz 위)
@@ -590,12 +621,28 @@ if [ "$OK" -eq 0 ] && [ "$FORCE_POWER" -eq 0 ] && [ "$HWFAIL" -eq 0 ]; then
    say "[4/5] 전원 재투입 — 하지 않는다 ($POWER_WHY)"
 elif [ "$OK" -eq 0 ]; then
    if power_allowed; then
-      POWER_DONE=1
+      POWER_DONE=1; POWER_N=1
       if power_stage; then
          OK=1; HOW="보드 전원 재투입(PDU) + NOTICE_CODE_RUN + usbreset (추가 시도 ${POWER_TRIES}회)"
          say "  ✓ 전원 재투입 뒤 확인 런 통과. 복구됐다."
       else
          say "  ★ 전원 재투입으로도 복구하지 못했다 : $POWER_FAIL"
+         #  ★ 신호 없음이면 상한 안에서 한 번 더 (2026-11-08 : 첫 재투입 뒤 트리거 0, 두 번째 재투입이 풀었다.
+         #    09:35 에 여기서 멈춰 5 시간을 잃었다). 상한은 power_allowed 가 그대로 본다
+         if [ "$POWER_NOSIG" -eq 1 ]; then
+            if power_allowed; then
+               say "[4/5] 전원 재투입 2 회째 — 첫 재투입 뒤 확인 런이 신호 없음 (사용량 $(power_used)/${POWER_MAX})"
+               POWER_NOSIG=0; POWER_N=2
+               if power_stage; then
+                  OK=1; HOW="보드 전원 재투입(PDU) 2 회 + NOTICE_CODE_RUN + usbreset (첫 재투입 뒤 트리거 0)"
+                  say "  ✓ 두 번째 전원 재투입 뒤 확인 런 통과. 복구됐다."
+               else
+                  say "  ★ 두 번째 전원 재투입으로도 복구하지 못했다 : $POWER_FAIL"
+               fi
+            else
+               say "  두 번째 전원 재투입은 하지 않는다 ($POWER_WHY)"
+            fi
+         fi
       fi
    else
       say "[4/5] 전원 재투입 — 하지 않는다 ($POWER_WHY)"
@@ -613,7 +660,16 @@ if [ "$OK" -eq 1 ]; then
    exit 0
 fi
 
-if [ "$POWER_DONE" -eq 1 ]; then
+if [ "$NOSIG" -eq 1 ]; then
+   say "★ 전자계 정상·트리거 0 : 확인 런이 부팅·DRAM(${DRAMN}/${DRAMN})·USB(0) 를 통과했는데 모든 ADC 의 사건이 0 이다."
+   if [ "$POWER_DONE" -eq 1 ]; then
+      say "  전원 재투입을 ${POWER_N} 회 했으나 풀리지 않았다 (상한 ${POWER_MAX} 회 / ${POWER_WINDOW_H} h)."
+   else
+      say "  전원 재투입은 하지 않았다 ($POWER_WHY)."
+   fi
+   say "  PMT HV(GECO 채널 출력) · 신호 케이블 · 앞단 전원을 확인할 것 (CLAUDE.md 11.131 · 11.225)."
+   MSG="전자계 정상·트리거 0 -- PMT HV·케이블·앞단 전원 확인 (11.131). 확인 런 DRAM ${DRAMN}/${DRAMN} · USB 0 · 사건 0, usbreset ${TRY}회$( [ "$POWER_DONE" -eq 1 ] && echo " + 전원 재투입 ${POWER_N}회" || echo ", 전원 재투입 안 함 ($POWER_WHY)") (${SUSPECT# })"
+elif [ "$POWER_DONE" -eq 1 ]; then
    say "★ usbreset 과 전원 재투입 모두 실패했다. 사람이 현장에 가야 한다."
    MSG="usbreset ${TRY}회 + 전원 재투입 실패 : $POWER_FAIL (${SUSPECT# })"
 elif [ "$RATE_ONLY" -eq 1 ]; then
