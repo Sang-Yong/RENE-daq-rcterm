@@ -3,8 +3,13 @@
    시트 : 새 런 행만 append (기존 행 불변 -- 쓰기 전 백업, 쓴 뒤 되대조)
    드라이브 : map_file 의 이름->fileId 로 PNG 내용을 같은 ID 에 교체
    --init : PNG 를 새 파일로 올리고 map_file 과 퍼가기 URL 을 찍는다
-   새 pip 의존 없음 : gspread + google-auth + urllib 뿐이다."""
+   새 pip 의존 없음 : gspread + google-auth + urllib 뿐이다.
+   ★ 시트 행은 로컬 원장 경유 (2026-11-09 사용자 지시, tools/sheetlog/sheet_ledger.py) : 새 런 행을 먼저
+     원장(sheet_ledger_dir, 기본 /Data_ssd/LOG/sheetledger/DAQ_runsummary.tsv)에 적고(=등재) 시트로 민다.
+     망이 없으면 원장에만 적고 '[SHEET] 보류' · '[DRIVE] 보류' -- 종료 0 (발행을 막지 않는다).
+     시트 쪽 진짜 실패(인증·시트 오류·되대조)는 예전처럼 종료 1."""
 import argparse, glob, json, os, sys, time, urllib.parse, urllib.request
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sheetlog"))
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
           "https://www.googleapis.com/auth/drive"]
@@ -30,7 +35,7 @@ def read_params(path):
     #    sheet_backup_dir 도 같은 규칙이다 -- 안 그러면 cwd 기준으로 풀려 시트 백업이
     #    cron 의 작업 디렉터리에 쌓인다 (2026-10-10 리뷰 지적 4).
     root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
-    for k in ("map_file", "sheet_backup_dir"):
+    for k in ("map_file", "sheet_backup_dir", "sheet_ledger_dir"):
         v = p.get(k, "")
         if v and not os.path.isabs(v):
             p[k] = os.path.join(root, v)
@@ -197,6 +202,8 @@ def main():
             print(f"  (dry) drive update {n}.png -> {fid}")
         print(f"[DRY] 시트 {len(rows)} 행 후보, 그림 {len(fmap)}/{len(pngs)} 개 교체 예정")
         return
+    if not a.init:
+        return publish(p, rows)
     creds = find_creds()
     if not creds: sys.exit("[FATAL] 서비스 계정 json 을 찾지 못했다")
     from google.oauth2.service_account import Credentials
@@ -230,46 +237,65 @@ def main():
             for n in missing: print(f"       {n}")
             sys.exit(1)
         return
-    ws = gspread.authorize(cr).open_by_key(p["sheet_id"]) \
-               .get_worksheet_by_id(int(p.get("sheet_gid", "0")))
-    grid = ws.get_all_values()
+
+
+def publish(p, rows):
+    """시트 행 -> 로컬 원장 -> 시트, 그 뒤 드라이브 그림 교체."""
+    import sheet_ledger as sl
+    tab = "DAQ_runsummary"
+    sid, gid = p["sheet_id"], p.get("sheet_gid", "0")
     #  시험이 실 /Data_ssd 를 건드리지 않게 params 로 갈아끼울 수 있다. 기본값은 그대로이고,
     #  상대 경로는 read_params 가 저장소 루트 기준으로 풀어 둔다(map_file 과 같은 규칙).
-    bdir = p.get("sheet_backup_dir", "/Data_ssd/LOG/websummary"); os.makedirs(bdir, exist_ok=True)
-    bak = os.path.join(bdir, time.strftime("sheet-backup-%Y%m%d%H%M%S.tsv"))
-    with open(bak, "w", encoding="utf-8") as fh:
-        for r in grid: fh.write("\t".join(r) + "\n")
-    #  gspread 는 빈 탭을 [] 로도, [[]] 처럼 빈 행 하나로도 돌려준다(실측 : 새로 만든
-    #  DAQ_runsummary 탭이 rows=1, cols=0 이었다). 내용 있는 행이 하나도 없으면 빈 것이다 --
-    #  그 판정을 안 하면 헤더 없이 자료 행부터 붙는다.
-    if not any(any(c.strip() for c in r) for r in grid):
-        ws.append_row(HEADER, value_input_option="RAW"); grid = [HEADER]
-    have = {r[0] for r in grid[1:] if r and r[0].isdigit()}
-    new = [[str(c) for c in r] for r in rows if str(r[0]) not in have]
-    #  append-only 로 남긴다 -- Run 이 시트의 현재 끝보다 낮은 값이라도
+    bdir = p.get("sheet_backup_dir") or "/Data_ssd/LOG/websummary"
+    os.environ.setdefault("RENE_SHEET_BACKUP_DIR", bdir)
+    lg = sl.Ledger(tab, HEADER, ["Run"], sid, gid, dir=p.get("sheet_ledger_dir") or None)
+    creds = find_creds()
+    fake = os.environ.get("RENE_SHEET_FAKE_DIR") or os.environ.get("RENE_SHEET_FAKE_NET")
+    if creds or fake:
+        ws, grid, nrc = sl.online(sid, gid, tab, creds)
+    else:
+        ws, grid, nrc = None, None, sl.RC_AUTH
+        print("[FATAL] 서비스 계정 json 을 찾지 못했다 -- 원장에만 적는다")
+    new = [[str(c) for c in r] for r in rows]
+    #  append-only 로 남긴다 -- Run 이 시트(원장)의 현재 끝보다 낮은 값이라도
     #  삽입하지 않고 그대로 맨 끝에 붙인다(컨트롤러 판정 R7. 옛 런을
     #  나중에 되메울 때 이런 일이 생긴다 -- CLAUDE.md §11.5 의 4208~4211
     #  처럼). 그러면 시트 안 Run 값이 더 이상 오름차순이 아니게 되므로
     #  사람이 알아채도록 여기서 경고만 낸다.
-    #  ★ 이 스크립트 자체는 동시에 두 벌이 떠도 서로를 막지 않는다 --
-    #  단일 기록자 보장은 여기가 아니라 오케스트레이터(websummary.sh,
-    #  Task 9)의 flock 몫이다.
-    existing_nums = [int(r[0]) for r in grid[1:] if r and r[0].isdigit()]
-    sheet_max_run = max(existing_nums) if existing_nums else None
-    if sheet_max_run is not None:
-        for r in new:
-            rn = int(r[0])
-            if rn < sheet_max_run:
-                print(f"[WARN] run {rn} 이 시트의 현재 최댓값 {sheet_max_run} 보다 "
-                      f"낮다 -- append-only 라 끝에 그대로 붙는다 (삽입하지 않는다)")
-    if new:
-        ws.append_rows(new, value_input_option="RAW")
-        back = ws.get_all_values()[-len(new):]
-        if [r[:len(HEADER)] for r in back] != new:
-            sys.exit("[FATAL] 되대조 실패 -- 시트에 쓴 것과 읽은 것이 다르다")
-        print(f"[SHEET] {len(new)} 행 추가 + 되대조 통과 (백업 {bak})")
-    else:
-        print("[SHEET] 새 행 없음")
+    #  ★ 단일 기록자 보장은 websummary.sh 의 flock + 원장 잠금 몫이다.
+    if grid is not None:
+        try:
+            sl.pull(lg, grid, sl.TABS[tab], log=lambda m: None)
+        except ValueError:
+            pass
+    have = {r["key"] for r in lg.rows}
+    nums = [int(k) for k in have if k.isdigit()]
+    mx = max(nums) if nums else None
+    for r in new:
+        if r[0] not in have and mx is not None and int(r[0]) < mx:
+            print(f"[WARN] run {r[0]} 이 시트의 현재 최댓값 {mx} 보다 "
+                  f"낮다 -- append-only 라 끝에 그대로 붙는다 (삽입하지 않는다)")
+    lrc, src, n_new, sent, rng = sl.commit_rows(lg, new, ws, grid, mode="insert", offline_rc=nrc)
+    if lrc:
+        sys.exit(f"[FATAL] 원장 쓰기 실패 (rc {lrc})")
+    if src == sl.RC_VERIFY:
+        sys.exit("[FATAL] 되대조 실패 -- 시트에 쓴 것과 읽은 것이 다르다 (원장에는 적혔고 pending 그대로)")
+    if src not in (0, sl.RC_NET):
+        sys.exit(f"[FATAL] 시트 쓰기 실패 (rc {src}) -- 원장에는 적혔다. 다음 회차에 다시 민다")
+    if ws is None:
+        print("[DRIVE] 보류 -- 망 없음. 그림은 다음 회차에 교체한다")
+        return
+    if src == 0:
+        print(f"[SHEET] {sent} 행 추가 + 되대조 통과 (원장 경유)" if sent else "[SHEET] 새 행 없음")
+    if os.environ.get("RENE_SHEET_FAKE_DIR"):
+        print("[DRIVE] (시험 대역 -- 드라이브는 건너뛴다)"); return
+    try:
+        from google.oauth2.service_account import Credentials
+        import google.auth.transport.requests
+        cr = Credentials.from_service_account_file(creds, scopes=SCOPES)
+        cr.refresh(google.auth.transport.requests.Request())
+    except Exception as e:      # noqa: BLE001
+        print(f"[WARN] drive 0/? 교체 실패 (토큰 : {type(e).__name__}: {str(e)[:120]})"); return
     fmap = read_map(p.get("map_file", ""))
     nup = 0
     failed = []             # (이름, 사유) -- 부분 실패를 조용히 넘기지 않는다
