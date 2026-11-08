@@ -171,5 +171,14 @@ check "같은 사유 -> 메일 생략"    '[ "$(nmail)" = $((n0+1)) ]'
 out=$(FAKE_PREVIEW=noledger bash "$SUT" --status 2>&1); rc=$?
 check "--status : ★ 미리보기 실패 · 메일 없음" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "★ 미리보기 실패 (rc=5)" && [ "$(nmail)" = $((n0+1)) ]'
 
+echo "[14] --dry-run 에서 미리보기가 실패해도 메일 0 · failstate 없음 (2 라운드 리뷰 필수 : dry-run 은 바깥에 닿지 않는다)"
+rm -f "$T/failstate"; : > "$T/log"; n0=$(nmail)
+FAKE_PREVIEW=noledger bash "$SUT" --dry-run --force >/dev/null 2>&1; rc=$?
+check "exit 1"                    '[ "$rc" = 1 ]'
+check "메일 0"                    '[ "$(nmail)" = "$n0" ]'
+check "failstate 없음"            '[ ! -s "$T/failstate" ]'
+FAKE_PREVIEW=noledger bash "$SUT" --force >/dev/null 2>&1
+check "뒤이은 진짜 실패는 메일이 간다 (dry-run 이 사유를 삼키지 않음)" '[ "$(nmail)" = $((n0+1)) ]'
+
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -147,7 +147,8 @@ if { [ $rc -ne 0 ] && ! printf '%s' "$preview" | grep -q '추가 대상'; } || p
    log "[FAIL] 미리보기 실패 (rc=$rc) : $why"
    printf '%s\n' "$preview" | tail -5 >> "$LOG"
    #  같은 사유는 한 번만 알린다 (원장이 없는 채 망이 끊기면 매시 같은 실패다)
-   if [ $NONOTIFY -eq 0 ] && [ -x "$NOTIFY" ] && sheet_fail_once "preview $why"; then
+   #  --dry-run 은 바깥(메일)에 닿지 않고 실패 표식도 심지 않는다 (2 라운드 리뷰 필수)
+   if [ $DRY -eq 0 ] && [ $NONOTIFY -eq 0 ] && [ -x "$NOTIFY" ] && sheet_fail_once "preview $why"; then
       FD=$(mktemp /tmp/sheetlog-preview.XXXXXX); printf '%s\n' "$preview" > "$FD"
       "$NOTIFY" --params "$PARAMS" sheetlog --msg "시트 런 로그 미리보기 실패 (rc=$rc) -- 등재하지 못했다 : $why. 원장이 없으면 망이 있을 때 sheet_ledger.py --pull --tab Y2026B 로 씨앗을 만든다. 로그 : $LOG" --detail-file "$FD" >/dev/null 2>&1
       rm -f "$FD"
