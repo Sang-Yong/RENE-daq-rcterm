@@ -86,7 +86,7 @@ declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
                 [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail \
                 [tail_finish]=mail [tail_finish_failed]=mail [no_events]=both )
-EXPERT_EVENTS="recovery_failed fatal no_events"     # params 의 mail_expert_events 가 덮어쓴다
+EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다 (없으면 no_events 도 expert, 아래)
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -393,7 +393,7 @@ case "$ACT" in
       #  params 에 목록이 없으면 예전 규칙(recovery_failed·fatal 만 expert) 그대로.
       WHO=routine
       if [ "$EXPERT_EVENTS" = "recovery_failed fatal" ]; then
-         case "$EVENT" in recovery_failed|fatal) WHO=expert ;; esac
+         case "$EVENT" in recovery_failed|fatal|no_events) WHO=expert ;; esac
       else
          case " $EXPERT_EVENTS " in *" $EVENT "*) WHO=both ;; esac
       fi
