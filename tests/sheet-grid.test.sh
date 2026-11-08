@@ -3,6 +3,7 @@
 #   그리드 358행 · 마지막 데이터 358행은 2026-10-16 13:07 의 Y2026B 실물 상태 그대로다
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+export RENE_SHEET_LEDGER_DIR=$T/ledger RENE_SHEET_BACKUP_DIR=$T/ledger-bak DRILL_FLAG=$T/drill.active   # ★ 운영 원장 무접촉 (2026-11-09)
 export RENE_CONFIG_DIRS=$T/none RENE_RAW_ROOTS=$T/noraw THR_TABLE=$T/none.tsv RENE_RUNDB=$T/run.db
 python3 - "$T/run.db" <<'PY'
 import sqlite3, sys
@@ -80,7 +81,7 @@ ok("행 22 개를 늘린다" in out, "미리보기 : '행 22 개를 늘린다' �
 w = WS(grid, 358)
 rc, out = run(w, ["--commit"])
 ok(w.calls[:1] == [("add_rows", 22)] and ("update", "A359:J360") in w.calls, "commit : add_rows 뒤에 A359:J360 범위 쓰기")
-ok(rc == 0 and "어긋남 0건 · 새 행 Run 불일치 0건" in out, "commit : 늘어난 그리드에서 되대조 통과")
+ok(rc == 0 and "되대조 통과" in out, "commit : 늘어난 그리드에서 되대조 통과 (2026-11-09 부터 원장 flush 의 문구)")
 ok([r[0] for r in w.grid[358:360]] == ["4387", "4388"] and w.grid[:358] == grid, "기존 358행 그대로 + 새 행 2")
 w = WS(grid, 400)
 rc, out = run(w, ["--commit"])
