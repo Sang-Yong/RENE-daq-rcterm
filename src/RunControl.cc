@@ -1,5 +1,6 @@
 #include "RunControl.hh"
 #include "OnlConsts.hh"
+#include "RunQuality.hh"
 
 #include <algorithm>
 #include <cctype>
@@ -597,6 +598,14 @@ void RunControl::FinalizeRunInDB(int run)
 {
    if (!fCfg.useDB || fCfg.dryRun) return;
 
+   // 이벤트 0 인 런은 onlbit=0 + 사유 (RunQuality.hh, 2026-11-08 run 4441~4445)
+   std::vector<long long> nev;
+   for (size_t i = 0; i < fMonNames.size(); ++i) nev.push_back((long long)fStats[fMonNames[i]].n);
+   const bool noEvents = runq::AllAdcZero(fMonKinds, nev);
+   if (noEvents)
+      std::cout << "[WARN] run " << run
+                << " ended with 0 events on all ADCs -> onlbit=0" << std::endl;
+
    std::ostringstream sql;
    sql << "UPDATE runcatalog SET ";
    bool first = true;
@@ -611,7 +620,12 @@ void RunControl::FinalizeRunInDB(int run)
    }
    if (HasColumn("onlbit")) {
       if (!first) sql << ",";
-      sql << "onlbit=" << (fCfg.goodRun ? 1 : 0);
+      sql << "onlbit=" << runq::OnlBit(fCfg.goodRun, noEvents);
+      first = false;
+   }
+   if (noEvents && HasColumn("runlog")) {
+      if (!first) sql << ",";
+      sql << "runlog='" << SqlEsc(runq::NoEventsRunlog()) << "'";
       first = false;
    }
    if (first) return;
