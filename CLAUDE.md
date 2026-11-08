@@ -189,6 +189,8 @@ scripts/pdu-power.sh     NETIO PDU(192.168.0.3) 로 보드 전원 채널 1 FADC 
                          ★ 수집 중이면 거부(--force). 자격증명 config/pdu.params (gitignore). --dry-run 은 HTTP 0 회
 scripts/netcheck.sh      바깥 링크가 실제로 얼마를 내는지 잰다. 읽기 전용
                          ★ 대역은 실제로 쓴다. --local-only 는 안 쓴다 (§11.121)
+tools/sheetlog/sheet_ledger.py  시트 등재 로컬 우선 원장. 먼저 로컬에 적고 망이 되면 동기화 (§11.231)
+                         ★ --status 읽기 전용. 첫 설치는 --pull --tab X 씨앗
 scripts/sheetlog-auto.sh 구글시트 런 로그 자동 등재. cron 이 부른다 (§11.126)
                          ★ 완결된 런까지만 쓴다. --status 는 읽기 전용
 scripts/chainwatch.sh    후처리 사슬·계수율 감시. cron 이 5분마다 부른다 (§11.138)
@@ -583,6 +585,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 - **dataflow 이동 ↔ websummary dst-build 경합** — dataflow 1 단계가 런을 /data 로 옮기는 동안 websummary 가 같은 런을 읽어 dst-build 가 "새로 160 / 실패 419" 를 냈다 (11-06 run 4437, §11.229). websummary 가 이동 중인 런을 건너뛰거나 `/Data_ssd` → `/data` 두 자리를 다 찾게 해야 한다
 - ~~**0 사건 런 대응 구멍 4 개**~~ **2026-11-08 해결 (§11.230, 34cbdbf)** -- chainwatch 벽시계 warmup · rcterm 0 사건 런 onlbit=0 + 시트 건너뜀 · 감시자 `no_events`(연속 2 회) · usb-recover 신호 없음 rc 5 + 전원 2 회째 재투입.
 - **0 사건 대응 후속 (11-08 리뷰 참고, 막지 않음, §11.230)** : ④ HV 가 정말 꺼진 채면 6 h 2 회 전원 재투입이 계속됨(하루 8 회, 정책 상한 안) ⑤ 시트 게이트는 nfadc 만 보고 rcterm 은 ADC 합 ⑥ 모니터 소켓이 첫 조회 전에 끊긴 런은 n=0 으로 onlbit=0 될 수 있음(추정, 소켓 재연결 백로그와 연결) ⑦ 새 경로 실물 첫 동작 확인
+- **시트 원장 후속 (11-09 리뷰 참고, 막지 않음, §11.231)** : ① pending 행은 사람이 시트에서 지워도 다시 붙는다 ③ 되대조 정규화가 못 맞추는 USER_ENTERED 값이면 rc 3 무한 반복 ⑤ KHNP sheet_only 가 reactor 래퍼 flock 밖(중복 가능, 추정) ⑥ ELIGIBLE 에 removed 런이 들어가 thr 접두어 비교가 어긋날 수 있음
 - **rcterm.log 회전 없음** — 11-06 현재 948 MB (§11.229)
 - ~~**`usb-recover.sh` 의 진단이 TCB 고장을 못 잡는다.** `FADCDAQ`·`SADCDAQ` 로그만
   훑고(`usb-recover.sh:148,152`), 오류 패턴도 `LIBUSB_ERROR_IO`·`read error` 계열
@@ -744,6 +747,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
   그룹 전체에 SIGINT 라 매크로까지 죽고 **반쪽짜리 Merged 가 남는다.** 완료 판정이
   `[ -s ]` 뿐이라 그 반쪽을 완료로 읽는다(§11.85 의 `empty_merged`). 셸 PID 에만
   `kill -TERM <pid>` 를 보내면 진행 중인 merge 를 끝내고 스스로 빠진다 (§11.109).
+- **★ 시트 등재는 로컬 원장에 먼저 적고 망이 되면 시트와 동기화한다** (§11.231). 망이 없으면 `[SHEET] 보류` 로 종료 0 이고 실패가 아니다. 보려면 `python3 tools/sheetlog/sheet_ledger.py --status`, 원장이 없는 첫 설치는 망이 있을 때 `--pull --tab X` 씨앗 (docs/MANUAL.md §8.2).
 - **★ 시트 등재는 이제 cron 이 한다** (§11.126). `scripts/sheetlog-auto.sh --status`
   로 밀린 런을 본다. 쓸 때마다 메일이 오므로 **메일이 안 오는데 런이 쌓이면**
   후처리가 덜 끝났거나(완결 게이트가 미루는 중) cron 이 죽은 것이다.
@@ -851,6 +855,7 @@ PRD 개수와 영원히 어긋나 런이 그대로 막힌다.
 | 2026-11-05 | 코드 갈래 6 회째 -- chainwatch 가 사람이 세운 감시자도 되살림(`chain_sup_restart_manual`), 리뷰 2 라운드 승인. **정책: 수집은 언제나 돌아야 한다** (세워 둘 땐 chainwatch.hold) | 스킬 daq-incident-playbook / veto-threshold-change / rene-daq-orchestrator 에 hold 규칙, CLAUDE.md §10 | 12:00 예약 정지 뒤 9 h 54 m 공백, 사용자 "이런 일이 생기면 안 된다" -> §11.228 |
 | 2026-11-06 | 코드 갈래 7 회째 -- worktree 2 개(tail-finish 리뷰 2 라운드 · drill-mode 리뷰 3 라운드) 승인, 머지 d30de30. 꼬리 자동 마감(`scripts/tailfinish.sh`) + 드릴 모드 플래그 | CLAUDE.md §2 · §6 · §10 (스킬 절차 변경 없음) | 11-05 드릴이 시트에 가짜 런 2 개·전문가 메일 10 통을 남기고 run 4434 꼬리가 게이트를 막음 -> §11.229 |
 | 2026-11-08 | 코드 갈래 8 회째 -- worktree 1 개(zero-events) 리뷰 1 라운드 승인 + 참고 2 반영, 머지 34cbdbf. 0 사건 런 대응(chainwatch 벽시계 warmup · onlbit=0 · 감시자 no_events · usb-recover 신호 없음 전원 2 회째) | CLAUDE.md §2 · §6 · §10 (스킬 절차 변경 없음) | 11-08 전원 재투입 뒤 4440~4445 가 0 사건으로 6 h 32 m 공백, 시트 5 행 오염 -> §11.230 |
+| 2026-11-09 | 코드 갈래 9 회째 -- worktree 1 개(sheet-ledger) 리뷰 2 라운드 + 오케스트레이터 한 줄 수정(d044c20, dry-run 가드), 머지 4951abf. 시트 등재 로컬 우선 원장. 시험 중 운영 경로 오염 사고 -> 격리 시험 | CLAUDE.md §2 · §6 · §10 · §11.5 (스킬 절차 변경 없음) | 사용자 지침 "시트 등재는 로컬 먼저, 망이 되면 동기화" -> §11.231 |
 
 ## 11.5 구글시트 런 로그 작성 규칙 ★ 사용자 지침 (2026-08-19, 영구)
 
@@ -943,6 +948,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
            부른다. 5개 이상 밀리면 즉시, 아니면 하루 한 번. 쓸 때마다 메일.
            후처리가 완결된(FADC==PRD) 런까지만 쓴다 (§11.126)
            tools/sheetlog/khu_scan.sh      로컬에 없는 런을 경희대에서 실측
+원장       tools/sheetlog/sheet_ledger.py  ★ 2026-11-09 부터 쓰기는 먼저 /Data_ssd/LOG/sheetledger/<탭>.tsv 에 (pending), 망이 되면 flush (§11.231)
 ```
 
 **대상 탭은 이름이 `Y2026B` 이고 gid=0 이다.** 문서에 탭이 10개 있으므로
@@ -971,6 +977,46 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 > 읽히므로 최근 것만 여기 둔다. **§11.100 이하를 가리키는 참조는 그 파일에서 찾는다.**
 
 ### 2026-09-09 (저녁) — 크레이트 전원 재투입 뒤 수집 재개 : run 4340. usbreset 은 두 번이 필요했다
+
+#### 11.231 ★★ 시트 등재 로컬 우선 원장 (sheet_ledger) : 먼저 로컬에 적고, 망이 되면 로컬 기준으로 시트와 동기화 (사용자 지시 11-09 01:5x, 영구, 코드 갈래 9 회째)
+
+정본: `/Data_ssd/LOG/harness/20261109_code-engineer_sheet-ledger.md` · `20261109_code-reviewer_sheet-ledger.md`. 메모리 `sheet-local-first.md`. 수치는 거기서.
+
+**요청 (원문).** "기록 페이지도 갱신해 줘, 그리고 앞으로 모든 시트 등재할때 로컬을 우선으로 먼저 등재해서 우선적으로 저장하고 네트워크가 확인될때 로컬의 정보를 우선으로 등재 기록을 동기화해줘"
+
+**01:44 운영 확인 (오케스트레이터).** 사용자가 d0890e8 push 완료. run 4447 sub 552, FADC·SADC sr 6.7 kHz, USB 오류 0, 감시자 health OK, chainwatch 카운터 0, hold 없음, 밤새 알림 0 (마지막은 16:40 rotate 책임자만), 시트 대기 런 4446 1 개, /Data_ssd 2.8 T · /data 28 T · /scratch 85 T.
+
+**설계.** 공통 모듈 `tools/sheetlog/sheet_ledger.py`. 탭마다 원장 `/Data_ssd/LOG/sheetledger/<탭>.tsv` (상태 pending · sent · foreign · removed · failed).
+- writer 는 원장에 먼저 적고 (그때 '등재됨') 곧바로 flush 를 시도한다. 망이 없으면 `[SHEET] 보류` 로 rc 0.
+- 각 cron 회차가 pending 을 먼저 밀고, netsync 망 복귀 flush 가 전 탭 `--flush`. 망 단절 중 sheetlog-auto 는 `--offline` 으로 로컬 등재.
+- flush : 시트에 없으면 끝에 추가 / 우리 행이 다르면 다른 칸만 로컬 값으로 (보호 열 : Y2026B carry 9 열, 백업 탭 Also at KHU · Storage Location) / 남의 행은 `failed:foreign` 으로 두고 손대지 않음. 쓰기 전 시트 백업, 되대조 뒤 sent.
+- pull 은 시트 사본을 원장에 반영한다 (사람이 시트에서 고친 값이 이긴다, §11.5). 시트에서 사라진 우리 행은 `removed` 로 두고 다시 올리지 않는다 (11-06 · 11-08 삭제 선례 보호).
+- 종료코드 0 · 3 되대조 어긋남 · 4 인증 · 5 망 · 6 기타. 드릴 플래그면 flush 도 건너뜀. `--drop KEY --tab X` 로 pending/failed 행 제거.
+- 탭별: Y2026B (append_runs.py, 키 Run) · back_up_hdd_log (append_backup_rows.py, 키 Run+날짜+시각) · DAQ_runsummary (publish_google.py) · KHNP_daily_power (reactor_power_log.py, 자기 TSV 가 원장, 망 실패는 rc 0).
+
+**코드 (worktree `~/DAQ/work-sheet-ledger`, 머지 4951abf).**
+
+| 라운드 | 커밋 | 무엇 |
+|---|---|---|
+| 1 | 924062a f4ed9bf cdc6e38 b0abf5c d585f26 a4cdc4f efa6e5a d967afe c8f3b1d | 원장 모듈 · 네 탭 연결 · sheetlog-auto/netsync/websummary/backup-sheetlog 래퍼 · 시험 신설. d585f26 은 backup-rebuild [10] 이 docs/backup-disks 를 덮어쓰던 기존 누수 |
+| 2 | dc7bf6b f0b6893 a654c71 9969f71 dfdeef7 747351a | 리뷰 필수 2 + 참고 ② ④ ⑨ : `--fill-labels` 키 보존, `--pull` 씨앗과 `--status` 의 원장 없음 표시, sheetlog-auto 미리보기 실패를 exit 1 로, `--drop`, MANUAL §8.2, backup-sheetlog 시험 누수 |
+| 오케스트레이터 | d044c20 | a654c71 이 `--dry-run` 에서 메일·failstate 를 건드리던 것에 가드 + 시험 [14] |
+
+리뷰 1 라운드 "고치면 승인" (필수 2 : fill-labels 가 같은 키 첫째 행을 둘째 행 값으로 덮음 · 원장이 없을 때 로컬 우선이 조용히 안 됨), 2 라운드 "고치면 승인" (필수 1 : dry-run 이 메일·failstate). d044c20 로 닫음 -- 가드 없이 [14] 2 건 실패를 실측, 가드 있으면 sheetlog-auto 50/50. 1 라운드 커밋 trailer 는 Opus 5.5 로 돼 있음 (기록만).
+
+**시험 (머지 트리, 순서대로).** sheet-ledger 84 · sheetlog-auto 50 · netsync 49 · backup-sheetlog 60 · monitor-publish 13 · websummary 23 · reactor-power-log 17. 리뷰어 2 라운드 실측 14 스위트 전부 통과 (sheet-grid 9 · thr-prefix 28 · append-zero-events 7 · backup-rebuild 66 · autonomy-drill 190 · daq-notify-queue 52 · mailq-send 63 포함). 새 시험을 main 에 얹으면 sheet-ledger 55 · sheetlog-auto 13 실패 (변경을 잡는다).
+
+**배포 02:49.** 운영 `git pull --ff-only` d0890e8 -> 4951abf (:47 reactor cron 끝난 뒤). 운영 params 변경 없음 (`sheet_ledger_dir` 선택).
+씨앗 (시트 읽기만): Y2026B 405 행 -> sent 123 · foreign 282 (§11.5 의 '남의 것 282' 와 일치) · pending 0 / back_up_hdd_log 2275 행 sent / DAQ_runsummary 121 행 sent / KHNP_daily_power 는 로컬 TSV 1354 행이 원장.
+`cd / && env -i` 로 `sheetlog-auto.sh --status` (밀린 런 4446 1 개, 원장 줄) · `netsync.sh --status` (시트 원장 4 줄) · `backup-sheetlog.sh --status` 정상.
+
+**시험 중 사고 (격리로 막음).** 1 라운드에서 세 스위트가 운영 기본 경로 `/Data_ssd/LOG/sheetledger` 에 가짜 원장을 만들었다 지움 (02:11~02:13, 그 전엔 없던 디렉터리, 실제 시트 무접촉). 이후 세 스위트에 `RENE_SHEET_LEDGER_DIR` 격리, sheet-ledger [18] 이 운영 디렉터리 불변을 검사. 기존 누수 둘도 고침 (backup-rebuild [10] · backup-sheetlog 82 행).
+
+**교훈.** ① 새 도구의 기본 경로가 운영 자리면 기존 시험도 그 자리를 오염시킨다 -- 기본 경로를 쓰는 모든 스위트에 격리를 넣고 불변 검사를 둘 것. ② 원장이 없는 첫 설치에서 '로컬 우선' 이 조용히 안 되는 것이 가장 위험했다 -- 씨앗(`--pull`)과 `--status` 의 표시로 드러낸다. ③ 리뷰 지적의 수정이 새 구멍(dry-run 부작용)을 만들 수 있다 -- 2 라운드가 필요했다.
+
+**사용법.** `python3 tools/sheetlog/sheet_ledger.py --status` (읽기 전용) · 첫 설치/헤더 변경 뒤 `--pull --tab X` 씨앗 (망 있을 때 한 번) · 절차 docs/MANUAL.md §8.2.
+
+**남은 것 (리뷰 참고 백로그, 막지 않음).** ① pending 행은 사람이 시트에서 지워도 다시 붙는다 ③ 되대조 정규화가 못 맞추는 USER_ENTERED 값이면 rc 3 무한 반복 ⑤ KHNP sheet_only 가 reactor 래퍼 flock 밖 (netsync 복귀 flush 와 :47 이 겹치면 중복 가능, 추정) ⑥ append_runs ELIGIBLE 에 removed 런 포함 -> thr 접두어 비교 어긋날 수 있음 ⑦ 오프라인 등재의 carry 값은 원장 마지막 행 기준 ⑧ 백업 탭 append 가 range write 로 바뀜 ⑨ 같은 배치 중복 키 둘째는 [WARN] 만. 실제 망 단절 중 오프라인 등재와 복귀 flush 의 실물 첫 동작은 아직 못 봤다.
 
 #### 11.230 ★★ 11-08 전원 재투입 뒤 0 사건 : run 4440~4445 6 h 32 m 공백 → 두 번째 전원 재투입으로 run 4446 재개 · 시트 오염 5 행 · 자율 사슬의 구멍 4 개 (사용자 요청 11-08 15:3x)
 
@@ -5553,7 +5599,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 **돌고 있는 것 (건드리지 말 것)**
 
 ```
-수집       ★★★★★★★★★★★★★★★★★ run 4447 (11-08 16:32 부터, 새 감시자 `--no-events-limit=2` + 새 chainwatch 벽시계 warmup(34cbdbf 배포, §11.230), `_all30_thr100_m2_p7off`, ~6.4 kHz, 24 h 로테이션, 다음 교체 11-09 16:32; run 4446 은 15:51~16:32 정상 마감). 이하 직전 기록 — ★★★★★★★★★★★★★★★★ run 4446 (11-08 15:51 부터, `_all30_thr100_m2_p7off`, ~6.75 kHz, 24 h 로테이션, 다음 교체 11-09 15:51; 11-08 09:19 run 4440 FADC USB 오류 -> 1 회째 PDU 재투입 뒤 4440~4445 가 0 사건으로 6 h 32 m 공백, 2 회째 재투입(`usb-recover.sh --force-power-cycle`)으로 재개, §11.230). 이하 직전 기록 — ★★★★★★★★★★★★★★★ run 4438 (11-06 09:19 부터, `_all30_thr100_m2_p7off`, ~6.7 kHz, 24 h 로테이션; run 4437 은 09:18 케이블 작업 중 FADC USB 이탈 exit 2 -> 감시자 restart 로 47 초 만에 재개, §11.229; 운영 `chain_tailfinish = 1` -- 비정상 종료 런의 꼬리를 chainwatch 5 분 회차가 마감, `scripts/tailfinish.sh --status`; 드릴 중에는 플래그 `/Data_ssd/LOG/drill.active`). 이하 직전 기록 — ★★★★★★★★★★★★★★ run 4433 (11-05 21:54 부터, `_all30_thr100_m2_p7off`, ~6.5 kHz, 24 h 로테이션, 다음 교체 11-06 21:54, §11.228; 12:00 예약 정지 뒤 9 h 54 m 공백은 chainwatch 가 사람이 세운 감시자를 안 되살려서였고 `chain_sup_restart_manual = 1` 로 고침 -- 세워 둘 땐 `touch /Data_ssd/LOG/chainwatch.hold`). 이하 직전 기록 — ★ **11-05 18:2x 배포(§11.228) 뒤에도 대기 상태 -- 재기동 뒤 드릴(docs/AUTONOMY-DRILL.md)을 하고, 감시자 첫 기동 로그의 `autonomy :` 줄과 첫 런의 `DRAM check` 줄을 볼 것.** 이하 직전 기록 — ★★★★★★★★★★★★★ **11-05 12:00 부터 대기 상태** (run 4432 사용자 예약 지시로 마감, exit 0, 6,820.8 Hz, 22 h 53 m, PRD 1373/1373 완결; rcterm.params = `_all30_thr100_m2_p7off`; 다음 런 사용자 결정, §11.227). 이하 직전 기록 — ★★★★★★★★★★★★ run 4432 (11-04 13:06 부터, `_all30_thr100_m2_p7off`, ~6.3 kHz, 24 h 로테이션, 다음 교체 11-05 13:06, 30 kHz 가드 `ratestop-20261103b.sh` 18:00 까지, §11.227; run 4431 24 h 완주 1440/1440 완결, 6,485 Hz). 이하 직전 기록 — ★★★★★★★★★★★ run 4431 (11-03 13:06 부터, `_all30_thr100_m2_p7off` = THR 100x30 중 판 7 ch12·13 만 500000 · MTHRSM 2, 판 7 HV OFF, ~6.0 kHz, 24 h 로테이션, 다음 교체 11-04 13:06, 30 kHz 순간 감시 11-04 18:00 까지, §11.227; run 4430 은 판 7 THR 100 인 채 시작해 onlbit 0). 이하 직전 기록 — **11-03 12:33 부터 대기 상태** (run 4429 사용자 지시로 마감, exit 0, 663 Hz, 59 분, PRD 60/60; rcterm.params = `_all30_thr200_m4`; 다음 런은 사용자 결정, §11.227). 이하 직전 기록 — run 4429 (11-03 11:34 부터, `_all30_thr200_m4` = 30 ch THR 200 · MTHRSM 4, ~666 Hz, 24 h 로테이션, 다음 교체 11-04 11:34, §11.227; run 4423 은 일출 뒤 판 7 빛샘으로 09:24 41.7 kHz 포화 → 10:29 FADC USB 이탈 사망, PDU 재투입 + usbreset 으로 복구, 4428 은 thr100_m2 99.6 kHz 라 1 초 만에 정지; 순간 30 kHz 정지 감시 `ratestop-20261103.sh` 16:00 까지). 이하 직전 기록 — run 4423 (11-02 16:25 부터, 18:37 일몰 뒤 6.8 kHz (−1.5 %), 판 7 몫 2.4 % 로 평탄 — 빛샘 확정, 내일 일출(06:55) 뒤 재상승 감시; `_all30_thr100_m2` = 30 ch THR 100 · MTHRSM 2, ~7.05 kHz, 24 h 로테이션, 다음 교체 11-03 16:25, 판 7 몫 3.8 % 이나 낮 재상승 주의 -- 4419 는 13:27 에 109 kHz, §11.227; 4422 는 4 분 런, THR 150 파일은 미적용). 이하 직전 기록 — run 4421 (11-02 14:42 부터, `_all30_thr200_m2` = 30 ch THR 200 · MTHRSM 2, ~2.9 kHz, 24 h 로테이션, 다음 교체 11-03 14:42, 판 7 짝 ~30 %, §11.227; THR 100→200 · MTHRSM 4→2 는 사용자 지시 "rate 가 기대보다 낮다"). 빛샘 덱은 15:07 에 4417 낮 창 최종(§11.226 15:07 단락, Version 6). 이하 직전 기록 — run 4420 (11-02 13:38 부터, `_all30_thr100_m4` = 30 ch THR 100 · MTHRSM 4, ~962 Hz, 24 h 로테이션, 다음 교체 11-03 13:38:05, §11.227; 4417 `_m6` 은 13:22 마감, 4418 `_m4` 시험 4 분, 4419 `_m2` 는 판 7 빛샘으로 108 kHz 라 15 초 중단 — 4418·4419 시트 제외 여부는 사용자 결정 대기). 이하 직전 기록 — ★★★★★ run 4417 (11-02 00:54 부터, `_all30_thr100_m6`, ~455 Hz, 24 h 로테이션, 다음 교체 11-03 00:54, §11.225; 정전 뒤 PDU 전원 재투입 + usbreset 3 회 + HV 채널 ON 으로 복구, 공백 10 h 05 m). 이하 직전 기록 — ★★★★ **11-01 14:49 부터 대기 상태** (정전 — 비 + 멀티탭 속 달팽이 + 물방울 쇼트(사용자 확인)로 PC·저장소 서버 다운, 11-02 00:02 재부팅. run 4416 은 13 h 20 m 에서 중단, DB 마감·00800 격리 완료. 보드 NOTICE 가 TCB TIMEOUT 으로 두 번 실패 -> 전원 재투입 필요, 감시자 미기동. rcterm.params = `_all30_thr100_m6`, §11.225). 이하 직전 기록 — run 4416 (11-01 01:29 부터, `_all30_thr100_m6` = 30 채널 THR 100 · MTHRSM 6, 뮤온 데이터, ~447 Hz, 24 h 로테이션, 다음 교체 11-02 01:29, rcterm.params 백업 .bak-20261101b, §11.224). 이하 직전 기록 — run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
+수집       ★ 11-09 02:50 : run 4447 밤새 정상(sub 552, 6.7 kHz, 알림 0), 다음 교체 11-09 16:32. 시트 등재는 로컬 원장 우선(§11.231). 이하 직전 기록 — ★★★★★★★★★★★★★★★★★ run 4447 (11-08 16:32 부터, 새 감시자 `--no-events-limit=2` + 새 chainwatch 벽시계 warmup(34cbdbf 배포, §11.230), `_all30_thr100_m2_p7off`, ~6.4 kHz, 24 h 로테이션, 다음 교체 11-09 16:32; run 4446 은 15:51~16:32 정상 마감). 이하 직전 기록 — ★★★★★★★★★★★★★★★★ run 4446 (11-08 15:51 부터, `_all30_thr100_m2_p7off`, ~6.75 kHz, 24 h 로테이션, 다음 교체 11-09 15:51; 11-08 09:19 run 4440 FADC USB 오류 -> 1 회째 PDU 재투입 뒤 4440~4445 가 0 사건으로 6 h 32 m 공백, 2 회째 재투입(`usb-recover.sh --force-power-cycle`)으로 재개, §11.230). 이하 직전 기록 — ★★★★★★★★★★★★★★★ run 4438 (11-06 09:19 부터, `_all30_thr100_m2_p7off`, ~6.7 kHz, 24 h 로테이션; run 4437 은 09:18 케이블 작업 중 FADC USB 이탈 exit 2 -> 감시자 restart 로 47 초 만에 재개, §11.229; 운영 `chain_tailfinish = 1` -- 비정상 종료 런의 꼬리를 chainwatch 5 분 회차가 마감, `scripts/tailfinish.sh --status`; 드릴 중에는 플래그 `/Data_ssd/LOG/drill.active`). 이하 직전 기록 — ★★★★★★★★★★★★★★ run 4433 (11-05 21:54 부터, `_all30_thr100_m2_p7off`, ~6.5 kHz, 24 h 로테이션, 다음 교체 11-06 21:54, §11.228; 12:00 예약 정지 뒤 9 h 54 m 공백은 chainwatch 가 사람이 세운 감시자를 안 되살려서였고 `chain_sup_restart_manual = 1` 로 고침 -- 세워 둘 땐 `touch /Data_ssd/LOG/chainwatch.hold`). 이하 직전 기록 — ★ **11-05 18:2x 배포(§11.228) 뒤에도 대기 상태 -- 재기동 뒤 드릴(docs/AUTONOMY-DRILL.md)을 하고, 감시자 첫 기동 로그의 `autonomy :` 줄과 첫 런의 `DRAM check` 줄을 볼 것.** 이하 직전 기록 — ★★★★★★★★★★★★★ **11-05 12:00 부터 대기 상태** (run 4432 사용자 예약 지시로 마감, exit 0, 6,820.8 Hz, 22 h 53 m, PRD 1373/1373 완결; rcterm.params = `_all30_thr100_m2_p7off`; 다음 런 사용자 결정, §11.227). 이하 직전 기록 — ★★★★★★★★★★★★ run 4432 (11-04 13:06 부터, `_all30_thr100_m2_p7off`, ~6.3 kHz, 24 h 로테이션, 다음 교체 11-05 13:06, 30 kHz 가드 `ratestop-20261103b.sh` 18:00 까지, §11.227; run 4431 24 h 완주 1440/1440 완결, 6,485 Hz). 이하 직전 기록 — ★★★★★★★★★★★ run 4431 (11-03 13:06 부터, `_all30_thr100_m2_p7off` = THR 100x30 중 판 7 ch12·13 만 500000 · MTHRSM 2, 판 7 HV OFF, ~6.0 kHz, 24 h 로테이션, 다음 교체 11-04 13:06, 30 kHz 순간 감시 11-04 18:00 까지, §11.227; run 4430 은 판 7 THR 100 인 채 시작해 onlbit 0). 이하 직전 기록 — **11-03 12:33 부터 대기 상태** (run 4429 사용자 지시로 마감, exit 0, 663 Hz, 59 분, PRD 60/60; rcterm.params = `_all30_thr200_m4`; 다음 런은 사용자 결정, §11.227). 이하 직전 기록 — run 4429 (11-03 11:34 부터, `_all30_thr200_m4` = 30 ch THR 200 · MTHRSM 4, ~666 Hz, 24 h 로테이션, 다음 교체 11-04 11:34, §11.227; run 4423 은 일출 뒤 판 7 빛샘으로 09:24 41.7 kHz 포화 → 10:29 FADC USB 이탈 사망, PDU 재투입 + usbreset 으로 복구, 4428 은 thr100_m2 99.6 kHz 라 1 초 만에 정지; 순간 30 kHz 정지 감시 `ratestop-20261103.sh` 16:00 까지). 이하 직전 기록 — run 4423 (11-02 16:25 부터, 18:37 일몰 뒤 6.8 kHz (−1.5 %), 판 7 몫 2.4 % 로 평탄 — 빛샘 확정, 내일 일출(06:55) 뒤 재상승 감시; `_all30_thr100_m2` = 30 ch THR 100 · MTHRSM 2, ~7.05 kHz, 24 h 로테이션, 다음 교체 11-03 16:25, 판 7 몫 3.8 % 이나 낮 재상승 주의 -- 4419 는 13:27 에 109 kHz, §11.227; 4422 는 4 분 런, THR 150 파일은 미적용). 이하 직전 기록 — run 4421 (11-02 14:42 부터, `_all30_thr200_m2` = 30 ch THR 200 · MTHRSM 2, ~2.9 kHz, 24 h 로테이션, 다음 교체 11-03 14:42, 판 7 짝 ~30 %, §11.227; THR 100→200 · MTHRSM 4→2 는 사용자 지시 "rate 가 기대보다 낮다"). 빛샘 덱은 15:07 에 4417 낮 창 최종(§11.226 15:07 단락, Version 6). 이하 직전 기록 — run 4420 (11-02 13:38 부터, `_all30_thr100_m4` = 30 ch THR 100 · MTHRSM 4, ~962 Hz, 24 h 로테이션, 다음 교체 11-03 13:38:05, §11.227; 4417 `_m6` 은 13:22 마감, 4418 `_m4` 시험 4 분, 4419 `_m2` 는 판 7 빛샘으로 108 kHz 라 15 초 중단 — 4418·4419 시트 제외 여부는 사용자 결정 대기). 이하 직전 기록 — ★★★★★ run 4417 (11-02 00:54 부터, `_all30_thr100_m6`, ~455 Hz, 24 h 로테이션, 다음 교체 11-03 00:54, §11.225; 정전 뒤 PDU 전원 재투입 + usbreset 3 회 + HV 채널 ON 으로 복구, 공백 10 h 05 m). 이하 직전 기록 — ★★★★ **11-01 14:49 부터 대기 상태** (정전 — 비 + 멀티탭 속 달팽이 + 물방울 쇼트(사용자 확인)로 PC·저장소 서버 다운, 11-02 00:02 재부팅. run 4416 은 13 h 20 m 에서 중단, DB 마감·00800 격리 완료. 보드 NOTICE 가 TCB TIMEOUT 으로 두 번 실패 -> 전원 재투입 필요, 감시자 미기동. rcterm.params = `_all30_thr100_m6`, §11.225). 이하 직전 기록 — run 4416 (11-01 01:29 부터, `_all30_thr100_m6` = 30 채널 THR 100 · MTHRSM 6, 뮤온 데이터, ~447 Hz, 24 h 로테이션, 다음 교체 11-02 01:29, rcterm.params 백업 .bak-20261101b, §11.224). 이하 직전 기록 — run 4415 (11-01 01:22 부터, `_all30_thr200_m6` = 30 채널 THR 200 · MTHRSM 6, 뮤온 데이터, ~408 Hz, 24 h 로테이션, 다음 교체 11-02 01:22, §11.224; 보드는 00:38 PDU 전원 재투입 + usbreset 2 회로 복구, 4410~4414 는 5 분 조명 런). 이하 직전 기록 — **11-01 00:31 부터 대기** (rcterm.params = `_all30_thr500_m2` ★ 시험용 — 물리 런 전에 반드시 교체; 보드는 usbreset 뒤 확인 런 TIMEOUT 1 건으로 불합격 상태, 다음 부팅 전 usbreset; run 4409 boot failed onlbit 0, §11.223). 이하 직전 기록.
 수집       ★ **10-31 21:49 부터 대기 상태** (run 4405 사용자 지시로 마감, exit 0, 284.1 Hz, 14 h 14 m; rcterm.params = `_typeB_3`; VETO 현장 점검 중 — 전원 재투입 시 §11.119 절차, 재기동은 사용자 결정, §11.222). 이하 직전 기록 — run 4403 (10-29 07:35 부터, `_typeB_3` = B1+B2 ch18~29 THR 100 · MTHRSM 4, ~284 Hz, 24 h 로테이션, 다음 교체 10-30 07:35, §11.222). 이하 직전 기록 — **10-25 16:10 부터 대기 상태** (run 4402 사용자 지시로 마감, exit 0, 102.1 Hz; rcterm.params = `_all100_noveto5_m12`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — run 4400 (10-22 17:07 부터, `_noveto5_m12` = Type A 8 패널 중 6 패널 AND(MTHRSM 12), ~102 Hz, 24 h 로테이션, 다음 교체 10-23 17:07, §11.222). 이하 직전 기록 — run 4399 는 15:00 예약 정지.
 수집       ★ run 4397 (10-20 13:43 부터, `_all100_noveto5` = Type A 8 패널(ch8·9 제외) THR 100 · MTHRSM 16, ~58 Hz, 24 h 로테이션, 다음 교체 10-21 13:43, §11.222). 이하 직전 기록 — **10-20 13:36 부터 대기 상태** (run 4396 사용자 지시로 마감, exit 0, 56.1 Hz, 9 h 58 m; rcterm.params = `_pidfix_all100`; 다음 런은 사용자 결정, §11.222). 이하 직전 기록 — ★★★★★★★★ run 4394 (10-18 03:37 부터, `_pidfix_all100` = Type A ch0~17 THR 100 · MTHRSM 18, ~57 Hz, 24 h 로테이션, 다음 교체 10-19 03:37, §11.220). 이하 직전 기록 — **10-18 03:33 부터 대기 상태** (run 4393 사용자 지시로 마감, exit 0, 40.1 Hz; rcterm.params = `_typeB_2`; 다음 런은 사용자 결정, 재기동 시 설정 확인, §11.220). 이하 직전 기록 — run 4393 (10-17 12:23 부터, `_typeB_2` = B2 ch24~29, ~40 Hz, 24 h 로테이션, 다음 교체 10-18 12:23, §11.220). 이하 직전 기록 — 10-17 12:18 부터 **대기 상태** (run 4392 사용자 지시로 마감, exit 0; rcterm.params = `_typeB`; 다음 런은 사용자 결정, §11.220). 이하 직전 기록 — run 4392 (10-16 20:16 부터, `_typeB` = B1 ch18~23, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 20:16, §11.220; 4391 은 20:13 마감 exit 0). 이하 직전 기록 — run 4391 (10-16 16:51 부터, `_typeB_2`, B2 ch24~29 만 HV, ~40.7 Hz, 24 h 로테이션, 다음 교체 10-17 16:51, §11.220; run 4390 은 ch18~29 HV 전부 켜진 잘못 받은 런). 이하 직전 기록 — 16:48 대기 상태  (run 4390 을 사용자 지시로 subrun 30 에서 종료, rcterm.params = `_typeB_2`; 다음 런은 사용자 결정 — 재기동 시 설정 확인). 이하 직전 기록 — run 4390 (10-16 16:16 부터, `_typeB_2` = ch24~29 만 THR 100 · MTHRSM 6, ~40 Hz, 24 h 로테이션, 다음 교체 10-17 16:16, §11.220; run 4389 는 HV 미인가라 0 사건 · onlbit 0). 이하 4388 줄은 직전 기록 — run 4388 (10-16 15:32:48 부터, `_mid3_pidfix_typeB` 설정 — Type B 3 장 6 채널 AND (MTHRSM 6, ch18~23 만 THR 100), 24 h 로테이션, ~43 Hz 가 정상, 다음 로테이션 10-17 15:32:48, §11.220). 이하 4387 줄은 직전 기록
 수집       ★ run 4387 (10-16 09:04 부터, `_mid3_pidfix` 설정 2 h 런, 감시자 `--run-length 2 --max-cycles 1`, 11:04 뒤 **대기 상태** — rcterm.params 는 pidfix 그대로, 재기동 시 주의) (§11.219). 이하는 직전 기록. 4386 은 09:03:40 마감
@@ -5569,7 +5615,7 @@ g() { local rp=$1; local base="TCB_${rp}.log"; } ->  base = 'TCB_004241.log'
 재처리     /Data_ssd/LOG/reprocess-old42.sh  A·B 두 갈래   옛 런 21개 (§11.153)
 백업       ★ 10 회차 종료 10-21 11:53 (code=3), 하드 2 장 가득 (RAW-010 ZK206K3B · PRD-008 Z4ZCA14T), 런 1,098 개 남음 — 새 하드 2 장 + storage-backup-mount.sh (ext4 아니면 mkfs 먼저, §11.221). 9 회차는 10-18 22:05 종료.
            옛 하드 26 장 라벨·시트 (§11.187~188, docs/BACKUP-DISKS.md). 시트 자동 등재 cron 37분 (§11.184). 독 이탈 이력 (§11.180)
-감시       chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 (시트 그리드 자동 확장) · mailq-send 5분
+감시       시트 원장 `/Data_ssd/LOG/sheetledger` (`python3 tools/sheetlog/sheet_ledger.py --status`, §11.231) · chainwatch cron 5분 (런 교체 rotate/resumed 메일 포함, §11.172) · sheetlog 매시 07분 (시트 그리드 자동 확장) · mailq-send 5분
            · backup-sheetlog 매시 37분 (외장하드 기록 시트, §11.184)
            · netsync */5 (11-05 신설, 망 단절·복귀 감지와 로컬 큐/시트 밀어주기, §11.228) · 멈춤 파일 /Data_ssd/LOG/chainwatch.hold (있으면 자동 재기동 없음)
 발행       tools/monitor/websummary.sh  ★ 09-10 03:55 부터 cron 매시 27분, publish=1 (§11.176).
@@ -5596,6 +5642,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 ```
 
 **최근에 크게 바뀐 것 열** (자세한 것은 각 절)
+§11.231         ★★ 11-09 시트 등재 로컬 우선 원장 : 탭마다 `/Data_ssd/LOG/sheetledger/<탭>.tsv` 에 먼저 적고(pending) 망이 되면 시트와 동기화(sent), 망 없으면 보류 rc 0. 사용자 지시(영구). 머지 4951abf 배포 02:49, 씨앗 Y2026B 405 행(sent 123 · foreign 282), 리뷰 2 라운드. 시험 중 운영 경로 오염 사고 -> 격리
 §11.230         ★★ (11-08 16:3x 갱신) 코드 갈래 머지·배포 34cbdbf : chainwatch 벽시계 warmup · 0 사건 런 onlbit=0 · 감시자 no_events · usb-recover 신호 없음 전원 2 회째 · run 4447 (새 감시자). 시트 407~411 삭제 완료. 이하 원 기록 — 11-08 : run 4440 FADC USB 오류 -> 자동 전원 재투입 1 회째 뒤 4440~4445 가 0 사건 (6 h 32 m 공백, 메일 8 통), 2 회째 재투입으로 run 4446 재개 (6.75 kHz). 원인 HV 아님. 시트 5 행 오염(삭제 대기). 구멍 4 개(chainwatch warmup · rcterm onlbit · 감시자 반복/오보 · usb-recover) 코드 갈래 진행 중
 §11.229         ★★ 11-06 : 11-05 밤 드릴 7 PASS · 2 FAIL(망이 안 끊김), 09:18 케이블 작업으로 run 4437 FADC USB 이탈 -> 4438 자동 재개(47 초), 오프라인 메일 큐·복귀 flush 첫 실물 동작. 드릴 런 4433~4437 onlbit=0 · 시트 405·406 행 삭제 · run 4434 꼬리 마감. 배포 d30de30 : `scripts/tailfinish.sh`(꼬리 자동 마감, `chain_tailfinish=1`) + 드릴 모드 플래그(메일 책임자만·시트/websummary 건너뜀·DB onlbit=0)
 §11.228         ★★ 11-05 21:5x 12:00 예약 정지 뒤 수집 9 h 54 m 공백(chainwatch 가 사람이 세운 감시자를 안 되살림) -> run 4433 재기동(21:54, 새 감시자 DRAM check 첫 실물 합격) + `chain_sup_restart_manual`(0fe6e4f). 정책 : 수집은 언제나 돌아야 한다, 세워 둘 땐 chainwatch.hold
@@ -5744,7 +5791,7 @@ tools/monitor/websummary.sh --status    # 웹 서머리 게이트·last_run (cro
 | ✅ run 4423 DB 행 채움 · run 4428 시트 제외 (11-03 12:3x) | 4423 stime/etime/nfadc 채움(onlbit 1, 등재 대상), 4428 onlbit 0. 빛샘테스트 런 표시 완료 | §11.227 |
 | **4416·4417·4420·4421 의 빛샘 분류 확인 (사용자)** | 4420·4421 은 오케스트레이터 해석으로 '빛샘테스트 런', 4416·4417 은 뮤온 데이터 런 + 분석 사용 표시만 | §11.227 |
 | **4418·4419·4422 시트 제외 여부 (사용자 결정)** | 셋 다 onlbit 1 이라 sheetlog 자동 등재 대상 | §11.227 |
-| **정전 뒤 남은 것** | ①~~서버 IPv4 복구·정식 마운트~~ ✅ 02:0x 사용자가 해결(서버의 10.0.0.11 이더넷 프로파일 삭제, 정식 마운트 완료) ②~~run 4417 첫 PRD~~ ✅ (PRD 66/69, 02:03) · chainwatch resumed 메일 확인 ③멀티탭 방수·위치 이전(정전 원인 = 비 + 달팽이 + 물방울 쇼트) · UPS · journald persistent 검토 ④GitHub push (자격증명 만료, 커밋 10개 대기) | §11.225 |
+| **정전 뒤 남은 것** | ①~~서버 IPv4 복구·정식 마운트~~ ✅ 02:0x 사용자가 해결(서버의 10.0.0.11 이더넷 프로파일 삭제, 정식 마운트 완료) ②~~run 4417 첫 PRD~~ ✅ (PRD 66/69, 02:03) · chainwatch resumed 메일 확인 ③멀티탭 방수·위치 이전(정전 원인 = 비 + 달팽이 + 물방울 쇼트) · UPS · journald persistent 검토 ④~~GitHub push~~ ✅ (11-09 캐시가 살아 있어 push 됨, 4951abf 까지) | §11.225 |
 | **Type B 판 11 한낮 저하 원인·판 10·14 14:50 계단 (텐트 온도·GECO HV 로그, 사용자)** — 11-04 낮 계수율 확인은 ✅ 두 회차 완료 (아침 0.987 · 낮 0.993, 재상승 없음, 4431 ~6.4 kHz) | 판 11 은 오늘도 한낮 저하 재현 (135 → 48~51 Hz), 판 10 은 미재현, 판 14 −15 %. 4432 14~18 시 회복 시각으로 하루 주기 확인. 판 7 HV 를 다시 켜면 THR 도 되돌릴 것 | §11.227 |
 | **Type B 판 10·11·13·14·6 의 오후 저하 원인 (GECO HV 기록·텐트 온도, 사용자)** | 11-03 13~15 시에 비트율이 15~60 % 낮았다가 14:50~18:00 에 회복(총율 +410 Hz). 오후 직사 이득 저하 / 12:5x 판 7 HV OFF 작업 여파 / 직류광 후보, 전부 추정 | §11.227 |
 | **해 뜬 뒤 태양빛 빛샘 재점검 (사용자 결정)** | 약한 조명 런 4410~4414 는 반응 PMT 없음. 수집은 11-01 01:22 부터 4415 뮤온 런으로 재개됨, rcterm.params = `_all30_thr200_m6`. 재점검 전에 재초기화 뒤 어둠 런 3 분, 빛은 FADC 10 kHz 아래로 | §11.224 |
