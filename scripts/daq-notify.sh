@@ -346,6 +346,8 @@ build_body() {
          rate_low)
             echo "  ★ 보드보다 검출기를 먼저 의심할 것. 2026-09-01 에 계수가 0 이었던"
             echo "     원인은 PMT HV 였고, 보드 진단에 30분을 헛되이 썼다."
+            echo "  ★ FADC·SADC 가 둘 다 0 (n=0 sr=0, daqtime=0) 이고 DRAM·USB 가 멀쩡하면 신호가 없는 것이다 --"
+            echo "     PMT HV 크레이트(GECO, SY4527) 의 채널 출력부터 (CLAUDE.md 11.131 · 11.225 · 2026-11-08 run 4441~4445)"
             echo "  1) HV 를 본다 (rundesc 기준 PMT_A 1680V · PMT_B 1642V)"
             echo "  2) 그 다음 보드 :  DAQ 로그의 LIBUSB 오류, TCB 로그의 DRAM 정렬"
             echo "     'Fail to align DRAM' 이 보이면 usbreset 을 두 번 걸어 볼 것"

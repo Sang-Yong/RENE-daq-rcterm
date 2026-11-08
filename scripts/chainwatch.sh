@@ -223,6 +223,29 @@ st_set() {                                  # 키=값 을 갈아끼운다
    mv -f "$tmp" "$STATE" 2>/dev/null || rm -f "$tmp"
 }
 
+# ---- warmup (벽시계 + daqtime) ---------------------------------------
+#  ★ warmup 은 daqtime 만으로 재지 않는다 (2026-11-08 run 4441~4445 : 사건이 0 인 런은 DAQ 의
+#    경과시간(QUERYTRGINFO m2)도 0 에 머물러 daqtime=0 -> 5 시간 동안 영원히 warmup 으로 읽혀
+#    rate_low 도 런 교체 판정도 돌지 않았다). 런 번호를 처음 본 시각을 상태 파일에 남기고
+#    (run_first_seen=<run> <epoch>), daqtime 과 벽시계 중 하나라도 WARMUP 을 넘으면 판정한다.
+RUN_SEEN=""
+note_run_seen() {
+   local cur pr pt now
+   cur=$(hb_field run); case "$cur" in ''|*[!0-9]*) RUN_SEEN=""; return 0 ;; esac
+   now=$(date +%s)
+   read -r pr pt <<< "$(st_get run_first_seen)"
+   if [ "${pr:-}" = "$cur" ] && [ -n "${pt:-}" ]; then RUN_SEEN=$pt; return 0; fi
+   RUN_SEEN=$now
+   [ "$DRY" -eq 1 ] || st_set run_first_seen "$cur $now"
+   return 0
+}
+warm_enough() {
+   local d; d=$(hb_field daqtime)
+   awk -v d="${d:-0}" -v w="$WARMUP" 'BEGIN{ exit !(d+0 >= w+0) }' && return 0
+   [ -n "$RUN_SEEN" ] || return 1
+   [ $(( $(date +%s) - RUN_SEEN )) -ge "$WARMUP" ]
+}
+
 # ---- 운용 중인가 -----------------------------------------------------
 #  tmux 세션도 없고 감시자도 없으면 사람이 일부러 세운 것이다. 조용히 있는다.
 gate_on() {
@@ -250,21 +273,23 @@ check_chain() {
 }
 
 check_rate() {
-   local age phase daqtime minrate
+   local age phase minrate
    in_standby && { RATE_MSG=""; return 0; }          # 감시자 대기 중 -- 수집 중이 아니다
    age=$(hb_age) || { RATE_MSG=""; return 0; }          # heartbeat 없음 -> 판정 안 함
    [ "$age" -le "$HB_MAX_AGE" ] || { RATE_MSG=""; return 0; }   # 수집 중이 아니다
    phase=$(hb_field phase)
    [ "$phase" = "running" ] || { RATE_MSG=""; return 0; }
-   daqtime=$(hb_field daqtime)
-   #  런이 막 떴을 때는 계수율이 0 으로 나온다. warmup 동안은 보지 않는다.
-   awk -v d="${daqtime:-0}" -v w="$WARMUP" 'BEGIN{ exit !(d+0 >= w+0) }' \
-      || { RATE_MSG=""; return 0; }
+   #  런이 막 떴을 때는 계수율이 0 으로 나온다. warmup 동안은 보지 않는다 (daqtime 또는 벽시계).
+   warm_enough || { RATE_MSG=""; return 0; }
    #  ★ 합·평균이 아니라 ADC 별 최솟값. 한 보드만 죽으면 합은 멀쩡해 보인다.
    minrate=$(hb_rates | awk 'NR==1||$1<m{m=$1} END{ if (NR) printf "%.1f", m; }')
    [ -n "${minrate:-}" ] || { RATE_MSG=""; return 0; }
    if awk -v r="$minrate" -v m="$MINRATE" 'BEGIN{ exit !(r+0 < m+0) }'; then
       RATE_MSG="ADC 별 계수율($(hb_rate_kind)) 최솟값 ${minrate} Hz (문턱 ${MINRATE} Hz), run $(hb_field run) sub $(hb_field subrun)"
+      #  모든 ADC 가 0 이면 신호가 없는 것이다 -- 보드보다 HV 를 먼저 (CLAUDE.md 11.131 · 11.225)
+      if hb_rates | awk '$1+0 != 0 { nz=1 } END{ exit (NR > 0 && !nz) ? 0 : 1 }'; then
+         RATE_MSG="$RATE_MSG ; ★ FADC·SADC 모두 0 Hz (daqtime=$(hb_field daqtime) totev=$(hb_field totev)) -- 신호 없음, PMT HV(GECO) 부터 볼 것 (CLAUDE.md 11.131)"
+      fi
       return 1
    fi
    RATE_MSG=""; return 0
@@ -272,14 +297,13 @@ check_rate() {
 
 #  ★ 계수율 높음 (2026-09-14 사용자 지시). 합이 아니라 ADC 별 최댓값. 30,000 이상 = 이상(알람+메일), 20,000 이상 = 경고 문구
 check_rate_high() {
-   local age phase daqtime maxrate run sub
+   local age phase maxrate run sub
    HIGH_MSG=""; WARN_MSG=""
    in_standby && return 0
    age=$(hb_age) || return 0
    [ "$age" -le "$HB_MAX_AGE" ] || return 0
    phase=$(hb_field phase); [ "$phase" = "running" ] || return 0
-   daqtime=$(hb_field daqtime)
-   awk -v d="${daqtime:-0}" -v w="$WARMUP" 'BEGIN{ exit !(d+0 >= w+0) }' || return 0
+   warm_enough || return 0
    maxrate=$(hb_rates | awk 'NR==1||$1>m{m=$1} END{ if (NR) printf "%.0f", m; }')
    [ -n "${maxrate:-}" ] || return 0
    run=$(hb_field run); sub=$(hb_field subrun)
@@ -316,8 +340,8 @@ check_runchange() {
    cur=$(hb_field run)
    case "$cur" in ''|*[!0-9]*) return 0 ;; esac         # 숫자가 아니면 보지 않는다
    daqtime=$(hb_field daqtime)
-   #  새 런이 warmup 을 넘겨 계수율이 잡힌 뒤에 판정한다. 그 전에는 다음 주기로.
-   awk -v d="${daqtime:-0}" -v w="$WARMUP" 'BEGIN{ exit !(d+0 >= w+0) }' || return 0
+   #  새 런이 warmup 을 넘겨 계수율이 잡힌 뒤에 판정한다 (daqtime 또는 벽시계). 그 전에는 다음 주기로.
+   warm_enough || return 0
    prev=$(st_get last_run)
    if [ -z "$prev" ]; then
       [ "$DRY" -eq 1 ] || st_set last_run "$cur"
@@ -342,7 +366,9 @@ check_runchange() {
       c_st=$(to_epoch "$(db_q "select stime from runcatalog where runnum=$cur")")
       if [ -z "$c_st" ]; then
          local hbt; hbt=$(hb_field time)
-         c_st=$(awk -v t="${hbt:-0}" -v d="${daqtime:-0}" 'BEGIN{ if (t>0) printf "%d", t-d; }')
+         c_st=$(awk -v t="${hbt:-0}" -v d="${daqtime:-0}" 'BEGIN{ if (t>0 && d+0 > 0) printf "%d", t-d; }')
+         #  daqtime 이 0 이면 (사건 0 인 런) 시작 시각을 알 수 없다 -- 처음 본 시각으로 갈음한다
+         [ -z "$c_st" ] && c_st=$RUN_SEEN
       fi
       c_desc=$(db_q "select rundesc from runcatalog where runnum=$cur")
       #  ★ 사이에 다른 런 번호가 있으면(부팅 실패로 warmup 도 못 넘긴 런) 문제가 있었던 것이다.
@@ -740,6 +766,7 @@ main() {
 
    check_disk
 
+   note_run_seen
    check_rate;  local r=$?
    handle rate_low "$r" "$RATE_MSG"
 
@@ -771,7 +798,7 @@ if [ "$STATUS" -eq 1 ]; then
    echo "  연속 카운터 : chain_down=${cd:-0} rate_low=${rl:-0} rate_high=${rh:-0} supervisor_down=$(st_get fail_supervisor_down | grep . || echo 0)  (문턱 $CONSEC, rate_high·supervisor_down 은 1)"
    echo "  계수율 기준 : $(hb_rate_kind)"
    w=$(st_get warn_rate_high); [ -n "$w" ] && echo "  ★ 경고     : $w"
-   echo "  런 추적     : last_run=$(st_get last_run)  (교체 간격 문턱 ${ROTATE_GAP}s · DB $DBFILE)"
+   echo "  런 추적     : last_run=$(st_get last_run)  처음 본 런/시각=$(st_get run_first_seen | awk '{ if ($2 != "") printf "%s %s", $1, strftime("%m-%d %H:%M:%S", $2); else print "-" }')  (교체 간격 문턱 ${ROTATE_GAP}s · DB $DBFILE · warmup 은 daqtime 또는 벽시계)"
    for d in "$SSD_ROOT:$SSD_MIN_GB:$SSD_ALARM_GB" "$MID_ROOT:$MID_MIN_GB:$MID_ALARM_GB"; do
       IFS=: read -r dr dm da <<< "$d"
       [ -d "$dr" ] && echo "  디스크      : $dr 여유 $(df_avail_gb "$dr") GB  (메일 < $dm · 알람 < $da)"
