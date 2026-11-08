@@ -1,0 +1,76 @@
+2026-08-26 00:56:04 [INFO] CupDAQManager::RC_TCB: TCB controller now starting [run=4310]
+2026-08-26 00:56:04 [INFO] CupDAQManager::TF_MsgServer: [TCB] message server on port 7809
+2026-08-26 00:56:04 [INFO] CupDAQManager::TF_MsgServer: [TCB] message server start
+2026-08-26 00:56:04 [INFO] CupDAQManager::RC_TCB: SADCDAQ connected
+2026-08-26 00:56:04 [INFO] CupDAQManager::RC_TCB: FADCDAQ connected
+2026-08-26 00:56:04 [INFO] CupDAQManager::RC_TCB: all DAQs were booted
+2026-08-26 00:56:04 [INFO] CupDAQManager::TF_MsgServer: [TCB]: new client connection, socket fd: 9, ip: 127.0.0.1, port: 43336
+2026-08-26 00:56:04 [INFO] CupDAQManager::TF_MsgServer: [TCB]: adding to list of sockets at 0
+2026-08-26 00:56:04 [INFO] CupDAQManager::TF_MsgServer: [TCB] CONFIGRUN command received
+2026-08-26 00:56:04 [INFO] CupGeneralTCB::Open: open with TCB
+2026-08-26 00:56:04 [INFO] nkusb_open_device: super speed device opened
+2026-08-26 00:56:04 [INFO] nkusb_open_device: bus = 2, address =   3, serial id =  0
+2026-08-26 00:56:04 [INFO] CupGeneralTCB::Open: tcb opened
+2026-08-26 00:56:04 [INFO] CupGeneralTCB::Config: module configuration start
+2026-08-26 00:56:05 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:06 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:06 [INFO] CupGeneralTCB::CheckLinkStatus: TCB[mid= 0] found @ 10
+2026-08-26 00:56:06 [INFO] CupGeneralTCB::CheckLinkStatus: TCB[mid= 0] found @ 13
+2026-08-26 00:56:06 [INFO] CupGeneralTCB::CheckLinkStatus: TCB[mid= 0] found @ 14
+2026-08-26 00:56:06 [INFO] CupGeneralTCB::CheckLinkStatus: TCB[mid= 0] found @ 15
+2026-08-26 00:56:06 [INFO] CupGeneralTCB::CheckLinkStatus: TCB[mid= 0] found @ 26
+2026-08-26 00:56:07 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+ ++   TCB config: SID(0) TRGON(1) CW(100) DLY(0) PTRIG(1000) 
+                  MTHRF(1)  PSCF(1)  DTF(0)  TSWF(1 1 0 0) 
+                  MTHRSM(2) PSCSM(1) DTSM(0) TSWSM(1 1 0 0) 
+                  MTHRSL(1) PSCSL(1) DTSL(0) TSWSL(0 0 0 0) 
+                  MTHRI(1)  PSCI(1)  DTI(0)  TSWI(0 0 0 0)
+2026-08-26 00:56:08 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:09 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:10 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:11 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:12 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:13 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:14 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:15 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:16 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:17 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:18 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:19 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:20 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:21 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:22 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:23 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:24 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:25 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:26 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:27 [ERROR] USB3TCBWrite: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:28 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:29 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:30 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:31 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:32 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:33 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:34 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:35 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:36 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:37 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:38 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:39 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:40 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:41 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:42 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:43 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:44 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:45 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:46 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+2026-08-26 00:56:47 [ERROR] USB3TCBRead: write error:LIBUSB_ERROR_TIMEOUT [sid=0]
+ ++ TCB register: SID(0) TRGON(538976288) CW(0) DLY(538976288) PTRIG(538976288) 
+                  MTHRF(538976288)  PSCF(538976288)  DTF(0)  TSWF(0 0 0 0) 
+                  MTHRSM(538976288) PSCSM(538976288) DTSM(0) TSWSM(0 0 0 0) 
+                  MTHRSL(538976288) PSCSL(538976288) DTSL(0) TSWSL(0 0 0 0) 
+                  MTHRI(538976288)  PSCI(538976288)  DTI(0)  TSWI(0 0 0 0) 
+2026-08-26 00:56:47 [INFO] CupGeneralTCB::ConfigTCB: TCB[sid=0] was configured
+2026-08-26 00:56:47 [ERROR] CupGeneralTCB::ConfigFADC: FADCT[mid= 3] is enabled but not linked
+2026-08-26 00:56:47 [ERROR] CupGeneralTCB::ConfigSADC: SADCT[mid=65] is enabled but not linked
+2026-08-26 00:56:48 [INFO] CupDAQManager::TF_MsgServer: [TCB]: host disconnected, socket fd: 9, ip: 127.0.0.1, port: 43336

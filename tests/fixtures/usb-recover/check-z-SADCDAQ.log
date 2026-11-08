@@ -1,0 +1,268 @@
+2026-11-08 09:32:18 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ now starting
+2026-11-08 09:32:18 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] message server on port 7815
+2026-11-08 09:32:18 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] message server start
+2026-11-08 09:32:19 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ]: new client connection, socket fd: 7, ip: 127.0.0.1, port: 37730
+2026-11-08 09:32:19 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ]: adding to list of sockets at 0
+2026-11-08 09:32:20 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ]: new client connection, socket fd: 8, ip: 127.0.0.1, port: 37746
+2026-11-08 09:32:20 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ]: adding to list of sockets at 1
+2026-11-08 09:32:26 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] CONFIGRUN command received
+
+============ CupDAQManager Prepare Report ==============
+                            type: SADC
+                   number of ADC: 1
+           minimum buffer count : 16
+                  record length : 0
+           number of data point : 0
+  minimum data size for reading : 256
+         preset number of event : 0
+            preset daq time [s] : 0
+=======================================================
+
+2026-11-08 09:32:26 [INFO] CupDAQManager::PrepareDAQ: prepared to take data from SADC
+2026-11-08 09:32:26 [INFO] nkusb_open_device: super speed device opened
+2026-11-08 09:32:26 [INFO] nkusb_open_device: bus = 2, address =  28, serial id =  1
+2026-11-08 09:32:26 [INFO] CupSADCT::Open: SADCT [sid=1]: opened
+2026-11-08 09:32:26 [INFO] CupDAQManager::OpenDAQ: all ADCs are opened
+2026-11-08 09:32:26 [INFO] CupDAQManager::TF_RunManager: run manager started
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] STARTRUN command received
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_SortEvent: sorting data started
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring started
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_ShrinkToFit: shrink buffer memory to fit started
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_BuildEvent: event building started
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_WriteEvent: writing output data started as SADC mode
+2026-11-08 09:32:29 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs started
+2026-11-08 09:32:29 [INFO] CupDAQManager::OpenNewOutputFile: /Data_ssd/RAW/999999 created
+2026-11-08 09:32:29 [INFO] CupDAQManager::OpenNewOutputFile: /Data_ssd/RAW/999999 already exist
+2026-11-08 09:32:29 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/SADC_999999.root.00000 opened
+2026-11-08 09:32:30 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:31 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:32 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:33 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:34 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:35 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:36 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:37 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:38 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:39 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:40 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:41 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:42 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:43 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:44 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:45 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:46 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:47 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:48 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:49 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:50 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:51 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:52 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:53 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:54 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:55 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:56 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:57 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:58 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:32:59 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:01 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:02 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:03 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:04 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:05 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:06 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:07 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:08 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:09 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:10 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:11 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:12 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:13 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:14 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:15 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:16 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:17 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:18 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:19 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:20 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:21 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:22 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:23 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:24 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:25 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:26 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:27 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:28 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:29 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:29 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] output file split command received
+2026-11-08 09:33:30 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:30 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/SADC_999999.root.00001 opened
+2026-11-08 09:33:31 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:32 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:33 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:34 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:35 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:36 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:37 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:38 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:39 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:40 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:41 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:42 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:43 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:44 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:45 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:46 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:47 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:48 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:49 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:50 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:51 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:52 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:53 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:54 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:55 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:56 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:57 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:58 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:33:59 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:00 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:01 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:02 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:03 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:04 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:05 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:06 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:07 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:08 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:09 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:10 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:11 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:12 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:13 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:14 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:15 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:16 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:17 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:18 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:19 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:20 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:21 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:22 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:23 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:24 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:25 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:26 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:27 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:28 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:29 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:30 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] output file split command received
+2026-11-08 09:34:30 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/SADC_999999.root.00002 opened
+2026-11-08 09:34:30 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:31 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:32 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:33 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:34 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:35 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:36 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:37 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:38 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:39 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:40 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:41 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:42 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:43 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:44 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:45 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:46 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:47 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:48 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:49 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:50 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:51 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:52 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:53 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:54 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:55 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:56 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:57 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:58 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:34:59 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:00 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:01 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:02 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:03 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:04 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:05 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:06 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:07 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:08 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:09 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:10 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:11 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:12 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:13 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:14 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:15 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:16 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:17 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:18 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:19 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:20 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:21 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:22 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:23 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:24 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:25 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:26 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:27 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:28 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:29 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:30 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] output file split command received
+2026-11-08 09:35:30 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/SADC_999999.root.00003 opened
+2026-11-08 09:35:30 [STAT]    0 events triggered [       0 |        0 /   0.0(  0.0) Hz / 0.0 s]
+2026-11-08 09:35:30 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] ENDRUN command received
+2026-11-08 09:35:30 [INFO] CupDAQManager::TF_RunManager: daq will be ended by ENDRUN command
+2026-11-08 09:35:30 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring ended
+2026-11-08 09:35:31 [INFO] CupDAQManager::TF_ShrinkToFit: shrink buffer memory to fit ended
+2026-11-08 09:35:40 [INFO] CupDAQManager::ReadData_GLT: waiting for reading remaining data in ADCs
+2026-11-08 09:35:41 [INFO] CupDAQManager::ReadData_GLT: no more data in ADCs [bcount=0]
+2026-11-08 09:35:41 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs ended
+2026-11-08 09:35:41 [INFO] CupDAQManager::TF_SortEvent: sorting data ended
+2026-11-08 09:35:41 [INFO] CupDAQManager::TF_BuildEvent: event building ended
+2026-11-08 09:35:41 [INFO] CupDAQManager::TF_WriteEvent: output data /Data_ssd/RAW/999999/SADC_999999.root.00003 closed
+2026-11-08 09:35:41 [INFO] CupDAQManager::TF_WriteEvent: writing output data ended
+2026-11-08 09:35:42 [INFO] CupDAQManager::TF_RunManager: all processes ended
+
+====================================================
+     process      cpu time[s]     real time[s]
+----------------------------------------------------
+    ReadData             25.6            191.8
+   SortEvent             25.6            191.8
+  BuildEvent             25.6            191.8
+  WriteEvent             25.6            191.7
+----------------------------------------------------
+       total            102.4            767.0
+====================================================
+
+
+************************* DAQ Summary *************************
+                   Run number : 999999
+                   Start Time : 2026-11-08 09:32:29
+                     End Time : 2026-11-08 09:35:30
+
+                    Live time : 0.0 [s]
+      Total number of trigger : 0
+                 Trigger rate : 0.00 [Hz]
+        Total number of event : 0
+  Software Trigger efficiency : 100.00 [%]
+
+           Received data size : 0.000 GBytes (0.000 MB/sec)
+            Written data size : 0.000 GBytes (0.000 MB/sec)
+***************************************************************
+
+2026-11-08 09:35:42 [INFO] CupDAQManager::TF_RunManager: run manger ended
+2026-11-08 09:35:42 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] EXIT command received
+2026-11-08 09:35:42 [INFO] CupDAQManager::TF_MsgServer: [SADCDAQ] message server ended
+2026-11-08 09:35:42 [INFO] CupSADCT::Open: SADCT [sid=1]: closed
+2026-11-08 09:35:42 [INFO] CupDAQManager::CloseDAQ: all ADCs are closed
+2026-11-08 09:35:42 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ ended
