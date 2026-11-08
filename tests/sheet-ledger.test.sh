@@ -246,6 +246,48 @@ check "--flush : rc 0 · 시트 2 행 = 로컬"      '[ "$rc" = 0 ] && diff <(ta
 out=$(python3 "$LED" --status --tab KHNP_daily_power 2>&1)
 check "--status : 0"                          'printf "%s" "$out" | grep -q "시트와 맞추지 않은 것 0"' "$out"
 
+echo "[16b] back_up_hdd_log --fill-labels : 같은 키 두 행 (#2) -- 각 행은 자기 라벨만 받고 다른 칸은 그대로 (리뷰 필수 1)"
+D=$T/dup; mkdir -p "$D"
+H=$(head -1 "$FX/sheet_backup_hdd_log_20261021.tsv")
+mkrow() { python3 - "$@" <<'PY2'
+import sys
+no, files, serial = sys.argv[1:4]
+v = [""] * 25
+v[0], v[1], v[2], v[3], v[4], v[5] = no, "2026-09-12", "04:10:42", "002456", "part", files
+v[13], v[14], v[16] = "/backup_hdd", "uuid-" + serial, serial
+print("\t".join(v))
+PY2
+}
+{ echo "$H"; mkrow 1 111 ZK206014; mkrow 2 222 Z4ZBXGAA; } > "$D/sheet.tsv"
+cp "$D/sheet.tsv" "$D/sheet.orig"
+python3 - "$D/disks.tsv" "$D/disks.md" <<'PY2'
+import sys, os
+sys.path.insert(0, os.environ["LEDDIR"])
+import backup_labels as bl
+for s in ("ZK206014", "Z4ZBXGAA"):
+    bl.ensure_label(s, "uuid-" + s, "ST2000", "all", "2026-09-12 04:10:42", path=sys.argv[1], md_path=sys.argv[2])
+PY2
+: > "$D/index"
+(cd "$DIR" && unset RENE_SHEET_LEDGER_DIR && python3 "$AB" --index "$D/index" --sheet-tsv "$D/sheet.tsv" --fill-labels --commit \
+    --backup-dir "$D/bk" --disks-tsv "$D/disks.tsv" --disks-md "$D/disks.md") > "$D/out" 2>&1; rc=$?
+L1=$(awk -F'\t' 'NR==2' "$D/sheet.tsv"); L2=$(awk -F'\t' 'NR==3' "$D/sheet.tsv")
+check "rc 0"                                     '[ "$rc" = 0 ]' "$(cat "$D/out")"
+check "첫 행 No 1 · Files 111 · ZK206014 그대로" 'printf "%s" "$L1" | awk -F"\t" "{exit !(\$1==1 && \$6==111 && \$17==\"ZK206014\")}"' "$L1"
+check "둘째 행 No 2 · Files 222 · Z4ZBXGAA 그대로" 'printf "%s" "$L2" | awk -F"\t" "{exit !(\$1==2 && \$6==222 && \$17==\"Z4ZBXGAA\")}"' "$L2"
+check "두 행 모두 자기 라벨 (서로 다르고 빈칸 없음)" 'a=$(printf "%s" "$L1" | cut -f13); b=$(printf "%s" "$L2" | cut -f13); [ -n "$a" ] && [ -n "$b" ] && [ "$a" != "$b" ]' "$L1 / $L2"
+check "라벨 칸 말고는 원래 시트와 같다"         'diff <(cut -f1-12,14- "$D/sheet.orig") <(cut -f1-12,14- "$D/sheet.tsv") >/dev/null'
+
+echo "[16c] 같은 배치 안 새 레코드 둘이 같은 키면 둘째는 [WARN] (조용히 버리지 않는다)"
+out=$(T=$T python3 - <<'PY2'
+import sys, os
+sys.path.insert(0, os.environ["LEDDIR"])
+import sheet_ledger as sl
+lg = sl.Ledger("DAQ_runsummary", ["Run", "x"], ["Run"], "sid", 0, dir=os.environ["T"] + "/dupled")
+print(lg.append([["4450", "a"], ["4450", "b"]]))
+PY2
+)
+check "[WARN] 줄 · 새로 1 그대로 1"              'printf "%s" "$out" | grep -q "^\[WARN\].*4450" && printf "%s" "$out" | grep -q "(1, 0, 1)"' "$out"
+
 echo "[17] cron 환경 (env -i, cd /) : --status · --flush"
 out=$(cd / && env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$T" RENE_SHEET_LEDGER_DIR=$T/led RENE_SHEET_FAKE_DIR=$T/fake \
       DRILL_FLAG=$T/none REACTOR_LOG_DIR=$T/reactor python3 "$LED" --status 2>&1); rc=$?

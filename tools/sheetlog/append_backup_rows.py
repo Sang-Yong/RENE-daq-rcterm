@@ -278,7 +278,7 @@ def main():
             lab = labels.get(v[16].strip()) or labels.get(v[14].strip())
             if lab:
                 nv = list(v); nv[12] = lab
-                fills.append((nv, lab, v[16].strip() or v[14].strip()))
+                fills.append(((r["key"], nv), lab, v[16].strip() or v[14].strip()))   # ★ 원장 키 그대로 (같은 키 둘째 행 'k#2' 보존)
         print(f"[FILL] 빈 Disk Label {len(fills)} 칸을 채운다" + (f" : " + ", ".join(sorted({f'{s}->{l}' for _, l, s in fills})) if fills else ""))
 
     if a.commit:                                      # 정본의 런 수·파일·GB·마지막 시각을 기록 합으로 채운다 (시리얼을 아는 하드만)

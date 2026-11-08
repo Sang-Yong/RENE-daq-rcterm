@@ -399,16 +399,29 @@ class Ledger:
         return [(r["key"], r["vals"], r["state"]) for r in self.rows]
 
     # -- 쓰기 (로컬만) --
-    def append(self, rows, mode="insert"):
-        """rows : 헤더 순서 값 목록들.  돌려줌 (새로, 바뀜, 그대로)."""
+    def append(self, rows, mode="insert", log=print):
+        """rows : 헤더 순서 값 목록들, 또는 (원장 키, 값 목록) 짝.  돌려줌 (새로, 바뀜, 그대로).
+        ★ 짝으로 주면 그 키의 행만 고친다 -- 같은 키 둘째 행('k#2')을 고칠 때 값에서 키를 다시 계산하면
+          '#N' 이 빠져 첫째 행을 덮는다 (2026-11-09 리뷰 필수 1 : --fill-labels 가 No·Files·Serial 을 덮었다)."""
         idx = self.key_idx(); have = self.by_key(); new = upd = same = 0
-        for vals in rows:
-            vals = ["" if v is None else str(v) for v in vals]
+        batch = set()
+        for item in rows:
+            given = None
+            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str):
+                given, item = item
+            vals = ["" if v is None else str(v) for v in item]
             vals += [""] * (len(self.header) - len(vals))
-            k = self.key_of(vals, idx)
+            k = given if given is not None else self.key_of(vals, idx)
             if not k.replace("\x1f", "").strip():
                 continue
+            if given is None and k in batch:
+                log(f"[WARN] {self.tab} : 같은 배치 안에 같은 키 {k.replace(chr(31), ' | ')!r} 가 또 있다 -- 둘째는 싣지 않는다")
+                same += 1; continue
+            batch.add(k)
             r = have.get(k)
+            if given is not None and r is None:
+                log(f"[WARN] {self.tab} : 고칠 키 {k.replace(chr(31), ' | ')!r} 가 원장에 없다 -- 건너뛴다")
+                same += 1; continue
             if r is None:
                 r = {"vals": vals, "key": k, "added": now_s(), "state": "pending", "sent": "", "range": "", "note": ""}
                 self.rows.append(r); have[k] = r; new += 1
@@ -640,7 +653,7 @@ def commit_rows(ledger, rows, ws=None, grid=None, cfg=None, mode="insert", offli
                 pull(ledger, grid, cfg, log)
             except Exception as e:      # noqa: BLE001
                 log(f"[WARN] {ledger.tab} : 시트 거울 갱신 실패 ({e}) -- 원장 그대로 쓴다")
-        new, upd, same = ledger.append(rows, mode)
+        new, upd, same = ledger.append(rows, mode, log=log)
         try:
             ledger.save()
         except OSError as e:
