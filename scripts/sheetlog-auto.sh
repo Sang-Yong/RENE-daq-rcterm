@@ -131,11 +131,27 @@ now=$(date +%s)
 elapsed_h=$(( (now - last_ts) / 3600 ))
 
 # ---- 밀린 런을 센다 (읽기 전용) --------------------------------------
-preview=$(cd "$DIR" && timeout 600 python3 "$TOOL" "${TOOLARGS[@]}" 2>&1 | grep -v FutureWarning | grep -v 'warnings.warn')
-rc=$?
-if [ $rc -ne 0 ] && ! printf '%s' "$preview" | grep -q '추가 대상'; then
-   log "[FAIL] 미리보기 실패 (rc=$rc)"
+#  ★ 종료코드는 python 의 것을 본다. 예전에는 '$(… | grep -v …); rc=$?' 라 grep 의 0 을 받아, 원장이 없고 망도 없을 때
+#    append_runs 의 '[FAIL] 원장이 비어 있고…' (rc 5) 가 '밀린 런 없음' 으로 기록됐다 (2026-11-09 리뷰 필수 2c)
+PO=$(mktemp /tmp/sheetlog-preview.XXXXXX)
+(cd "$DIR" && timeout 600 python3 "$TOOL" "${TOOLARGS[@]}") > "$PO" 2>&1; rc=$?
+preview=$(grep -v FutureWarning "$PO" | grep -v 'warnings.warn'); rm -f "$PO"
+if { [ $rc -ne 0 ] && ! printf '%s' "$preview" | grep -q '추가 대상'; } || printf '%s\n' "$preview" | grep -qE '^\[(FAIL|FATAL)\]'; then
+   why=$(printf '%s\n' "$preview" | grep -E '^\[(FAIL|FATAL)\]' | head -1)
+   [ -n "$why" ] || why=$(printf '%s\n' "$preview" | grep -v '^[[:space:]]*$' | tail -1)
+   if [ $STATUS -eq 1 ]; then
+      echo "★ 미리보기 실패 (rc=$rc) : $why"
+      [ -r "$LEDGER_TOOL" ] && echo "원장            : $(cd "$DIR" && python3 "$LEDGER_TOOL" --status --tab Y2026B 2>/dev/null | sed -n '2p' | sed 's/^ *//')"
+      exit 1
+   fi
+   log "[FAIL] 미리보기 실패 (rc=$rc) : $why"
    printf '%s\n' "$preview" | tail -5 >> "$LOG"
+   #  같은 사유는 한 번만 알린다 (원장이 없는 채 망이 끊기면 매시 같은 실패다)
+   if [ $NONOTIFY -eq 0 ] && [ -x "$NOTIFY" ] && sheet_fail_once "preview $why"; then
+      FD=$(mktemp /tmp/sheetlog-preview.XXXXXX); printf '%s\n' "$preview" > "$FD"
+      "$NOTIFY" --params "$PARAMS" sheetlog --msg "시트 런 로그 미리보기 실패 (rc=$rc) -- 등재하지 못했다 : $why. 원장이 없으면 망이 있을 때 sheet_ledger.py --pull --tab Y2026B 로 씨앗을 만든다. 로그 : $LOG" --detail-file "$FD" >/dev/null 2>&1
+      rm -f "$FD"
+   fi
    exit 1
 fi
 

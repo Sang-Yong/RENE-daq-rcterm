@@ -35,6 +35,10 @@ if "--commit" in sys.argv:
         print("gspread.exceptions.APIError: " + r)
         sys.exit(1)
 else:
+    if os.environ.get("FAKE_PREVIEW") == "noledger":     # 실물 append_runs.main_ledger 의 print 형식 그대로
+        print("[SHEET] 시트를 못 읽는다 (rc 5) -- 원장(/x/Y2026B.tsv)으로 정한다")
+        print("[FAIL] 원장이 비어 있고 시트도 못 읽었다 -- 첫 등재는 망이 있을 때 한 번 해야 한다 (/x/Y2026B.tsv)")
+        sys.exit(5)
     if os.environ.get("FAKE_ZERO"):
         print("건너뜀(0 사건) 5 런 : 4441 4442 4443 4444 4445")   # 실물 append_runs.py 의 print 형식
     print("추가 대상 : 1 런 (4432 ~ 4432)")
@@ -155,6 +159,17 @@ check "--dry-run 은 flush 하지 않는다" '[ ! -s "$T/ledger.calls" ]'
 out=$(bash "$SUT" --status 2>&1)
 check "--status 에 원장 줄"       'printf "%s" "$out" | grep -q "원장            : Y2026B           pending 2"'
 check "--status 는 flush 하지 않는다" '! grep -q -- "--flush" "$T/ledger.calls"'
+
+echo "[13] 미리보기가 [FAIL] rc 5 (원장 없음 + 망 없음) -> '밀린 런 없음' 이 아니라 exit 1 · 메일 한 번 (리뷰 필수 2c)"
+rm -f "$T/failstate"; : > "$T/log"; n0=$(nmail)
+FAKE_PREVIEW=noledger bash "$SUT" --force >/dev/null 2>&1; rc=$?
+check "exit 1"                    '[ "$rc" = 1 ]'
+check "로그 [FAIL] 미리보기 · '밀린 런 없음' 없음" 'grep -q "\[FAIL\] 미리보기 실패 (rc=5) : \[FAIL\] 원장이 비어" "$T/log" && ! grep -q "밀린 런 없음" "$T/log"'
+check "메일 +1 · 씨앗 안내"       '[ "$(nmail)" = $((n0+1)) ] && tail -1 "$T/notify.calls" | grep -q -- "--pull --tab Y2026B"'
+FAKE_PREVIEW=noledger bash "$SUT" --force >/dev/null 2>&1
+check "같은 사유 -> 메일 생략"    '[ "$(nmail)" = $((n0+1)) ]'
+out=$(FAKE_PREVIEW=noledger bash "$SUT" --status 2>&1); rc=$?
+check "--status : ★ 미리보기 실패 · 메일 없음" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "★ 미리보기 실패 (rc=5)" && [ "$(nmail)" = $((n0+1)) ]'
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]
