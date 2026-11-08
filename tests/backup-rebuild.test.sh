@@ -181,7 +181,7 @@ chk "행 수 13 (빈 시트 + 옛 백업)" "$(($(wc -l < "$T/empty.tsv")-1))" "1
 chk "  손 열(KHU) 이 백업에서 살아났다" "$(col "$T/empty.tsv" $(rowof "$T/empty.tsv" 002443 U-A) 22)" "yes (RAW 21286)"
 echo "[10] 다시 붙이기(append_backup_rows.py) 가 재작성된 표 위에 그대로 붙는다 (마지막 시각 = 최대 시각)"
 printf '002461\tU-K\t2026-09-13 13:00:00\t10\t1000000000\tFADC_002461.root.00000\tSADC_002461.root.00009\tpart\t/backup_hdd\tST2000DM008-2FR102\tZK206014\t1953514584\n' >> "$T/index"
-out=$(python3 "$DIR/tools/sheetlog/append_backup_rows.py" --index "$T/index" --sheet-tsv "$T/sheet.tsv" --commit 2>&1)
+out=$(python3 "$DIR/tools/sheetlog/append_backup_rows.py" --index "$T/index" --sheet-tsv "$T/sheet.tsv" --disks-tsv "$T/disks.tsv" --disks-md "$T/disks.md" --commit 2>&1)   # ★ 라벨 정본은 임시 파일 (실제 docs/ 무접촉, 2026-11-09)
 printf '%s' "$out" | grep -q '새 행 1' && ok "새 행 1" || bad "append 결과" "$out"
 chk "  No 14 로 이어진다" "$(tail -1 "$T/sheet.tsv" | cut -f1,4)" "$(printf '14\t002461')"
 
