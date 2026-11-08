@@ -16,13 +16,19 @@
     일일 행(type=day) : 날짜가 바뀐 뒤 첫 성공 때 지난 날짜의 시간별 행을 평균해 한 줄 (출력 % · MW 는 산술평균, status 는 '운전 N/M h').
 
 종료 코드 : 0 정상 · 2 KHNP 읽기 실패(아무것도 안 씀) · 3 로컬 TSV 는 썼으나 시트 실패 · 4 로컬 TSV 실패
-정본은 로컬 TSV (/Data_ssd/LOG/reactor-power/reactor_power.tsv) 다. 시트는 그 사본이며, 실패한 시간은 다음 성공 때 --sheet-catchup 로 메운다.
+정본은 로컬 TSV (/Data_ssd/LOG/reactor-power/reactor_power.tsv) 다. 시트는 그 사본이며, 실패한 시간은 다음 성공 때 메운다.
+★ 2026-11-09 (로컬 우선 등재, tools/sheetlog/sheet_ledger.py) : 이 TSV 가 이 탭의 원장이다. 시트가 '망 없음' 으로
+  실패하면 종료 0 + '[SHEET] 보류' (로컬 등재는 됐으므로 실패가 아니다). 인증·시트 오류는 예전처럼 3.
+  마지막으로 시트와 맞춘 행은 <log-dir>/reactor_power.sheet_synced 에 남기고, sheet_ledger.py --status/--flush 가 이것을 쓴다.
+    reactor_power_log.py --sheet-only   KHNP 를 읽지 않고 로컬 TSV 의 빠진 행만 시트로 (sheet_ledger.py --flush 가 부른다)
 """
 import argparse, csv, datetime as dt, glob, io, json, os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import expected_ibd as ei   # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "sheetlog"))
+import sheet_ledger as sl   # noqa: E402  망 오류 분류 · 시험용 대역 (RENE_SHEET_FAKE_NET)
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
 GID = 748730312
@@ -131,6 +137,7 @@ def sheet_sync(sheet, tsv_rows, log):
     keys = {(h[0], h[1]) for h in have if len(h) >= 2}
     missing = [r for r in tsv_rows if (r[0], r[1]) not in keys]       # 일일 행은 datetime 이 앞 날짜라 (datetime, type) 짝으로 가른다
     if not missing: log("시트 : 붙일 것 없음"); return 0
+    last_exc = None
     for attempt in range(3):
         try:
             sheet.append(missing, header=not sheet.has_header())
@@ -140,8 +147,102 @@ def sheet_sync(sheet, tsv_rows, log):
             log(f"[WARN] 시트 되읽기 불일치 : {back[-1][:2] if back else None} != {missing[-1][:2]}")
             return -1
         except Exception as e:
-            log(f"[WARN] 시트 쓰기 실패 ({attempt + 1}/3) : {e}"); time.sleep(5)
+            last_exc = e
+            log(f"[WARN] 시트 쓰기 실패 ({attempt + 1}/3) : {e}")
+            if sl.classify(e) == sl.RC_NET:
+                return -2                      # 망이 없다 -- 세 번 기다려 봐야 소용없다 (보류)
+            time.sleep(5)
     return -1
+
+
+SYNCED = "reactor_power.sheet_synced"
+
+
+def mark_synced(log_dir, tsv_rows):
+    """시트와 맞춘 마지막 로컬 행을 적는다 (status 의 pending 셈). 실패해도 넘어간다."""
+    if not tsv_rows:
+        return
+    try:
+        with open(os.path.join(log_dir, SYNCED + ".tmp"), "w", encoding="utf-8") as f:
+            f.write(f"rows={len(tsv_rows)}\nlast={tsv_rows[-1][0]}\t{tsv_rows[-1][1]}\nat={dt.datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        os.replace(os.path.join(log_dir, SYNCED + ".tmp"), os.path.join(log_dir, SYNCED))
+    except OSError:
+        pass
+
+
+def open_sheet(sheet_tsv=None):
+    if os.environ.get("RENE_SHEET_FAKE_NET") == "down":
+        raise ConnectionError("fake: network down (RENE_SHEET_FAKE_NET=down)")
+    if sheet_tsv: return SheetTsv(sheet_tsv)
+    if os.environ.get("RENE_SHEET_FAKE_DIR"): return SheetTsv(os.path.join(os.environ["RENE_SHEET_FAKE_DIR"], "KHNP_daily_power.tsv"))
+    creds = find_creds()
+    if not creds: raise sl.AuthMissing("서비스 계정 json 없음")
+    return SheetGoogle(creds)
+
+
+def sync_and_report(tsv, log_dir, sheet_tsv, log):
+    """로컬 TSV -> 시트. 돌려줌 0 정상 · 0 (보류, 망) · 3 시트 오류."""
+    rows = read_tsv(tsv)
+    try:
+        sheet = open_sheet(sheet_tsv)
+        n = sheet_sync(sheet, rows, log)
+    except Exception as e:
+        rc = sl.rc_of(e)
+        if rc == sl.RC_NET:
+            log(f"[SHEET] 보류 -- 망 없음 : {e}. 로컬 TSV 가 정본이고 망이 돌아오면 빠진 행을 메운다"); return 0
+        log(f"[FAIL] 시트 : {e}"); return 3
+    if n == -2:
+        log("[SHEET] 보류 -- 망 없음. 로컬 TSV 가 정본이고 망이 돌아오면 빠진 행을 메운다"); return 0
+    if n >= 0:
+        mark_synced(log_dir, rows); return 0
+    return 3
+
+
+def sheet_only(commit=True, log=None, log_dir=None):
+    """sheet_ledger.py --flush 가 부른다 : KHNP 를 읽지 않고 로컬 TSV 의 빠진 행만 시트로."""
+    log = log or print
+    d = log_dir or os.environ.get("REACTOR_LOG_DIR", DEFAULT_LOG_DIR)
+    tsv = os.path.join(d, "reactor_power.tsv")
+    if not os.path.isfile(tsv):
+        log(f"[SKIP] KHNP_daily_power : 로컬 TSV 없음 ({tsv})"); return 0
+    p = pending_count(d)
+    if not commit:
+        log(f"[DRY] KHNP_daily_power : 시트와 맞추지 않은 로컬 행 {p if p is not None else '?'} -- 시트에 붙지 않는다"); return 0
+    if p == 0:
+        log("[OK] KHNP_daily_power : pending 0"); return 0
+    if sl.drill_active():
+        log("[SKIP] KHNP_daily_power : 드릴 중 -- 시트에 밀지 않는다"); return 0
+    rc = sync_and_report(tsv, d, None, lambda m: log("KHNP_daily_power " + m))
+    if rc == 0 and pending_count(d):
+        return sl.RC_NET
+    return rc
+
+
+def pending_count(log_dir):
+    """마지막으로 맞춘 행 뒤의 로컬 행 수. 표식이 없으면 None (한 번도 맞춘 적 없음)."""
+    rows = read_tsv(os.path.join(log_dir, "reactor_power.tsv"))
+    try:
+        kv = dict(l.rstrip("\n").split("=", 1) for l in open(os.path.join(log_dir, SYNCED), encoding="utf-8") if "=" in l)
+    except OSError:
+        return None if rows else 0
+    last = kv.get("last", "").split("\t")
+    for i in range(len(rows) - 1, -1, -1):
+        if rows[i][:2] == last[:2]:
+            return len(rows) - 1 - i
+    return len(rows)
+
+
+def sheet_status(log_dir=None):
+    d = log_dir or os.environ.get("REACTOR_LOG_DIR", DEFAULT_LOG_DIR)
+    rows = read_tsv(os.path.join(d, "reactor_power.tsv"))
+    p = pending_count(d)
+    at = ""
+    try:
+        at = [l.split("=", 1)[1].strip() for l in open(os.path.join(d, SYNCED), encoding="utf-8") if l.startswith("at=")][0]
+    except (OSError, IndexError):
+        pass
+    return (f"{'KHNP_daily_power':16s} 로컬 TSV {len(rows)} 행 · 시트와 맞추지 않은 것 {p if p is not None else '? (맞춘 기록 없음)'}"
+            + (f"  (마지막 맞춤 {at})" if at else "") + f"  [{d}]")
 
 
 def main():
@@ -150,7 +251,12 @@ def main():
     ap.add_argument("--daily", action="store_true", help="지난 날짜의 일일 행을 만든다 (없을 때만)")
     ap.add_argument("--fixture"); ap.add_argument("--sheet-tsv"); ap.add_argument("--log-dir", default=os.environ.get("REACTOR_LOG_DIR", DEFAULT_LOG_DIR))
     ap.add_argument("--now", help="시험용 시각 'YYYY-MM-DD HH:MM' 또는 YYYY-MM-DDTHH:MM"); ap.add_argument("--no-sheet", action="store_true")
+    ap.add_argument("--sheet-only", action="store_true", help="KHNP 를 읽지 않고 로컬 TSV 의 빠진 행만 시트로 (망 복귀 때)")
     a = ap.parse_args()
+    if a.sheet_only:
+        if a.sheet_tsv or os.environ.get("RENE_SHEET_FAKE_DIR") or os.environ.get("RENE_SHEET_FAKE_NET") or find_creds():
+            return sync_and_report(os.path.join(a.log_dir, "reactor_power.tsv"), a.log_dir, a.sheet_tsv, print) if os.path.isfile(os.path.join(a.log_dir, "reactor_power.tsv")) else 0
+        print("[FAIL] 서비스 계정 json 없음"); return 3
     tsv = os.path.join(a.log_dir, "reactor_power.tsv")
     now = dt.datetime.strptime(a.now.replace("T", " "), "%Y-%m-%d %H:%M") if a.now else dt.datetime.now()   # 'T' 도 받는다 (셸 인자에 공백을 못 넣을 때)
     def log(m): print(f"[{dt.datetime.now().strftime('%F %T')}] {m}", flush=True)
@@ -159,6 +265,7 @@ def main():
         rows = read_tsv(tsv)
         print(f"로컬 TSV : {tsv}  ({len(rows)} 행)")
         for r in rows[-5:]: print("  ", r[0], r[1], "th_MW", r[20], "exp_ibd", r[23], "|", " ".join(f"U{i+1}:{r[2+3*i]}/{r[3+3*i]}%" for i in range(6)))
+        print("시트 원장 : " + sheet_status(a.log_dir))
         return 0
 
     # ---- 읽기 ----
@@ -190,17 +297,12 @@ def main():
     log(f"로컬 TSV : {len(new_rows)} 행 ({tsv})")
     if a.no_sheet: return 0
 
-    # ---- 시트 ----
-    try:
-        if a.sheet_tsv: sheet = SheetTsv(a.sheet_tsv)
-        else:
-            creds = find_creds()
-            if not creds: log("[FAIL] 서비스 계정 json 없음"); return 3
-            sheet = SheetGoogle(creds)
-        n = sheet_sync(sheet, read_tsv(tsv), log)
-    except Exception as e:
-        log(f"[FAIL] 시트 : {e}"); return 3
-    return 0 if n >= 0 else 3
+    # ---- 시트 (로컬 TSV 가 원장이다. 망이 없으면 보류 = 종료 0) ----
+    if sl.drill_active():
+        log("[SKIP] 시트 : 드릴 중 -- 로컬 TSV 만 썼다"); return 0
+    if not a.sheet_tsv and not os.environ.get("RENE_SHEET_FAKE_DIR") and not os.environ.get("RENE_SHEET_FAKE_NET") and not find_creds():
+        log("[FAIL] 서비스 계정 json 없음"); return 3
+    return sync_and_report(tsv, a.log_dir, a.sheet_tsv, log)
 
 
 if __name__ == "__main__":
