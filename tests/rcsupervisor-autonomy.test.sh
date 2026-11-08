@@ -32,6 +32,9 @@ trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$ROOT"' EXIT
 #    REAL_TCB=<파일>     TCB 로그를 실물 사본으로 (tests/fixtures/supervisor-logs)
 #    REAL_FADC=<파일>    FADCDAQ 로그를 실물 사본으로
 #    NOHB=1              heartbeat 도 로그도 쓰지 않고 곧바로 EXIT (실물 rcterm 의 Init 단계 exit 1)
+#    ZERO=1              사건 0 (totev=0 · n=0 · daqtime=0) -- 2026-11-08 run 4441~4445 의 heartbeat 그대로
+#    ZERO_FOR=<s>        처음 s 초 동안만 사건 0, 그 뒤 정상
+#    FREEZE_AFTER=<s>    s 초 뒤 사건 수가 굳는다 (사건이 있던 런의 stall)
 cat > "$ROOT/fake_rcterm.sh" <<'FAKE'
 #!/usr/bin/env bash
 HB=""; RUN=0; DRY=0
@@ -49,7 +52,7 @@ if [ "$DRY" = 1 ]; then
    exit "$(cat "$D/dryrun_rc" 2>/dev/null || echo 0)"
 fi
 echo "$RUN" >> "$D/launches"
-EXIT=""; LIFE=0; ALIGNED=8; FAIL=0; USB=0; SR=100; CLOSE_TIMEOUT=0; REAL_TCB=""; REAL_FADC=""
+EXIT=""; LIFE=0; ALIGNED=8; FAIL=0; USB=0; SR=100; CLOSE_TIMEOUT=0; REAL_TCB=""; REAL_FADC=""; ZERO=0; ZERO_FOR=0; FREEZE_AFTER=0
 [ -r "$D/plan/$RUN" ] && . "$D/plan/$RUN"
 [ "${NOHB:-0}" = 1 ] && exit "${EXIT:-1}"
 R6=$(printf '%06d' "$RUN")
@@ -63,7 +66,28 @@ echo "SADCDAQ run $RUN" > "$L/SADCDAQ_$R6.log"
 [ -n "$REAL_FADC" ] && cp "$REAL_FADC" "$L/FADCDAQ_$R6.log"
 N=0; T0=$(date +%s)
 hb() {
-   N=$((N+100))
+   local z=$ZERO
+   [ "$ZERO_FOR" -gt 0 ] && [ $(( $(date +%s) - T0 )) -lt "$ZERO_FOR" ] && z=1
+   if [ "$z" = 1 ]; then
+      cat > "$HB.tmp" <<H
+time=$(date +%s)
+pid=$$
+phase=$1
+run=$RUN
+subrun=0
+state=Running
+statebit=3
+error=0
+status=8
+daqtime=0
+totev=0
+ndaq=2
+daq0=FADCDAQ n=0 sr=0 ar=0
+daq1=SADCDAQ n=0 sr=0 ar=0
+H
+      mv -f "$HB.tmp" "$HB"; return
+   fi
+   if [ "$FREEZE_AFTER" -eq 0 ] || [ $(( $(date +%s) - T0 )) -lt "$FREEZE_AFTER" ]; then N=$((N+100)); fi
    cat > "$HB.tmp" <<H
 time=$(date +%s)
 pid=$$
@@ -116,7 +140,7 @@ start() {
    : > "$D/notify.log"; : > "$D/sup.log"; : > "$D/hb"
    "$SUP" --rcterm "$ROOT/fake_rcterm.sh" --no-db --run 100 \
       --heartbeat "$D/hb" --log "$D/sup.log" --bindir "$D/bin" \
-      --no-socket-check --no-stall-check \
+      --no-socket-check ${STALLOPT:---no-stall-check} \
       --check-period 2 --boot-grace 2 --stale-limit 30 --grace 5 \
       --settle 0 --backoff 0 --margin 0 \
       --rate-poll 1 --rate-cooldown 2 --standby-retry-min 0.05 \
@@ -362,8 +386,67 @@ waitfor 15 'grep -q "DRAM not aligned" "$D/sup.log"'
 chk "옛 자리 TCB 로그로 DRAM 판정" 'grep -q "DRAM check run=100 : is aligned 7 / 8.*s16/daqlog/TCB_000100.log" "$D/sup.log"'
 stop_sup
 
+echo "== [18] 사건 0 런 2 개 -> no_events + recover --no-events (전원까지는 usb-recover 몫) -> 성공하면 재개 (2026-11-08)"
+STALLOPT="--stall-grace 3" start s18 --run-length 1 --max-consec-fail 5
+for r in 100 101; do echo "ZERO=1" > "$D/plan/$r"; done
+echo 0 > "$D/recover_rc"
+waitfor 40 '[ "$(nlaunch)" -ge 3 ]'
+chk "두 번째 사건 0 런에서 no_events" 'grep -q "2 runs in a row never saw an event (totev stuck at 0); no_events" "$D/sup.log"'
+chk "no_events 알림 1 회" '[ "$(grep -c "^no_events" "$D/notify.log")" = 1 ]'
+chk "recover 1 회, 인자에 --no-events" '[ "$(ncalls)" = 1 ] && grep -q -- "--no-events" "$D/recover.calls"'
+chk "5 런을 태우지 않고 run 102 로 재개" 'grep -qx 102 "$D/launches" && [ "$(nlaunch)" = 3 ]'
+chk "fatal 없음" '! grep -q "^fatal" "$D/notify.log"'
+stop_sup
+
+echo "== [18b] recover 도 못 풀면 standby(hardware) -> 대기 중 recover 도 --no-events -> 확인 런이 또 0 이면 곧바로 대기, recovered 없음"
+STALLOPT="--stall-grace 3" start s18b --run-length 1 --max-consec-fail 5
+for r in 100 101 102 103; do echo "ZERO=1" > "$D/plan/$r"; done
+echo 2 > "$D/recover_rc"
+waitfor 40 'grep -q "STANDBY (hardware)" "$D/sup.log"'
+chk "standby(hardware)" 'grep -q "still no events; entering standby (hardware)" "$D/sup.log"'
+chk "recover 가 recovery_failed 를 알렸으니 fatal 생략" '! grep -q "^fatal" "$D/notify.log"'
+waitfor 5 '[ -s "$D/hb.sup" ]'
+chk "hb.sup standby=hardware" 'grep -q "^standby=hardware$" "$D/hb.sup"'
+waitfor 15 '[ "$(ncalls)" -ge 2 ]'
+chk "대기 중 recover 도 --no-events" '[ "$(grep -c -- "--no-events" "$D/recover.calls")" -ge 2 ]'
+echo 1 > "$D/recover_rc"            # not-usb -> 확인 런 1 개
+waitfor 30 'grep -qx 102 "$D/launches"'
+waitfor 30 '[ "$(grep -c "STANDBY (hardware)" "$D/sup.log")" -ge 2 ]'
+chk "확인 런 102 도 사건 0 -> 곧바로 다시 대기 (런 1 개)" '[ "$(grep -c "STANDBY (hardware)" "$D/sup.log")" -ge 2 ] && [ "$(nlaunch)" = 3 ]'
+chk "그 확인 런 실패에 recover 를 또 부르지 않았다" 'grep -q "recover not repeated" "$D/sup.log"'
+chk "★ 사건 0 확인 런에는 recovered 를 보내지 않는다" '! grep -q "^recovered" "$D/notify.log"'
+chk "no_events 는 한 연쇄에 1 회" '[ "$(grep -c "^no_events" "$D/notify.log")" = 1 ]'
+stop_sup
+chk "SIGTERM -> exit 0" '[ "$RC" = 0 ]'
+
+echo "== [19] 대기 -> 확인 런에 사건이 들어온 뒤에야 recovered (부팅·DRAM 만으로는 아니다)"
+STALLOPT="--stall-grace 3" start s19 --run-length 1 --no-events-limit 1
+echo "ZERO=1" > "$D/plan/100"
+echo "ZERO_FOR=3" > "$D/plan/101"
+echo 2 > "$D/recover_rc"
+waitfor 30 'grep -q "STANDBY (hardware)" "$D/sup.log"'
+chk "--no-events-limit 1 : 첫 사건 0 런에서 no_events" 'grep -q "1 runs in a row never saw an event" "$D/sup.log" && [ "$(nlaunch)" = 1 ]'
+echo 1 > "$D/recover_rc"
+waitfor 30 'grep -q "^recovered" "$D/notify.log"'
+chk "확인 런 101 에서 recovered" 'grep -q "^recovered" "$D/notify.log" && grep -qx 101 "$D/launches"'
+chk "recovered 는 totev>0 이 된 뒤 (DRAM 점검보다 늦게)" '[ "$(grep -n "DRAM check run=101" "$D/sup.log" | cut -d: -f1)" -lt "$(grep -n "notify: recovered" "$D/sup.log" | cut -d: -f1)" ]'
+chk "본문 : 사건이 들어온다" 'grep "^recovered" "$D/notify.log" | grep -q "사건이 들어온다"'
+stop_sup
+
+echo "== [20] 사건이 있던 런의 stall 은 nosignal 이 아니다 (기존 restart 경로)"
+STALLOPT="--stall-grace 3" start s20 --run-length 1 --max-consec-fail 9
+#  사건이 들어오다가 멈춘 런 : 정상 heartbeat 를 몇 번 쓴 뒤 같은 totev 로 굳힌다
+echo "FREEZE_AFTER=2" > "$D/plan/100"
+waitfor 30 'grep -q "UNHEALTHY : no new events" "$D/sup.log"'
+chk "stall 은 잡힌다" 'grep -q "UNHEALTHY : no new events" "$D/sup.log"'
+chk "nosignal 로 가지 않는다" '! grep -q "nosignal" "$D/sup.log"'
+waitfor 20 'grep -q "^restart" "$D/notify.log"'
+chk "restart 알림" 'grep -q "^restart" "$D/notify.log"'
+stop_sup
+
 echo "== [17] --help 에 새 옵션"
 chk "--help 에 --max-rate · SIGUSR1 · --standby-retry-min" '"$SUP" --help | grep -q -- "--max-rate" && "$SUP" --help | grep -q SIGUSR1 && "$SUP" --help | grep -q -- "--standby-retry-min"'
+chk "--help 에 --no-events-limit" '"$SUP" --help | grep -q -- "--no-events-limit"'
 
 echo
 echo "결과 : 통과 $PASS / 실패 $FAIL"

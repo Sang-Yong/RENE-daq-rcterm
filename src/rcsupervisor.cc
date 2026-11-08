@@ -104,6 +104,7 @@ struct Sup {
    double rateCooldownSec = 600.0;     // 마감 뒤 재기동까지 쉬는 시간 [초]
    int    rateStopLimit   = 3;         // 창 안에서 이만큼 마감하면 standby
    double rateWindowSec   = 7200.0;    // 위의 창 [초]
+   int    noEventsLimit   = 2;         // 사건이 한 번도 없던 런(totev 0) 이 연속 이만큼이면 no_events + recover --no-events (전원 재투입까지), 0 = 끔
    std::string daqLogDir    = "/Data_ssd/LOG";             // TCB/FADCDAQ/SADCDAQ_<run>.log
    std::string daqLogDirOld = "/scratch/DAQ_LOG/RAW_log";  // logrotate 가 옮긴 곳
 };
@@ -319,10 +320,11 @@ static void Notify(const Sup& c, const char* event,
 //  자동 USB 복구를 부르고 그 판정을 그대로 돌려준다.
 //   0 복구됨 / 1 USB 문제 아님 / 2 복구 실패 / 3 안전조건 미달 / 그 외 실행 실패
 //  ★ 이쪽은 백그라운드로 돌리지 않는다. 결과를 보고 다음 행동을 정해야 한다.
-static int RunRecover(const Sup& c)
+//  extra : 복구 스크립트에 덧붙일 인자 (사건 0 런 연속이면 " --no-events" -- 전원 재투입까지 허용)
+static int RunRecover(const Sup& c, const std::string& extra = "")
 {
    if (c.recoverCmd.empty()) return -1;
-   std::string cmd = c.recoverCmd;
+   std::string cmd = c.recoverCmd + extra;
    if (!c.notifyParams.empty()) cmd += " --params " + ShQuote(c.notifyParams);
    Log("recover: " + cmd);
    if (c.dryRun) return -1;
@@ -467,6 +469,7 @@ struct HealthState {
    unsigned long long lastTot = 0;
    bool   haveTot   = false;
    time_t lastAdvance = 0;
+   bool   sawEvents = false;   // 이 런에서 totev 가 한 번이라도 0 을 넘었나 (2026-11-08 run 4441~4445)
 };
 
 // true = 정상, false = 이상(reason 에 이상 사유)
@@ -555,6 +558,7 @@ static bool CheckHealth(const Sup& c, time_t launchTime,
    if (c.stallCheck) {
       const unsigned long long tot =
          strtoull(HBGet(hb, "totev", "0").c_str(), 0, 10);
+      if (tot > 0) hs.sawEvents = true;
       if (!hs.haveTot) {
          hs.haveTot     = true;
          hs.lastTot     = tot;
@@ -591,7 +595,7 @@ static const char* SBName(int k)
 //  3 = 재개 (recover 1 : 확인 런. recover 를 막 불렀으므로 그 런이 실패해도 또 부르지 않는다)
 //  what 에는 무엇으로 재개했는지가 담긴다 (확인 런이 통과한 뒤의 recovered 본문)
 static int Standby(const Sup& c, int kind, const std::string& run, int runProbe,
-                   std::string& whatOut)
+                   std::string& whatOut, const std::string& recoverExtra = "")
 {
    const double retrySec = c.standbyRetryMin * 60.0;
    const time_t since = time(0);
@@ -619,7 +623,7 @@ static int Standby(const Sup& c, int kind, const std::string& run, int runProbe,
          if (ConfigDryRunOK(c, runProbe, rc)) how = 1;
          what = "rcterm --dry-run returned " + std::to_string(rc);
       } else if (kind == SB_HARDWARE && c.autoRecover && !c.recoverCmd.empty()) {
-         const int rrc = RunRecover(c);
+         const int rrc = RunRecover(c, recoverExtra);
          what = "recover returned " + std::to_string(rrc);
          if (rrc == 0) how = 2;
          else if (rrc == 1) { how = 3; what += " (not usb : one probe run)"; }
@@ -705,6 +709,8 @@ static void Usage(const char* p)
 "   --rate-cooldown SEC    rest after a rate stop before relaunch       (600)\n"
 "   --rate-stop-limit N    rate stops within the window -> standby        (3)\n"
 "   --rate-window SEC      the window                                  (7200)\n"
+"   --no-events-limit N    runs in a row that never saw an event (totev 0)\n"
+"                          -> no_events + recover --no-events, 0 = off   (2)\n"
 "   --daq-logdir DIR       DAQ logs  TCB_<run6>.log ...       (/Data_ssd/LOG)\n"
 "   --daq-logdir-old DIR   rotated DAQ logs        (/scratch/DAQ_LOG/RAW_log)\n"
 "\n"
@@ -814,6 +820,7 @@ int main(int argc, char** argv)
       else if (o == "--dram-lines")          { VAL c.dramLines = atoi(v.c_str()); }
       else if (o == "--rate-poll")           { VAL c.ratePollSec = atof(v.c_str()); }
       else if (o == "--max-rate")            { VAL c.maxRate = atof(v.c_str()); }
+      else if (o == "--no-events-limit")     { VAL c.noEventsLimit = atoi(v.c_str()); }
       else if (o == "--rate-consec")         { VAL c.rateConsec = atoi(v.c_str()); }
       else if (o == "--rate-cooldown")       { VAL c.rateCooldownSec = atof(v.c_str()); }
       else if (o == "--rate-stop-limit")     { VAL c.rateStopLimit = atoi(v.c_str()); }
@@ -834,6 +841,7 @@ int main(int argc, char** argv)
    if (c.standbyRetryMin <= 0){ std::cerr << "--standby-retry-min must be > 0" << std::endl; return 1; }
    if (c.rateConsec < 1)      c.rateConsec = 1;
    if (c.rateStopLimit < 1)   c.rateStopLimit = 1;
+   if (c.noEventsLimit < 0)   c.noEventsLimit = 0;
    if (!c.useDB && c.startRun <= 0) {
       std::cerr << "--no-db requires --run <first run number>" << std::endl;
       return 1;
@@ -898,11 +906,11 @@ int main(int argc, char** argv)
 
    snprintf(hdr, sizeof(hdr),
             "autonomy : standby=%s(retry %.1f min)  early-recover=%s  dram-check=%s(%d)  "
-            "max-rate=%.0f Hz x%d/%.0fs  cooldown=%.0f s  rate-stops %d/%.0f s",
+            "max-rate=%.0f Hz x%d/%.0fs  cooldown=%.0f s  rate-stops %d/%.0f s  no-events-limit=%d",
             c.standbyEnable ? "on" : "off", c.standbyRetryMin,
             c.earlyRecover ? "on" : "off", c.dramCheck ? "on" : "off", c.dramLines,
             c.maxRate, c.rateConsec, c.ratePollSec, c.rateCooldownSec,
-            c.rateStopLimit, c.rateWindowSec);
+            c.rateStopLimit, c.rateWindowSec, c.noEventsLimit);
    Log(hdr);
    snprintf(hdr, sizeof(hdr), "daq logs : %s  (old : %s)",
             c.daqLogDir.c_str(), c.daqLogDirOld.empty() ? "-" : c.daqLogDirOld.c_str());
@@ -918,6 +926,10 @@ int main(int argc, char** argv)
    bool pendingRecov  = false;           // 대기에서 재개한 확인 런이 부팅을 통과하면 recovered
    std::string pendingWhat;
    bool skipNextLimitRecover = false;    // 대기에서 막 recover 를 불렀다 -> 확인 런 실패에 또 부르지 않는다
+   int  zeroRuns = 0;                    // 사건이 한 번도 없던 런이 연속 몇 개인가 (totev stuck at 0)
+   bool sbNoEvents = false;              // 지금 대기는 사건 0 런 연속 때문이다 -> 대기 중 recover 에 --no-events
+   bool noEvRecoverDone = false;         // 대기에서 막 --no-events recover 를 불렀다 -> 확인 런 실패에 또 부르지 않는다
+   bool noEvSent = false;                // 이 사건 연쇄에 no_events 를 이미 알렸다
 
    //  fatal 을 한 연쇄에 한 번만 낸다 (전문가 목록이 받는 메일이다)
    auto FatalOnce = [&](const std::string& run, const std::string& msg) {
@@ -931,10 +943,15 @@ int main(int argc, char** argv)
       if (standby != SB_NONE) {
          const int runProbe = c.startRun + cycle;      // --no-db 일 때 dry-run 에 쓸 번호
          std::string what;
-         const int how = Standby(c, standby, lastRun, runProbe, what);
+         const int how = Standby(c, standby, lastRun, runProbe, what,
+                                 sbNoEvents ? " --no-events" : "");
          if (how == 0) break;                          // SIGTERM
          if (standby == SB_CONFIG || how == 2) consecFail = 0;   // 고쳐졌다고 본다
          else consecFail = (c.maxConsecFail > 0) ? c.maxConsecFail - 1 : 0;   // 한 번만 시험
+         // 사건 0 때문에 들어간 대기 : 확인 런이 또 사건 0 이면 곧바로 대기로 (limit-1 을 남긴다)
+         zeroRuns = (sbNoEvents && how != 2 && c.noEventsLimit > 0) ? c.noEventsLimit - 1 : 0;
+         noEvRecoverDone = sbNoEvents && how == 3;   // 대기에서 막 recover 를 불렀다
+         if (how == 2) sbNoEvents = false;
          // 확인 런 : 실패하면 곧바로 대기로 돌아간다. 조기 recover 도 다시 부르지 않는다
          earlyTried = (standby == SB_HARDWARE && how != 2);
          skipNextLimitRecover = (how == 3);
@@ -948,7 +965,7 @@ int main(int argc, char** argv)
          if (how != 2) {
             pendingRecov = true;
             char pb[256];
-            snprintf(pb, sizeof(pb), "대기-재시도 모드(%s)를 벗어난 확인 런이 부팅·DRAM 점검을 통과했다 (%s)",
+            snprintf(pb, sizeof(pb), "대기-재시도 모드(%s)를 벗어난 확인 런이 부팅·DRAM 점검을 통과하고 사건이 들어온다 (%s)",
                      SBName(standby), what.c_str());
             pendingWhat = pb;
          }
@@ -1111,9 +1128,14 @@ int main(int argc, char** argv)
                   }
                }
 
-               // 부팅·DRAM 점검을 통과했고 계수율도 상한 아래 -> 사건 연쇄가 끝났다고 본다
-               if (running && dramDone && rateHits == 0
+               // 부팅·DRAM 점검을 통과했고 계수율도 상한 아래이고 사건이 들어온다 -> 사건 연쇄가 끝났다고 본다
+               //  ★ totev 가 0 이면 아니다 (2026-11-08 run 4445 : 부팅·DRAM 만 보고 recovered 를 전문가 13 명에게
+               //    보냈는데 사건은 0 이었다)
+               const unsigned long long tv = strtoull(HBGet(hb, "totev", "0").c_str(), 0, 10);
+               if (tv > 0) hs.sawEvents = true;
+               if (running && dramDone && rateHits == 0 && tv > 0
                    && (double)(now - launch) >= c.bootGraceSec) {
+                  zeroRuns = 0; noEvSent = false; sbNoEvents = false;
                   if (pendingRecov) {
                      pendingRecov = false;
                      Notify(c, "recovered", cycRun, pendingWhat);
@@ -1180,6 +1202,7 @@ int main(int argc, char** argv)
 
       // ---- S-4 : 계수율 상한 / SIGUSR1 마감 --------------------------------
       if (rateStop || usr1Stop) {
+         if (hs.sawEvents) zeroRuns = 0;
          if (rateStop) Notify(c, "rate_high", cycRun, reason);
          // 포화 런의 마감 읽기에는 TIMEOUT 이 따르고, 그 뒤 부팅은 OVERFLOW 로 죽는다 (11.223)
          std::string where;
@@ -1242,6 +1265,53 @@ int main(int argc, char** argv)
                   "restart #%d (consecutive failures %d/%d); next run will be new",
                   nRestart, consecFail, c.maxConsecFail);
          Log(b);
+
+         // ---- 사건이 한 번도 없던 런 (totev 가 시작부터 0) 이 연속 : 5 번을 다 태우지 않는다 ----
+         //  2026-11-08 : 09:23 전원 재투입 뒤 부팅·DRAM·USB 정상인데 트리거 0 인 런 5 개(약 4 h).
+         //  원인은 보드가 트리거를 못 내는 상태로 올라온 것이었고 두 번째 전원 재투입(15:42)이 풀었다.
+         //  -> no_events 알림 + recover --no-events (usb-recover 가 전원 재투입까지 한다, 6 h 2 회 상한은 그쪽)
+         const bool noEvRun = unhealthy && !hs.sawEvents
+                              && reason.find("totev stuck at 0") != std::string::npos;
+         zeroRuns = noEvRun ? zeroRuns + 1 : 0;
+         if (noEvRun && c.noEventsLimit > 0 && zeroRuns >= c.noEventsLimit) {
+            snprintf(b, sizeof(b),
+                     "%d runs in a row never saw an event (totev stuck at 0); no_events",
+                     zeroRuns);
+            Log(b);
+            if (!noEvSent) {
+               snprintf(b, sizeof(b),
+                        "사건 0 인 런이 연속 %d 개 (run %s, 부팅·DRAM 정상, totev 0). "
+                        "보드가 트리거를 못 내는 상태일 수 있어 전원 재투입까지 자동 복구를 부른다",
+                        zeroRuns, cycRun.c_str());
+               Notify(c, "no_events", cycRun, b);
+               noEvSent = true;
+            }
+            int rrc = 1;
+            if (noEvRecoverDone) {
+               Log("no_events on a probe run right after standby recovery - recover not repeated");
+            } else if (c.autoRecover && !c.recoverCmd.empty()) {
+               rrc = RunRecover(c, " --no-events");
+               snprintf(b, sizeof(b), "automatic recovery (--no-events) returned %d "
+                        "(0=recovered 1=not-usb 2=failed 3=unsafe)", rrc);
+               Log(b);
+            }
+            noEvRecoverDone = false;
+            if (rrc == 0) {
+               Log("automatic recovery succeeded; resuming data taking");
+               consecFail = 0; zeroRuns = 0; earlyTried = false;
+               SleepFor(c.settleSec);
+               continue;
+            }
+            if (!c.standbyEnable) { Log("FATAL no events (no standby); giving up"); return 2; }
+            Log("still no events; entering standby (hardware)");
+            if (rrc == 2) fatalSent = true;     // recover 가 recovery_failed 로 이미 알렸다
+            else FatalOnce(cycRun, "사건 0 런 연속, 자동 복구로 안 풀림 -- 전자계 정상·트리거 0 : "
+                                   "PMT HV·케이블·앞단 전원 확인 (CLAUDE.md 11.131). 대기-재시도 모드로 간다");
+            standby = SB_HARDWARE;
+            sbNoEvents = true;
+            consecFail = 0;
+            continue;
+         }
 
          // heartbeat 가 멈춰서 잡힌 것과 그냥 실패한 것은 성격이 다르다.
          // 앞은 '쓰다가 멎었다', 뒤는 '아예 못 떴다' 인 경우가 많다.
@@ -1330,6 +1400,7 @@ int main(int argc, char** argv)
       } else {
          consecFail = 0;
          earlyTried = false;
+         if (hs.sawEvents) zeroRuns = 0;
          SleepFor(c.settleSec);
       }
    }

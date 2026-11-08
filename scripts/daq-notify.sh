@@ -29,6 +29,9 @@
 #                      대기에 들어간 사건(fatal)은 이미 한 번 나간다. 메일로 받으려면 on_standby_retry = mail
 #     net_down         바깥 망(메일·시트)이 끊겼다 (scripts/netsync.sh). 큐에 들어가 망이 돌아올 때 나간다
 #     net_restored     바깥 망이 돌아왔다 -- 밀린 메일·시트를 내보낸 결과
+#     no_events        ★ 부팅·DRAM 은 정상인데 사건 0 인 런(totev 가 시작부터 0)이 연속 (감시자 --no-events-limit).
+#                      감시자는 곧바로 usb-recover --no-events (전원 재투입까지) 를 부른다. 기본 both, 전문가 목록
+#                      (2026-11-08 run 4441~4445 : 전원 재투입 뒤 보드가 트리거를 못 내는 상태로 올라왔다)
 #     tail_finish      비정상으로 끝난 런의 꼬리를 자동 마감했다 (scripts/tailfinish.sh). 책임자만
 #     tail_finish_failed  꼬리 자동 마감이 시도 상한까지 안 됐다. 사람이 볼 것. 책임자만
 #
@@ -82,8 +85,8 @@ declare -A ON=( [restart]=mail [stale]=mail [recovered]=mail \
                 [sheetlog]=mail [chain_down]=mail [rate_low]=mail [rate_high]=both \
                 [rotate]=mail [resumed]=mail [backup_session]=mail [websummary]=mail \
                 [supervisor_down]=both [disk_low]=mail [mid_disk_low]=mail [standby_retry]=none [net_down]=mail [net_restored]=mail \
-                [tail_finish]=mail [tail_finish_failed]=mail )
-EXPERT_EVENTS="recovery_failed fatal"     # params 의 mail_expert_events 가 덮어쓴다
+                [tail_finish]=mail [tail_finish_failed]=mail [no_events]=both )
+EXPERT_EVENTS="recovery_failed fatal no_events"     # params 의 mail_expert_events 가 덮어쓴다
 
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$NOTIFY_LOG" 2>/dev/null; }
 
@@ -122,6 +125,7 @@ load_params() {
          on_net_restored)    ON[net_restored]=$v ;;
          on_tail_finish)     ON[tail_finish]=$v ;;
          on_tail_finish_failed) ON[tail_finish_failed]=$v ;;
+         on_no_events)       ON[no_events]=$v ;;
          mail_queue)         NOTIFY_MAILQ=$v ;;
          mail_expert_events) EXPERT_EVENTS=$v ;;
          drill_flag)         drill_flag_param "$v" ;;
@@ -262,11 +266,20 @@ build_body() {
       case "$EVENT" in
          recovery_failed)
             echo "  자동 복구(usbreset)가 실패했다. 사람이 현장에 가야 한다."
+            echo "  ★ 위 '내용' 에 '전자계 정상·트리거 0' 이 있으면 전원 재투입 상한까지 썼는데도 사건이 0 이다 --"
+            echo "     PMT HV(GECO 채널 출력) · 신호 케이블 · 앞단 전원을 볼 것 (11.131 · 11.225)"
             echo "  1) tmux attach -t daq   로 화면을 본다"
             echo "  2) 수집이 멎어 있는지 확인 :  pgrep -x rcterm ; ss -ltn | grep 7809"
             echo "  3) 보드 전원을 껐다 켜거나 USB 케이블을 다시 꽂는다"
             echo "  4) 복구 절차는 저장소 CLAUDE.md 11.50 에 순서대로 있다"
             echo "  5) 알람을 끄려면 :  scripts/daq-alarm.sh --silence" ;;
+         no_events)
+            echo "  ★ 부팅·DRAM·USB 는 정상인데 사건(트리거)이 하나도 안 들어오는 런이 이어졌다."
+            echo "  감시자가 자동 복구(usb-recover --no-events)를 부른다 -- 확인 런이 또 사건 0 이면 보드 전원 재투입까지 한다"
+            echo "  (6 h 에 2 회 상한). 2026-11-08 에는 첫 전원 재투입 뒤 보드가 트리거를 못 내는 상태로 올라왔고"
+            echo "  두 번째 전원 재투입이 풀었다. 결과는 recovered 또는 recovery_failed 로 따로 온다."
+            echo "  전원 재투입 상한을 다 쓰고도 0 이면 : PMT HV(GECO 채널 출력) · 신호 케이블 · 앞단 전원을 볼 것 (CLAUDE.md 11.131 · 11.225)"
+            echo "  상태 :  scripts/chainwatch.sh --status   ·  scripts/usb-recover.sh --diagnose" ;;
          recovered)
             echo "  자동 복구에 성공해 수집이 이어지고 있다. 가지 않아도 된다."
             echo "  다만 보드가 걸리는 일이 잦아지면 보드/케이블/USB 허브를 의심할 것." ;;
@@ -346,8 +359,10 @@ build_body() {
          rate_low)
             echo "  ★ 보드보다 검출기를 먼저 의심할 것. 2026-09-01 에 계수가 0 이었던"
             echo "     원인은 PMT HV 였고, 보드 진단에 30분을 헛되이 썼다."
-            echo "  ★ FADC·SADC 가 둘 다 0 (n=0 sr=0, daqtime=0) 이고 DRAM·USB 가 멀쩡하면 신호가 없는 것이다 --"
-            echo "     PMT HV 크레이트(GECO, SY4527) 의 채널 출력부터 (CLAUDE.md 11.131 · 11.225 · 2026-11-08 run 4441~4445)"
+            echo "  ★ FADC·SADC 가 둘 다 0 (n=0 sr=0, daqtime=0) 이고 DRAM·USB 가 멀쩡하면 트리거가 하나도 없는 것이다 --"
+            echo "     먼저 PMT HV 크레이트(GECO, SY4527) 의 채널 출력 (CLAUDE.md 11.131 · 11.225)."
+            echo "     HV 가 켜져 있으면 보드가 트리거를 못 내는 상태일 수 있다 -- 2026-11-08 run 4441~4445 는 첫 전원 재투입 뒤"
+            echo "     그렇게 올라왔고 두 번째 전원 재투입이 풀었다 (감시자가 no_events 로 usb-recover --no-events 를 부른다)"
             echo "  1) HV 를 본다 (rundesc 기준 PMT_A 1680V · PMT_B 1642V)"
             echo "  2) 그 다음 보드 :  DAQ 로그의 LIBUSB 오류, TCB 로그의 DRAM 정렬"
             echo "     'Fail to align DRAM' 이 보이면 usbreset 을 두 번 걸어 볼 것"
