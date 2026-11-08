@@ -1,0 +1,267 @@
+2026-11-03 12:43:21 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ now starting
+2026-11-03 12:43:21 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server on port 7814
+2026-11-03 12:43:21 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server start
+2026-11-03 12:43:22 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 6, ip: 127.0.0.1, port: 41478
+2026-11-03 12:43:22 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 0
+2026-11-03 12:43:23 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 7, ip: 127.0.0.1, port: 41490
+2026-11-03 12:43:23 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 1
+2026-11-03 12:43:28 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] CONFIGRUN command received
+
+============ CupDAQManager Prepare Report ==============
+                            type: 
+                   number of ADC: 1
+           minimum buffer count : 16
+                  record length : 8
+           number of data point : 496
+  minimum data size for reading : 4096
+         preset number of event : 0
+            preset daq time [s] : 0
+=======================================================
+
+2026-11-03 12:43:29 [INFO] CupDAQManager::PrepareDAQ: prepared to take data from FADC
+2026-11-03 12:43:29 [INFO] nkusb_open_device: super speed device opened
+2026-11-03 12:43:29 [INFO] nkusb_open_device: bus = 2, address =  19, serial id =  3
+2026-11-03 12:43:29 [INFO] CupFADCT::Open: FADCT [sid=3]: opened
+2026-11-03 12:43:29 [INFO] CupDAQManager::OpenDAQ: all ADCs are opened
+2026-11-03 12:43:29 [INFO] CupDAQManager::TF_RunManager: run manager started
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] STARTRUN command received
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs started
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_SortEvent: sorting data started
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_ShrinkToFit: shrink buffer memory to fit started
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_WriteEvent: writing output data started as FADC mode
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_BuildEvent: event building started
+2026-11-03 12:43:32 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring started
+2026-11-03 12:43:32 [INFO] CupDAQManager::OpenNewOutputFile: /Data_ssd/RAW/999999 already exist
+2026-11-03 12:43:32 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/FADC_999999.root.00000 opened
+2026-11-03 12:43:33 [STAT] 6248 events triggered [    6248 |     6196 / 6129.5(6129.5) Hz / 1.0 s]
+2026-11-03 12:43:34 [STAT] 6036 events triggered [   12284 |    12262 / 6035.6(6083.0) Hz / 2.0 s]
+2026-11-03 12:43:35 [STAT] 5920 events triggered [   18204 |    18204 / 5929.7(6032.3) Hz / 3.0 s]
+2026-11-03 12:43:36 [STAT] 5976 events triggered [   24180 |    24180 / 5970.4(6016.9) Hz / 4.0 s]
+2026-11-03 12:43:37 [STAT] 6116 events triggered [   30296 |    30296 / 6130.5(6039.5) Hz / 5.0 s]
+2026-11-03 12:43:38 [STAT] 5900 events triggered [   36196 |    36194 / 5851.1(6007.9) Hz / 6.0 s]
+2026-11-03 12:43:39 [STAT] 5800 events triggered [   41996 |    41996 / 5801.2(5978.5) Hz / 7.0 s]
+2026-11-03 12:43:40 [STAT] 5884 events triggered [   47880 |    47880 / 5892.8(5967.8) Hz / 8.0 s]
+2026-11-03 12:43:41 [STAT] 6072 events triggered [   53952 |    53948 / 6064.2(5978.5) Hz / 9.0 s]
+2026-11-03 12:43:42 [STAT] 6156 events triggered [   60108 |    60108 / 6127.5(5993.5) Hz / 10.0 s]
+2026-11-03 12:43:43 [STAT] 6104 events triggered [   66212 |    66176 / 6092.7(6002.5) Hz / 11.0 s]
+2026-11-03 12:43:44 [STAT] 5916 events triggered [   72128 |    72128 / 5964.8(5999.4) Hz / 12.0 s]
+2026-11-03 12:43:45 [STAT] 5876 events triggered [   78004 |    77940 / 5820.5(5985.5) Hz / 13.0 s]
+2026-11-03 12:43:46 [STAT] 5996 events triggered [   84000 |    83968 / 5985.4(5985.5) Hz / 14.0 s]
+2026-11-03 12:43:47 [STAT] 5916 events triggered [   89916 |    89916 / 5921.6(5981.3) Hz / 15.0 s]
+2026-11-03 12:43:48 [STAT] 5924 events triggered [   95840 |    95788 / 5918.4(5977.3) Hz / 16.0 s]
+2026-11-03 12:43:49 [STAT] 5984 events triggered [  101824 |   101768 / 5969.9(5976.9) Hz / 17.0 s]
+2026-11-03 12:43:50 [STAT] 5924 events triggered [  107748 |   107748 / 5952.5(5975.5) Hz / 18.0 s]
+2026-11-03 12:43:51 [STAT] 5944 events triggered [  113692 |   113692 / 5909.5(5972.1) Hz / 19.0 s]
+2026-11-03 12:43:52 [STAT] 5928 events triggered [  119620 |   119620 / 5936.1(5970.3) Hz / 20.0 s]
+2026-11-03 12:43:53 [STAT] 5988 events triggered [  125608 |   125599 / 5964.9(5970.0) Hz / 21.0 s]
+2026-11-03 12:43:54 [STAT] 6056 events triggered [  131664 |   131636 / 6032.3(5972.8) Hz / 22.0 s]
+2026-11-03 12:43:55 [STAT] 5748 events triggered [  137412 |   137412 / 5763.5(5963.8) Hz / 23.0 s]
+2026-11-03 12:43:56 [STAT] 5952 events triggered [  143364 |   143300 / 5934.5(5962.6) Hz / 24.0 s]
+2026-11-03 12:43:57 [STAT] 6004 events triggered [  149368 |   149320 / 5997.5(5964.0) Hz / 25.0 s]
+2026-11-03 12:43:58 [STAT] 5912 events triggered [  155280 |   155216 / 5903.5(5961.6) Hz / 26.0 s]
+2026-11-03 12:43:59 [STAT] 5812 events triggered [  161092 |   161001 / 5804.7(5955.8) Hz / 27.0 s]
+2026-11-03 12:44:00 [STAT] 5868 events triggered [  166960 |   166924 / 5861.0(5952.4) Hz / 28.0 s]
+2026-11-03 12:44:01 [STAT] 5940 events triggered [  172900 |   172900 / 6006.1(5954.3) Hz / 29.0 s]
+2026-11-03 12:44:02 [STAT] 6012 events triggered [  178912 |   178912 / 5966.0(5954.7) Hz / 30.0 s]
+2026-11-03 12:44:03 [STAT] 5776 events triggered [  184688 |   184688 / 5769.7(5948.7) Hz / 31.0 s]
+2026-11-03 12:44:04 [STAT] 5948 events triggered [  190636 |   190597 / 5916.6(5947.7) Hz / 32.1 s]
+2026-11-03 12:44:05 [STAT] 5980 events triggered [  196616 |   196528 / 5965.1(5948.2) Hz / 33.1 s]
+2026-11-03 12:44:06 [STAT] 5904 events triggered [  202520 |   202471 / 5905.5(5947.0) Hz / 34.1 s]
+2026-11-03 12:44:07 [STAT] 5952 events triggered [  208472 |   208416 / 5935.0(5946.6) Hz / 35.1 s]
+2026-11-03 12:44:08 [STAT] 5844 events triggered [  214316 |   214316 / 5876.2(5944.7) Hz / 36.1 s]
+2026-11-03 12:44:09 [STAT] 6068 events triggered [  220384 |   220320 / 6038.3(5947.2) Hz / 37.1 s]
+2026-11-03 12:44:10 [STAT] 6000 events triggered [  226384 |   226344 / 6004.8(5948.7) Hz / 38.1 s]
+2026-11-03 12:44:11 [STAT] 6020 events triggered [  232404 |   232404 / 6016.7(5950.5) Hz / 39.1 s]
+2026-11-03 12:44:12 [STAT] 5952 events triggered [  238356 |   238356 / 5974.2(5951.1) Hz / 40.1 s]
+2026-11-03 12:44:13 [STAT] 6088 events triggered [  244444 |   244444 / 6054.0(5953.6) Hz / 41.1 s]
+2026-11-03 12:44:14 [STAT] 5916 events triggered [  250360 |   250360 / 5911.3(5952.6) Hz / 42.1 s]
+2026-11-03 12:44:15 [STAT] 6024 events triggered [  256384 |   256370 / 5991.0(5953.5) Hz / 43.1 s]
+2026-11-03 12:44:16 [STAT] 5980 events triggered [  262364 |   262306 / 5966.5(5953.8) Hz / 44.1 s]
+2026-11-03 12:44:17 [STAT] 5992 events triggered [  268356 |   268356 / 6021.9(5955.3) Hz / 45.1 s]
+2026-11-03 12:44:18 [STAT] 6092 events triggered [  274448 |   274448 / 6093.4(5958.3) Hz / 46.1 s]
+2026-11-03 12:44:19 [STAT] 5860 events triggered [  280308 |   280308 / 5882.1(5956.7) Hz / 47.1 s]
+2026-11-03 12:44:20 [STAT] 5968 events triggered [  286276 |   286224 / 5909.9(5955.7) Hz / 48.1 s]
+2026-11-03 12:44:21 [STAT] 5972 events triggered [  292248 |   292244 / 5965.1(5955.9) Hz / 49.1 s]
+2026-11-03 12:44:22 [STAT] 5852 events triggered [  298100 |   298060 / 5833.1(5953.4) Hz / 50.1 s]
+2026-11-03 12:44:23 [STAT] 5940 events triggered [  304040 |   304040 / 5981.2(5954.0) Hz / 51.1 s]
+2026-11-03 12:44:24 [STAT] 5848 events triggered [  309888 |   309888 / 5847.4(5951.9) Hz / 52.1 s]
+2026-11-03 12:44:25 [STAT] 5992 events triggered [  315880 |   315861 / 5949.0(5951.9) Hz / 53.1 s]
+2026-11-03 12:44:26 [STAT] 5920 events triggered [  321800 |   321800 / 5910.6(5951.1) Hz / 54.1 s]
+2026-11-03 12:44:27 [STAT] 5916 events triggered [  327716 |   327676 / 5890.5(5950.0) Hz / 55.1 s]
+2026-11-03 12:44:28 [STAT] 5928 events triggered [  333644 |   333581 / 5935.4(5949.7) Hz / 56.1 s]
+2026-11-03 12:44:29 [STAT] 5784 events triggered [  339428 |   339428 / 5813.3(5947.3) Hz / 57.1 s]
+2026-11-03 12:44:30 [STAT] 5960 events triggered [  345388 |   345388 / 5911.8(5946.7) Hz / 58.1 s]
+2026-11-03 12:44:31 [STAT] 5936 events triggered [  351324 |   351324 / 5933.1(5946.5) Hz / 59.1 s]
+2026-11-03 12:44:32 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] output file split command received
+2026-11-03 12:44:32 [STAT] 5876 events triggered [  357200 |   357200 / 5897.3(5945.7) Hz / 60.1 s]
+2026-11-03 12:44:32 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/FADC_999999.root.00001 opened
+2026-11-03 12:44:33 [STAT] 5960 events triggered [  363160 |   363100 / 5919.8(5945.3) Hz / 61.1 s]
+2026-11-03 12:44:34 [STAT] 5804 events triggered [  368964 |   368928 / 5812.2(5943.1) Hz / 62.1 s]
+2026-11-03 12:44:35 [STAT] 5900 events triggered [  374864 |   374864 / 5926.8(5942.9) Hz / 63.1 s]
+2026-11-03 12:44:36 [STAT] 6056 events triggered [  380920 |   380920 / 6037.7(5944.3) Hz / 64.1 s]
+2026-11-03 12:44:37 [STAT] 6100 events triggered [  387020 |   386976 / 6055.3(5946.1) Hz / 65.1 s]
+2026-11-03 12:44:38 [STAT] 5840 events triggered [  392860 |   392860 / 5896.4(5945.3) Hz / 66.1 s]
+2026-11-03 12:44:39 [STAT] 5972 events triggered [  398832 |   398796 / 5913.5(5944.8) Hz / 67.1 s]
+2026-11-03 12:44:40 [STAT] 5936 events triggered [  404768 |   404768 / 5945.1(5944.8) Hz / 68.1 s]
+2026-11-03 12:44:41 [STAT] 6060 events triggered [  410828 |   410828 / 6052.5(5946.4) Hz / 69.1 s]
+2026-11-03 12:44:42 [STAT] 6024 events triggered [  416852 |   416792 / 6002.4(5947.2) Hz / 70.1 s]
+2026-11-03 12:44:43 [STAT] 5924 events triggered [  422776 |   422776 / 5937.6(5947.1) Hz / 71.1 s]
+2026-11-03 12:44:44 [STAT] 5904 events triggered [  428680 |   428619 / 5881.8(5946.2) Hz / 72.1 s]
+2026-11-03 12:44:45 [STAT] 5932 events triggered [  434612 |   434612 / 5922.2(5945.8) Hz / 73.1 s]
+2026-11-03 12:44:46 [STAT] 5940 events triggered [  440552 |   440508 / 5946.3(5945.8) Hz / 74.1 s]
+2026-11-03 12:44:47 [STAT] 5848 events triggered [  446400 |   446400 / 5892.5(5945.1) Hz / 75.1 s]
+2026-11-03 12:44:48 [STAT] 6024 events triggered [  452424 |   452421 / 5951.8(5945.2) Hz / 76.1 s]
+2026-11-03 12:44:49 [STAT] 5928 events triggered [  458352 |   458352 / 5936.9(5945.1) Hz / 77.1 s]
+2026-11-03 12:44:50 [STAT] 5912 events triggered [  464264 |   464264 / 5939.6(5945.0) Hz / 78.1 s]
+2026-11-03 12:44:51 [STAT] 6108 events triggered [  470372 |   470316 / 6049.7(5946.4) Hz / 79.1 s]
+2026-11-03 12:44:52 [STAT] 5968 events triggered [  476340 |   476340 / 6001.5(5947.1) Hz / 80.1 s]
+2026-11-03 12:44:53 [STAT] 6100 events triggered [  482440 |   482416 / 6058.1(5948.4) Hz / 81.1 s]
+2026-11-03 12:44:54 [STAT] 5844 events triggered [  488284 |   488284 / 5844.5(5947.2) Hz / 82.1 s]
+2026-11-03 12:44:55 [STAT] 5960 events triggered [  494244 |   494216 / 5949.8(5947.2) Hz / 83.1 s]
+2026-11-03 12:44:56 [STAT] 5884 events triggered [  500128 |   500128 / 5903.3(5946.7) Hz / 84.1 s]
+2026-11-03 12:44:57 [STAT] 6004 events triggered [  506132 |   506056 / 5973.5(5947.0) Hz / 85.1 s]
+2026-11-03 12:44:58 [STAT] 6056 events triggered [  512188 |   512156 / 6029.9(5948.0) Hz / 86.1 s]
+2026-11-03 12:44:59 [STAT] 6040 events triggered [  518228 |   518132 / 6036.9(5949.0) Hz / 87.1 s]
+2026-11-03 12:45:00 [STAT] 6008 events triggered [  524236 |   524236 / 6021.1(5949.8) Hz / 88.1 s]
+2026-11-03 12:45:01 [STAT] 5984 events triggered [  530220 |   530220 / 5975.9(5950.1) Hz / 89.1 s]
+2026-11-03 12:45:02 [STAT] 5880 events triggered [  536100 |   536060 / 5866.4(5949.2) Hz / 90.1 s]
+2026-11-03 12:45:03 [STAT] 5896 events triggered [  541996 |   541996 / 5920.6(5948.9) Hz / 91.1 s]
+2026-11-03 12:45:04 [STAT] 5952 events triggered [  547948 |   547948 / 5962.8(5949.0) Hz / 92.1 s]
+2026-11-03 12:45:05 [STAT] 5860 events triggered [  553808 |   553808 / 5852.2(5948.0) Hz / 93.1 s]
+2026-11-03 12:45:06 [STAT] 6012 events triggered [  559820 |   559820 / 6005.3(5948.6) Hz / 94.1 s]
+2026-11-03 12:45:07 [STAT] 6056 events triggered [  565876 |   565852 / 6008.0(5949.2) Hz / 95.1 s]
+2026-11-03 12:45:08 [STAT] 6008 events triggered [  571884 |   571840 / 5988.3(5949.6) Hz / 96.1 s]
+2026-11-03 12:45:09 [STAT] 5908 events triggered [  577792 |   577764 / 5891.9(5949.0) Hz / 97.1 s]
+2026-11-03 12:45:10 [STAT] 6032 events triggered [  583824 |   583764 / 6041.5(5950.0) Hz / 98.1 s]
+2026-11-03 12:45:11 [STAT] 5932 events triggered [  589756 |   589751 / 5930.3(5949.8) Hz / 99.1 s]
+2026-11-03 12:45:12 [STAT] 5964 events triggered [  595720 |   595672 / 5957.5(5949.8) Hz / 100.1 s]
+2026-11-03 12:45:13 [STAT] 5988 events triggered [  601708 |   601675 / 5985.8(5950.2) Hz / 101.1 s]
+2026-11-03 12:45:14 [STAT] 5996 events triggered [  607704 |   607695 / 5997.2(5950.7) Hz / 102.1 s]
+2026-11-03 12:45:15 [STAT] 6012 events triggered [  613716 |   613692 / 5990.3(5951.0) Hz / 103.1 s]
+2026-11-03 12:45:16 [STAT] 5952 events triggered [  619668 |   619636 / 5932.5(5950.9) Hz / 104.1 s]
+2026-11-03 12:45:17 [STAT] 5880 events triggered [  625548 |   625484 / 5884.9(5950.2) Hz / 105.1 s]
+2026-11-03 12:45:18 [STAT] 5988 events triggered [  631536 |   631536 / 6000.0(5950.7) Hz / 106.1 s]
+2026-11-03 12:45:19 [STAT] 5800 events triggered [  637336 |   637336 / 5822.1(5949.5) Hz / 107.1 s]
+2026-11-03 12:45:20 [STAT] 6024 events triggered [  643360 |   643360 / 6005.3(5950.0) Hz / 108.1 s]
+2026-11-03 12:45:21 [STAT] 6036 events triggered [  649396 |   649349 / 5994.9(5950.4) Hz / 109.1 s]
+2026-11-03 12:45:22 [STAT] 5804 events triggered [  655200 |   655200 / 5816.6(5949.2) Hz / 110.1 s]
+2026-11-03 12:45:23 [STAT] 5872 events triggered [  661072 |   661072 / 5864.1(5948.5) Hz / 111.1 s]
+2026-11-03 12:45:24 [STAT] 5808 events triggered [  666880 |   666880 / 5796.4(5947.1) Hz / 112.1 s]
+2026-11-03 12:45:25 [STAT] 6064 events triggered [  672944 |   672864 / 6038.4(5947.9) Hz / 113.1 s]
+2026-11-03 12:45:26 [STAT] 5932 events triggered [  678876 |   678812 / 5942.0(5947.9) Hz / 114.1 s]
+2026-11-03 12:45:27 [STAT] 6044 events triggered [  684920 |   684872 / 6020.3(5948.5) Hz / 115.1 s]
+2026-11-03 12:45:28 [STAT] 6052 events triggered [  690972 |   690962 / 6048.4(5949.4) Hz / 116.1 s]
+2026-11-03 12:45:29 [STAT] 6012 events triggered [  696984 |   696984 / 6021.5(5950.0) Hz / 117.1 s]
+2026-11-03 12:45:30 [STAT] 5984 events triggered [  702968 |   702928 / 5974.0(5950.2) Hz / 118.1 s]
+2026-11-03 12:45:31 [STAT] 6008 events triggered [  708976 |   708912 / 5985.0(5950.5) Hz / 119.1 s]
+2026-11-03 12:45:32 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] output file split command received
+2026-11-03 12:45:32 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/FADC_999999.root.00002 opened
+2026-11-03 12:45:32 [STAT] 5800 events triggered [  714776 |   714732 / 5801.9(5949.2) Hz / 120.1 s]
+2026-11-03 12:45:33 [STAT] 5956 events triggered [  720732 |   720676 / 5950.0(5949.2) Hz / 121.1 s]
+2026-11-03 12:45:34 [STAT] 6056 events triggered [  726788 |   726688 / 6035.3(5949.9) Hz / 122.2 s]
+2026-11-03 12:45:35 [STAT] 5912 events triggered [  732700 |   732700 / 5974.6(5950.1) Hz / 123.1 s]
+2026-11-03 12:45:36 [STAT] 6224 events triggered [  738924 |   738860 / 6153.9(5951.8) Hz / 124.2 s]
+2026-11-03 12:45:37 [STAT] 5864 events triggered [  744788 |   744788 / 5886.7(5951.3) Hz / 125.1 s]
+2026-11-03 12:45:38 [STAT] 5940 events triggered [  750728 |   750726 / 5921.4(5951.0) Hz / 126.2 s]
+2026-11-03 12:45:39 [STAT] 5800 events triggered [  756528 |   756528 / 5837.2(5950.2) Hz / 127.1 s]
+2026-11-03 12:45:40 [STAT] 5916 events triggered [  762444 |   762444 / 5892.7(5949.7) Hz / 128.1 s]
+2026-11-03 12:45:41 [STAT] 5924 events triggered [  768368 |   768284 / 5882.4(5949.2) Hz / 129.2 s]
+2026-11-03 12:45:42 [STAT] 5916 events triggered [  774284 |   774228 / 5914.0(5948.9) Hz / 130.2 s]
+2026-11-03 12:45:43 [STAT] 5884 events triggered [  780168 |   780104 / 5870.5(5948.3) Hz / 131.2 s]
+2026-11-03 12:45:44 [STAT] 6044 events triggered [  786212 |   786201 / 6047.1(5949.1) Hz / 132.2 s]
+2026-11-03 12:45:45 [STAT] 5852 events triggered [  792064 |   792028 / 5850.6(5948.3) Hz / 133.2 s]
+2026-11-03 12:45:46 [STAT] 6096 events triggered [  798160 |   798160 / 6098.1(5949.4) Hz / 134.2 s]
+2026-11-03 12:45:47 [STAT] 6032 events triggered [  804192 |   804132 / 5984.4(5949.7) Hz / 135.2 s]
+2026-11-03 12:45:48 [STAT] 5808 events triggered [  810000 |   810000 / 5847.8(5949.0) Hz / 136.2 s]
+2026-11-03 12:45:49 [STAT] 5936 events triggered [  815936 |   815928 / 5902.8(5948.6) Hz / 137.2 s]
+2026-11-03 12:45:50 [STAT] 5844 events triggered [  821780 |   821780 / 5853.3(5947.9) Hz / 138.2 s]
+2026-11-03 12:45:51 [STAT] 5976 events triggered [  827756 |   827692 / 5943.2(5947.9) Hz / 139.2 s]
+2026-11-03 12:45:52 [STAT] 6104 events triggered [  833860 |   833796 / 6110.0(5949.0) Hz / 140.2 s]
+2026-11-03 12:45:53 [STAT] 5944 events triggered [  839804 |   839804 / 5949.2(5949.0) Hz / 141.2 s]
+2026-11-03 12:45:54 [STAT] 5980 events triggered [  845784 |   845784 / 5984.2(5949.3) Hz / 142.2 s]
+2026-11-03 12:45:55 [STAT] 5964 events triggered [  851748 |   851748 / 5974.7(5949.5) Hz / 143.2 s]
+2026-11-03 12:45:56 [STAT] 5852 events triggered [  857600 |   857596 / 5834.4(5948.7) Hz / 144.2 s]
+2026-11-03 12:45:57 [STAT] 6040 events triggered [  863640 |   863597 / 6012.4(5949.1) Hz / 145.2 s]
+2026-11-03 12:45:58 [STAT] 5956 events triggered [  869596 |   869496 / 5928.0(5949.0) Hz / 146.2 s]
+2026-11-03 12:45:59 [STAT] 5928 events triggered [  875524 |   875488 / 5911.8(5948.7) Hz / 147.2 s]
+2026-11-03 12:46:00 [STAT] 5948 events triggered [  881472 |   881472 / 6006.2(5949.1) Hz / 148.2 s]
+2026-11-03 12:46:01 [STAT] 5932 events triggered [  887404 |   887352 / 5878.6(5948.6) Hz / 149.2 s]
+2026-11-03 12:46:02 [STAT] 5980 events triggered [  893384 |   893320 / 5972.7(5948.8) Hz / 150.2 s]
+2026-11-03 12:46:03 [STAT] 5768 events triggered [  899152 |   899152 / 5808.8(5947.9) Hz / 151.2 s]
+2026-11-03 12:46:04 [STAT] 6028 events triggered [  905180 |   905180 / 5987.7(5948.1) Hz / 152.2 s]
+2026-11-03 12:46:05 [STAT] 6156 events triggered [  911336 |   911336 / 6178.5(5949.6) Hz / 153.2 s]
+2026-11-03 12:46:06 [STAT] 5964 events triggered [  917300 |   917300 / 5958.4(5949.7) Hz / 154.2 s]
+2026-11-03 12:46:07 [STAT] 5976 events triggered [  923276 |   923215 / 5922.6(5949.5) Hz / 155.2 s]
+2026-11-03 12:46:08 [STAT] 5920 events triggered [  929196 |   929168 / 5915.5(5949.3) Hz / 156.2 s]
+2026-11-03 12:46:09 [STAT] 5984 events triggered [  935180 |   935180 / 5978.2(5949.5) Hz / 157.2 s]
+2026-11-03 12:46:10 [STAT] 6060 events triggered [  941240 |   941240 / 6075.5(5950.3) Hz / 158.2 s]
+2026-11-03 12:46:11 [STAT] 5976 events triggered [  947216 |   947216 / 5981.7(5950.5) Hz / 159.2 s]
+2026-11-03 12:46:12 [STAT] 5980 events triggered [  953196 |   953154 / 5940.4(5950.4) Hz / 160.2 s]
+2026-11-03 12:46:13 [STAT] 6052 events triggered [  959248 |   959190 / 6045.3(5951.0) Hz / 161.2 s]
+2026-11-03 12:46:14 [STAT] 5920 events triggered [  965168 |   965104 / 5932.6(5950.9) Hz / 162.2 s]
+2026-11-03 12:46:15 [STAT] 6004 events triggered [  971172 |   971112 / 5994.3(5951.1) Hz / 163.2 s]
+2026-11-03 12:46:16 [STAT] 5996 events triggered [  977168 |   977144 / 5993.2(5951.4) Hz / 164.2 s]
+2026-11-03 12:46:17 [STAT] 6044 events triggered [  983212 |   983212 / 6058.2(5952.0) Hz / 165.2 s]
+2026-11-03 12:46:18 [STAT] 5936 events triggered [  989148 |   989148 / 5913.9(5951.8) Hz / 166.2 s]
+2026-11-03 12:46:19 [STAT] 6068 events triggered [  995216 |   995216 / 6050.5(5952.4) Hz / 167.2 s]
+2026-11-03 12:46:20 [STAT] 5916 events triggered [ 1001132 |  1001132 / 5933.3(5952.3) Hz / 168.2 s]
+2026-11-03 12:46:21 [STAT] 6016 events triggered [ 1007148 |  1007148 / 5992.7(5952.5) Hz / 169.2 s]
+2026-11-03 12:46:22 [STAT] 6012 events triggered [ 1013160 |  1013116 / 5982.3(5952.7) Hz / 170.2 s]
+2026-11-03 12:46:23 [STAT] 5940 events triggered [ 1019100 |  1019100 / 5988.7(5952.9) Hz / 171.2 s]
+2026-11-03 12:46:24 [STAT] 6072 events triggered [ 1025172 |  1025172 / 6028.9(5953.4) Hz / 172.2 s]
+2026-11-03 12:46:25 [STAT] 5920 events triggered [ 1031092 |  1031092 / 5903.8(5953.1) Hz / 173.2 s]
+2026-11-03 12:46:26 [STAT] 5984 events triggered [ 1037076 |  1037012 / 5966.4(5953.2) Hz / 174.2 s]
+2026-11-03 12:46:27 [STAT] 5944 events triggered [ 1043020 |  1043019 / 5950.5(5953.1) Hz / 175.2 s]
+2026-11-03 12:46:28 [STAT] 6020 events triggered [ 1049040 |  1049040 / 6025.1(5953.5) Hz / 176.2 s]
+2026-11-03 12:46:29 [STAT] 5900 events triggered [ 1054940 |  1054904 / 5868.6(5953.1) Hz / 177.2 s]
+2026-11-03 12:46:30 [STAT] 5936 events triggered [ 1060876 |  1060820 / 5918.7(5952.9) Hz / 178.2 s]
+2026-11-03 12:46:31 [STAT] 5924 events triggered [ 1066800 |  1066752 / 5918.7(5952.7) Hz / 179.2 s]
+2026-11-03 12:46:32 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] output file split command received
+2026-11-03 12:46:32 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/999999/FADC_999999.root.00003 opened
+2026-11-03 12:46:32 [STAT] 5916 events triggered [ 1072716 |  1072716 / 5973.5(5952.8) Hz / 180.2 s]
+2026-11-03 12:46:32 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] ENDRUN command received
+2026-11-03 12:46:32 [INFO] CupDAQManager::TF_RunManager: daq will be ended by ENDRUN command
+2026-11-03 12:46:32 [INFO] CupDAQManager::ReadData_GLT: waiting for reading remaining data in ADCs
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring ended
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_ShrinkToFit: shrink buffer memory to fit ended
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] EXIT command received
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_SortEvent: sorting data ended
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_BuildEvent: event building ended
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server ended
+2026-11-03 12:46:33 [INFO] CupDAQManager::ReadData_GLT: no more data in ADCs [bcount=0]
+2026-11-03 12:46:33 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs ended
+2026-11-03 12:46:34 [INFO] CupDAQManager::TF_WriteEvent: output data /Data_ssd/RAW/999999/FADC_999999.root.00003 closed
+2026-11-03 12:46:34 [INFO] CupDAQManager::TF_WriteEvent: writing output data ended
+2026-11-03 12:46:35 [INFO] CupDAQManager::TF_RunManager: all processes ended
+
+====================================================
+     process      cpu time[s]     real time[s]
+----------------------------------------------------
+    ReadData             85.1            181.3
+   SortEvent             85.1            181.3
+  BuildEvent             85.1            181.3
+  WriteEvent             85.1            181.3
+----------------------------------------------------
+       total            340.5            725.2
+====================================================
+
+
+************************* DAQ Summary *************************
+                   Run number : 999999
+                   Start Time : 2026-11-03 12:43:32
+                     End Time : 2026-11-03 12:46:32
+
+                    Live time : 180.3 [s]
+      Total number of trigger : 1073380
+                 Trigger rate : 5952.84 [Hz]
+        Total number of event : 1073380
+  Software Trigger efficiency : 100.00 [%]
+
+           Received data size : 4.095 GBytes (23.253 MB/sec)
+            Written data size : 0.977 GBytes (5.551 MB/sec)
+***************************************************************
+
+2026-11-03 12:46:35 [INFO] CupDAQManager::TF_RunManager: run manger ended
+2026-11-03 12:46:35 [INFO] CupFADCT::Close: FADCT [sid=3]: closed
+2026-11-03 12:46:35 [INFO] CupDAQManager::CloseDAQ: all ADCs are closed
+2026-11-03 12:46:35 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ ended

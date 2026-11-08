@@ -181,5 +181,36 @@ out=$("$NT" --params "$T/nt.params" rate_high --msg "시험" --dry-run 2>&1)
 check "daq-notify rate_high : 알람 (기본 both)"   'printf "%s" "$out" | grep -q "\[DRY\] 알람 : rate_high"'
 check "daq-notify rate_high : 책임자 메일"        'printf "%s" "$out" | grep -qE "routine|책임자"'
 
+echo "[Z] 사건 0 인 런 (2026-11-08 run 4441~4445) — daqtime=0 이어도 벽시계 warmup 뒤 판정한다"
+#  ★ 픽스처는 실물 heartbeat 를 그대로 옮긴 것이다 (/Data/LOG/rcterm.hb, 11-08 14:50 run 4445)
+hbz() {  # run
+   { echo "time=$(date +%s)"; echo "pid=3167942"; echo "phase=running"; echo "run=$1"; echo "subrun=12"
+     echo "state=Running"; echo "statebit=3"; echo "error=0"; echo "status=8"; echo "daqtime=0"; echo "totev=0"; echo "ndaq=2"
+     echo "daq0=FADCDAQ n=0 sr=0 ar=0"; echo "daq1=SADCDAQ n=0 sr=0 ar=0"; } > "$HB"
+}
+rm -f "$ST"; now=$(date +%s)
+sqlite3 "$DB" "insert or replace into runcatalog values(4439,1,'$(ts $((now-86800)))','$(ts $((now-430)))',560000000,86400.0,'desc A');
+               insert or replace into runcatalog values(4440,NULL,NULL,NULL,NULL,NULL,'desc A');"
+printf 'last_run=4439\n' > "$ST"
+hbz 4440; run --min-rate 100 --consecutive 1
+check "처음 본 회차 : rate_low 없음 (warmup)"  '! grep -q " rate_low " "$CALLS"'
+check "run_first_seen 에 4440 이 남는다"        'grep -q "^run_first_seen=4440 [0-9]" "$ST"'
+check "last_run 은 아직 4439"                   '[ "$(sed -n s/^last_run=//p "$ST")" = 4439 ]'
+#  4 분이 지난 것으로 만든다 (5 분 cron 의 다음 회차)
+sed -i "s/^run_first_seen=.*/run_first_seen=4440 $((now-400))/" "$ST"
+hbz 4440; run --min-rate 100 --consecutive 1
+check "벽시계 warmup 뒤 rate_low 가 나간다"     'grep -q " rate_low --msg" "$CALLS"'
+check "사유에 모두 0 Hz -> HV 부터"            'grep -q "모두 0 Hz" "$CALLS" && grep -q "PMT HV" "$CALLS"'
+check "런 교체 판정도 돈다 (last_run=4440)"     '[ "$(sed -n s/^last_run=//p "$ST")" = 4440 ]'
+check "시작 시각 = 처음 본 시각 -> rotate"      'grep -Eq "(^| )rotate " "$CALLS"'
+check "run_first_seen 은 그대로 (다시 안 씀)"   'grep -q "^run_first_seen=4440 $((now-400))$" "$ST"'
+#  daqtime 이 0 이 아닌 정상 런은 여전히 daqtime 으로 판정된다 (처음 본 회차라도)
+rm -f "$ST"; printf 'last_run=4440\n' > "$ST"; hbr 4450 400 50; run --min-rate 100 --consecutive 1
+check "정상 heartbeat 는 daqtime 으로 곧바로 판정" 'grep -q " rate_low --msg" "$CALLS"'
+check "정상 계수율 0 이 아니면 HV 문구는 없다"   '! grep -q "모두 0 Hz" "$CALLS"'
+printf 'alarm_state = %s/daq-alarm.state\non_rate_low = mail\nmail_to = boss@example.org\n' "$T" > "$T/nt2.params"
+out=$("$NT" --params "$T/nt2.params" rate_low --msg "시험" --dry-run 2>&1)
+check "daq-notify rate_low 본문에 '둘 다 0 이면 HV'" 'printf "%s" "$out" | grep -q "둘 다 0" && printf "%s" "$out" | grep -q "GECO"'
+
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

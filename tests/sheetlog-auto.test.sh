@@ -27,6 +27,8 @@ if "--commit" in sys.argv:
         print("gspread.exceptions.APIError: " + r)
         sys.exit(1)
 else:
+    if os.environ.get("FAKE_ZERO"):
+        print("건너뜀(0 사건) 5 런 : 4441 4442 4443 4444 4445")   # 실물 append_runs.py 의 print 형식
     print("추가 대상 : 1 런 (4432 ~ 4432)")
     print("['4432', '2026-11-04', '13:07:06']")
 PY
@@ -94,6 +96,13 @@ check "--status 에 드릴 표시"     'printf "%s" "$out" | grep -q "★ 드릴
 printf 'pid=999999\n' > "$T/drill.active"; : > "$T/tool.calls"; go ok
 check "죽은 플래그면 등재한다"     'grep -q -- "--commit" "$T/tool.calls"'
 rm -f "$T/drill.active"
+
+echo "[9] 0 사건 런을 건너뛰면 로그에 남긴다 (2026-11-08 run 4441~4445)"
+FAKE_ZERO=1 FAKE_COMMIT=ok bash "$SUT" --force >/dev/null 2>&1; rc=$?
+check "rc 0"                      '[ "$rc" -eq 0 ]'
+check "로그에 건너뜀(0 사건)"     'grep -q "건너뜀(0 사건) 5 런 : 4441 4442 4443 4444 4445 -- 시트에 싣지 않는다" "$T/log"'
+out=$(FAKE_ZERO=1 bash "$SUT" --status 2>&1)
+check "--status 에도 보인다"      'printf "%s" "$out" | grep -q "건너뜀(0 사건) 5 런"'
 
 echo; echo "PASS $PASS  FAIL $FAIL"
 [ "$FAIL" -eq 0 ]

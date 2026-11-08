@@ -1,0 +1,25 @@
+2026-11-03 10:33:42 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ now starting
+2026-11-03 10:33:42 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server on port 7814
+2026-11-03 10:33:42 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server start
+2026-11-03 10:33:43 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 7, ip: 127.0.0.1, port: 49886
+2026-11-03 10:33:43 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 0
+2026-11-03 10:33:43 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 8, ip: 127.0.0.1, port: 49898
+2026-11-03 10:33:43 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 1
+2026-11-03 10:33:49 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] CONFIGRUN command received
+
+============ CupDAQManager Prepare Report ==============
+                            type: FADC
+                   number of ADC: 1
+           minimum buffer count : 16
+                  record length : 8
+           number of data point : 496
+  minimum data size for reading : 4096
+         preset number of event : 0
+            preset daq time [s] : 0
+=======================================================
+
+2026-11-03 10:33:50 [INFO] CupDAQManager::PrepareDAQ: prepared to take data from FADC
+2026-11-03 10:33:51 [WARNING] get_serial_id: could not get serial id
+2026-11-03 10:33:51 [ERROR] CupFADCT::Open: FADCT [sid=3]: open falied, check connection and power
+2026-11-03 10:33:51 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] EXIT command received
+2026-11-03 10:33:51 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server ended

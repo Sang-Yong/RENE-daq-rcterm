@@ -1,0 +1,48 @@
+2026-11-03 10:31:04 [INFO] CupDAQManager::RC_TCBCTRLDAQ: TCB controlled DAQ now starting
+2026-11-03 10:31:04 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server on port 7814
+2026-11-03 10:31:04 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server start
+2026-11-03 10:31:05 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 7, ip: 127.0.0.1, port: 50898
+2026-11-03 10:31:05 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 0
+2026-11-03 10:31:06 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: new client connection, socket fd: 8, ip: 127.0.0.1, port: 50902
+2026-11-03 10:31:06 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ]: adding to list of sockets at 1
+2026-11-03 10:31:11 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] CONFIGRUN command received
+
+============ CupDAQManager Prepare Report ==============
+                            type: 
+                   number of ADC: 1
+           minimum buffer count : 16
+                  record length : 8
+           number of data point : 496
+  minimum data size for reading : 4096
+         preset number of event : 0
+            preset daq time [s] : 0
+=======================================================
+
+2026-11-03 10:31:12 [INFO] CupDAQManager::PrepareDAQ: prepared to take data from FADC
+2026-11-03 10:31:12 [INFO] nkusb_open_device: super speed device opened
+2026-11-03 10:31:12 [INFO] nkusb_open_device: bus = 2, address =  12, serial id =  3
+2026-11-03 10:31:12 [INFO] CupFADCT::Open: FADCT [sid=3]: opened
+2026-11-03 10:31:12 [INFO] CupDAQManager::OpenDAQ: all ADCs are opened
+2026-11-03 10:31:12 [INFO] CupDAQManager::TF_RunManager: run manager started
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] STARTRUN command received
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_BuildEvent: event building started
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring started
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_ShrinkToFit: shrink buffer memory to fit started
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs started
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_WriteEvent: writing output data started as FADC mode
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_SortEvent: sorting data started
+2026-11-03 10:31:15 [ERROR] USB3Read: read error:LIBUSB_ERROR_OVERFLOW [sid=3]
+2026-11-03 10:31:15 [ERROR] USB3ReadReg: read error:LIBUSB_ERROR_OVERFLOW [sid=3]
+2026-11-03 10:31:15 [ERROR] CupDAQManager::ReadBCount: error in reading buffer count [sid=3]
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_ReadData: reading data from ADCs ended
+2026-11-03 10:31:15 [WARNING] CupDAQManager::TF_RunManager: daq will be ended by error
+2026-11-03 10:31:15 [INFO] CupDAQManager::OpenNewOutputFile: /Data_ssd/RAW/004424 already exist
+2026-11-03 10:31:15 [WARNING] CupDAQManager::RC_TCBCTRLDAQ: run=4424 ended by error state
+2026-11-03 10:31:15 [INFO] CupDAQManager::OpenNewROOTFile: /Data_ssd/RAW/004424/FADC_004424.root.00000 opened
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] EXIT command received
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_MsgServer: [FADCDAQ] message server ended
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_WriteEvent: output data /Data_ssd/RAW/004424/FADC_004424.root.00000 closed
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_WriteEvent: writing output data ended
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_TriggerMon: trigger monitoring ended
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_BuildEvent: event building ended
+2026-11-03 10:31:15 [INFO] CupDAQManager::TF_SortEvent: sorting data ended
