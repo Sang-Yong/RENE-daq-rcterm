@@ -1,0 +1,8 @@
+Run	Start Date (YYYY-MM-DD)	Start Time (hh:mm)	Duration	Max subrun	Event Rate (kHz)	RAW (GB)	PRD (GB)	Detector	Source	PMT-A HV (V)	PMT-B HV (V)	THR (mV)	Coincidence (ns)	Record length	Time after HV ON	TLT	Description	Data issue
+3785	2026. 03. 30	5:58	5h16m	316	3.1	90	51	Shielding:Side		1680	1642	200	400	8		1x2	LS 주입 직후 데이터 수집	
+3805	2026. 04. 03	19:12	2m	2	7.2	1.3	0.677	Shielding:Side	-	1680	1642	200	400	8		1x2	zzz	
+3807	2026. 04. 03	19:34	12m	12	14	5	2.2	Shielding:Side	-	1680	1642	80	400	8		1x2		
+4431	2026. 11. 03	13:06	23h59m	1439	6.48	577.8	559.1	Full	-	1680	1642	80	100	8	1m	1x2	비토 문턱값 변경(감소) [VETO_test_9layers_v2_mid3_pidfix_all30_thr100_m2_p7off.config: 30ch 변경 → 100×12 off×2 100×16 (이전 200×30)] Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP, Split T [m] = 1	
+4432	2026. 11. 04	13:07	22h53m	1372	6.82	582.3	563.3	Full	-	1680	1642	80	100	8	1m	1x2	Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP, Split T [m] = 1	
+4438	2026. 11. 06	09:19	23h59m	1439	6.76	608.1	587.1	Full	-	1680	1642	80	100	8	1m	1x2	Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP, Split T [m] = 1	
+4439	2026. 11. 07	09:19	23h59m	1439	6.73	606.6	585.6	Full	-	1680	1642	80	100	8	1m	1x2	Yeong-Gwang site at A dong container tent 26.10.15., VETO detector only data taking for MIP, Split T [m] = 1	

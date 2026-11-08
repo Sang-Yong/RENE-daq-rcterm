@@ -1,0 +1,3 @@
+Run	Type	Start	live/wall [h]	Total	Target only	VETO only	V+T	FADC [Hz]	VETO [Hz]	dF/dV [%]	Panels	IBD nGd	acci nGd	IBD nH	acci nH	R_LL [Hz]	fast-n	Li/He	Source
+4280	physics	2026-08-14 23:34	1.1/1.1	3803967	675938	3102844	25185	180.5	805.1	-	6/15	2	0	2640	2568	85.1102	23.9(예비)	—	none
+4281	test	2026-08-15 00:42	0.1/0.1	277312	49631	225770	1911	182.3	805.5	+1.0 / +0.0	-	0	0	192	187	84.9428	1.4(예비)	—	none

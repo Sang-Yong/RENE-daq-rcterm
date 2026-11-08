@@ -314,6 +314,20 @@ if [ "$DRY" -eq 1 ]; then
    exit 0
 fi
 
+# ---- 시트 원장의 pending 을 먼저 민다 (2026-11-09 로컬 우선 등재) ---------------
+#  망이 없던 동안 publish_google.py 가 원장(DAQ_runsummary)에만 적은 행을, 새 런이 없는 회차에도 시트로 보낸다.
+#  ★ 시험(WEBSUMMARY_MON_DIR 이 기본값이 아님)에서는 실물 도구를 부르지 않는다 -- 운영 원장·구글에 닿는다.
+if [ "$PUBLISH" = 1 ]; then
+   LEDGER_TOOL=${WEBSUMMARY_LEDGER_TOOL:-}
+   [ -z "$LEDGER_TOOL" ] && [ "$MON" = "$MON_DEFAULT" ] && LEDGER_TOOL=$REPO/tools/sheetlog/sheet_ledger.py
+   LDIR=$(getp sheet_ledger_dir "")
+   [ -n "$LDIR" ] && case "$LDIR" in /*) ;; *) LDIR=$REPO/$LDIR ;; esac
+   if [ -n "$LEDGER_TOOL" ] && [ -r "$LEDGER_TOOL" ]; then
+      fl=$(timeout 300 python3 "$LEDGER_TOOL" --flush --tab DAQ_runsummary ${LDIR:+--dir "$LDIR"} 2>&1 | grep -E '^(\[|기록함)' | grep -vE '^\[(OK|SKIP)\] DAQ_runsummary : (pending 0|원장 없음)')
+      [ -n "$fl" ] && printf '%s\n' "$fl" | while read -r l; do log "원장 flush : $l"; done
+   fi
+fi
+
 # ---- 새로 할 것이 없다 -- cron 이 시끄러우면 안 되므로 조용히 나간다 ---
 if [ ${#NEWLIST_ARR[@]} -eq 0 ]; then
    [ "$FORCE" -eq 1 ] && log "[FORCE] 새로 처리할 완결 런이 없다 (start_run=$START_RUN)"
@@ -486,6 +500,9 @@ else
          log "[OK  ] publish"
          rm -f "$FAILSTATE.drive" 2>/dev/null
       fi
+      #  망이 없으면 publish_google.py 는 원장에만 적고 0 을 낸다 (2026-11-09). 막지 않고 한 줄 남긴다
+      tail -c "+$((LOGPOS + 1))" "$LOG" 2>/dev/null | grep -q '^\[SHEET\].*보류' && \
+         log "[WARN] publish : 시트 보류 (망 없음) -- 로컬 원장에 적혔다. 다음 회차·망 복귀 때 원장에서 민다"
    else
       log "[SKIP] publish=0 -- 로컬 생성까지만"
    fi

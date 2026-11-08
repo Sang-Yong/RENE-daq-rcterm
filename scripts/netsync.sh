@@ -24,7 +24,8 @@
 #  전환
 #     up -> down   연속 NETSYNC_DOWN_CONSEC(기본 2) 회 실패해야 down. 일시적 흔들림으로 메일 두 통을 내지 않는다.
 #                  로그 + net_down 메일 한 통을 큐에 (망이 돌아오면 그때 나간다). 알람(소리)은 없다
-#     down -> up   곧바로 : 메일 큐 비우기(mailq-send) · sheetlog-auto (보통 게이트) · backup-sheetlog ·
+#     down -> up   곧바로 : 메일 큐 비우기(mailq-send) · 시트 원장 flush(sheet_ledger.py --flush, 전 탭 -- 망이 없던 동안
+#                  로컬 원장에만 적힌 행을 원장 값으로 시트에, 2026-11-09) · sheetlog-auto (보통 게이트) · backup-sheetlog ·
 #                  reactor-power-log · websummary(뒤에서, 자기 잠금이 겹치면 스스로 건너뛴다) ·
 #                  복귀 메일 1 통 (단절 시간 · 밀린 메일 수 · 등재 런 수)
 #     ★ sheetlog-auto 를 --force 로 부르지 않는다 (2026-11-06). 망 복귀가 등재를 서두를 이유가 없고,
@@ -50,6 +51,7 @@ SHEETLOG_CMD=${NETSYNC_SHEETLOG_CMD:-$DIR/scripts/sheetlog-auto.sh}
 BACKUPSHEET_CMD=${NETSYNC_BACKUPSHEET_CMD:-$DIR/scripts/backup-sheetlog.sh}
 REACTOR_CMD=${NETSYNC_REACTOR_CMD:-$DIR/scripts/reactor-power-log.sh}
 WEBSUMMARY_CMD=${NETSYNC_WEBSUMMARY_CMD:-$DIR/tools/monitor/websummary.sh}
+LEDGER_CMD=${NETSYNC_LEDGER_CMD:-$DIR/tools/sheetlog/sheet_ledger.py}
 QUEUES=${NETSYNC_QUEUES:-/scratch/MAILQ /Data_ssd/LOG/MAILQ}
 PROBE=${NETSYNC_PROBE:-}            # 시험용 : '<스크립트> <검사이름>' 의 종료코드를 결과로 쓴다
 BG=${NETSYNC_BG:-1}                 # 1 이면 websummary 를 뒤에서 (시험은 0)
@@ -92,6 +94,7 @@ if [ "$MODE" = status ]; then
    drill_active && echo "  ★ 자율 복구 드릴 중 (pid $(drill_flag_get pid), $DRILL_FLAG) -- 복귀해도 시트·웹 발행은 건너뛴다"
    [ -n "$c" ] && [ $(( $(date +%s) - c )) -gt "$NETSYNC_FRESH_SEC" ] && echo "  ★ 상태가 오래됐다 -- cron 이 사는지 볼 것 (crontab -l)"
    for q in $QUEUES; do [ -d "$q" ] && echo "  메일 큐   : $q  대기 $(find "$q" -maxdepth 1 -name '*.mail' 2>/dev/null | wc -l) 통"; done
+   [ -x "$LEDGER_CMD" ] && "$LEDGER_CMD" --status 2>/dev/null | sed -n '2,$p' | sed 's/^ */  시트 원장 : /'
    [ -s "$LOG" ] && { echo "  최근 로그 :"; tail -5 "$LOG" | sed 's/^/    /'; }
    exit 0
 fi
@@ -142,6 +145,11 @@ flush() {                # $1 = 단절 시작 epoch
    q0=$(queued)
    log "망 복귀 -- 밀린 것을 내보낸다 (단절 $(dur $(( now - down_at ))), 메일 큐 $q0 통)"
    timeout 600 "$MAILQ_CMD" >/dev/null 2>&1; log "  mailq-send rc=$?"
+   #  ★ 시트 원장 : 망이 없던 동안 원장에만 적힌 행을 먼저 민다 (드릴 중이면 도구가 스스로 건너뛴다)
+   ledout=$(timeout 900 "$LEDGER_CMD" --flush 2>&1); lrc=$?
+   lsent=$(printf '%s\n' "$ledout" | grep -c '^\[SHEET\].*되대조 통과')
+   log "  sheet_ledger --flush rc=$lrc (시트로 보낸 탭 $lsent)"
+   printf '%s\n' "$ledout" | grep -E '^\[(SHEET|FAIL|SKIP)\]' | head -8 | sed 's/^/    /' >> "$LOG" 2>/dev/null
    if drill_active; then
       DRILLNOW=1; sheetmsg="시트 등재 건너뜀 (드릴 중)"
       log "  sheetlog-auto 건너뜀 (드릴 중 : $DRILL_FLAG pid $(drill_flag_get pid)) -- 드릴 시험 런을 싣지 않는다"
@@ -166,7 +174,7 @@ flush() {                # $1 = 단절 시작 epoch
    fi
    q1=$(queued)
    "$NOTIFY" --params "$PARAMS" net_restored \
-      --msg "바깥 망 복귀 -- 단절 $(dur $(( now - down_at ))) ($(date -d @"$down_at" '+%m-%d %H:%M') ~ $(date -d @"$now" '+%H:%M')) · 밀린 메일 $q0 통 중 $(( q0 - q1 )) 통 보냄 · $sheetmsg" \
+      --msg "바깥 망 복귀 -- 단절 $(dur $(( now - down_at ))) ($(date -d @"$down_at" '+%m-%d %H:%M') ~ $(date -d @"$now" '+%H:%M')) · 밀린 메일 $q0 통 중 $(( q0 - q1 )) 통 보냄 · 시트 원장 flush rc=$lrc · $sheetmsg" \
       >/dev/null 2>&1 || log "WARN 복귀 메일 실패"
 }
 
@@ -174,7 +182,7 @@ if [ "$NOW_OK" = 1 ]; then
    if [ "$prev" = down ]; then
       say "전환 : down -> up  (단절 $(dur $(( now - since ))))"
       if [ "$MODE" = dry ]; then if drill_active; then say "[DRY] mailq-send · backup-sheetlog · reactor-power-log · net_restored 메일을 했을 것 (드릴 중 : sheetlog-auto · websummary 건너뜀)"
-         else say "[DRY] mailq-send · sheetlog-auto · backup-sheetlog · reactor-power-log · websummary · net_restored 메일을 했을 것"; fi
+         else say "[DRY] mailq-send · sheet_ledger --flush · sheetlog-auto · backup-sheetlog · reactor-power-log · websummary · net_restored 메일을 했을 것"; fi
       else
          write_state up "$now" 0 ""          # ★ 먼저 up 으로 적어야 내보내는 쪽들이 netsync_is_down 에 막히지 않는다
          flush "$since"

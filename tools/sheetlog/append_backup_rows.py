@@ -18,9 +18,18 @@
       같은 (run, date, time) 이 이미 있으면 건너뛴다.
     * 기본은 미리보기. --commit 이라야 쓴다. 쓰기 전 시트 전체를 백업하고, 쓴 뒤 되읽어 대조한다.
     * --sheet-tsv 를 주면 구글 대신 그 TSV 를 읽고(기존 행) 거기에 덧붙인다 -- 시험용. 네트워크에 닿지 않는다.
+      원장은 그 파일 옆 <파일>.ledger/ 에 둔다 (운영 원장 무접촉).
+
+★ 로컬 우선 등재 (2026-11-09 사용자 지시, tools/sheetlog/sheet_ledger.py)
+    등재 = 로컬 원장(/Data_ssd/LOG/sheetledger/back_up_hdd_log.tsv)에 적는 것. 시트는 원장의 사본이다.
+    망이 되면 시트를 읽어 원장 거울을 갱신하고(사람이 시트에서 채운 열이 원장에 남는다), 새 행·마지막 시각·No 는
+    원장에서 정한다. --commit 이면 원장에 적고 시트로 민다. 망이 없으면 원장에만 적고 '[SHEET] 보류' (종료 0).
+    --fill-labels 로 채운 라벨도 원장의 그 행을 고치고(pending) 시트의 그 칸을 원장 값으로 고친다.
+    종료 : 0 정상(보류 포함) · 3 되대조 어긋남 · 4 인증 · 5 망이 없고 원장도 비었다 · 6 그 밖
 """
 import argparse, glob, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sheet_ledger as sl   # noqa: E402  로컬 원장 (2026-11-09)
 import backup_labels   # noqa: E402  라벨 정본 (docs/backup-disks/disks.tsv). 새 시리얼은 여기서 자동으로 번호를 받는다 (2026-09-16)
 
 SHEET_ID = "1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGusqD0"
@@ -210,22 +219,27 @@ def main():
     if a.source_dirs:
         srcdirs = {ln.strip() for ln in read_lines(a.source_dirs) if ln.strip()}
 
-    # ---- 기존 행 ----
-    ws = None
+    # ---- 기존 행 = 원장 (망이 되면 시트로 거울을 먼저 갱신한다) ----
+    tab = "back_up_hdd_log"
+    ldir = (os.path.abspath(a.sheet_tsv) + ".ledger") if a.sheet_tsv else None
+    lg = sl.Ledger(tab, HEADER, ["Run", "Backup Date", "Backup Time"], SHEET_ID, GID, dir=ldir)
     if a.sheet_tsv:
-        grid = load_sheet_tsv(a.sheet_tsv)
+        ws = sl.TsvSheet(a.sheet_tsv, tab); grid = ws.get_all_values(); nrc = 0
     else:
-        creds = a.creds or find_creds()
-        if not creds:
-            sys.exit("[FATAL] 서비스 계정 json 을 찾지 못했다")
-        from google.oauth2.service_account import Credentials
-        import gspread
-        cr = Credentials.from_service_account_file(creds, scopes=SCOPES)
-        ws = gspread.authorize(cr).open_by_key(SHEET_ID).get_worksheet_by_id(GID)
-        grid = ws.get_all_values()
-    if not grid or [c.strip() for c in grid[0][:3]] != HEADER[:3]:
-        sys.exit(f"[FATAL] 헤더가 기대와 다르다 : {grid[0][:5] if grid else '(빈 시트)'}")
-    body = [r for r in grid[1:] if any(c.strip() for c in r)]
+        ws, grid, nrc = sl.online(SHEET_ID, GID, tab, a.creds or None)
+    if grid is not None:
+        if not grid or [c.strip() for c in grid[0][:3]] != HEADER[:3]:
+            sys.exit(f"[FATAL] 헤더가 기대와 다르다 : {grid[0][:5] if grid else '(빈 시트)'}")
+        try:
+            sl.pull(lg, grid, sl.TABS[tab])                 # 메모리에서만 (미리보기는 원장을 안 바꾼다)
+        except ValueError as e:
+            sys.exit(f"[FATAL] {e}")
+    elif not lg.rows:
+        print(f"[FAIL] 원장이 비어 있고 시트도 못 읽었다 (rc {nrc}) -- 첫 등재는 망이 있을 때 ({lg.path})")
+        return nrc or sl.RC_NET
+    else:
+        print(f"[SHEET] 시트를 못 읽는다 (rc {nrc}) -- 원장({lg.path})으로 정한다")
+    body = [r["vals"] for r in lg.rows]
     have = {(r[3].strip(), r[1].strip(), r[2].strip()) for r in body if len(r) > 3}
     last_ts = max((f"{r[1].strip()} {r[2].strip()}" for r in body if len(r) > 2 and r[1].strip()), default="")
     nos = [int(r[0]) for r in body if r and r[0].strip().isdigit()]
@@ -253,15 +267,18 @@ def main():
         print(f"[LABEL] 새 하드 {serial} -> {lab} ({cat or '?'}) -- 정본 {a.disks_tsv} 에 적었다. 스티커 : {lab} / {serial}")
 
     # ---- 빈 라벨 채우기 (--fill-labels) : 정본에 있는 시리얼/UUID 의 빈 Disk Label 칸만. 다른 칸은 안 건드린다 ----
+    #  원장의 그 행을 고치고(upsert -> pending) flush 가 시트의 그 칸만 원장 값으로 고친다 (빈 칸·보호 열은 안 건드린다)
     fills = []
     if a.fill_labels:
         labels = backup_labels.labels_of(backup_labels.load_rows(a.disks_tsv))
-        for i, row in enumerate(grid):
-            if i == 0 or len(row) <= 16 or row[12].strip():
+        for r in lg.rows:
+            v = r["vals"]
+            if r["state"] not in ("sent", "pending") or len(v) <= 16 or v[12].strip():
                 continue
-            lab = labels.get(row[16].strip()) or labels.get(row[14].strip())
+            lab = labels.get(v[16].strip()) or labels.get(v[14].strip())
             if lab:
-                fills.append((i + 1, lab, row[16].strip() or row[14].strip()))
+                nv = list(v); nv[12] = lab
+                fills.append(((r["key"], nv), lab, v[16].strip() or v[14].strip()))   # ★ 원장 키 그대로 (같은 키 둘째 행 'k#2' 보존)
         print(f"[FILL] 빈 Disk Label {len(fills)} 칸을 채운다" + (f" : " + ", ".join(sorted({f'{s}->{l}' for _, l, s in fills})) if fills else ""))
 
     if a.commit:                                      # 정본의 런 수·파일·GB·마지막 시각을 기록 합으로 채운다 (시리얼을 아는 하드만)
@@ -276,48 +293,19 @@ def main():
     print(f"[INFO] 시트 기존 {len(body)} 행 (마지막 {last_ts or '-'}) · 서버 기록 {len(recs)} 건 · 새 행 {len(new)}")
     for row in new:
         print("  " + " | ".join(row[:8]) + f" | {row[13]} {row[16]} | {row[11]}")
-    if not new and not fills:
+    if not new and not fills and not lg.pending():
         return 0
     if not a.commit:
-        print("[DRY] --commit 이 없어 쓰지 않는다")
+        print("[DRY] --commit 이 없어 쓰지 않는다" + (f" (원장 pending {len(lg.pending())} 행은 다음 등재 때 함께 민다)" if lg.pending() else ""))
         return 0
-
-    if a.sheet_tsv:
-        if fills:
-            lines = load_sheet_tsv(a.sheet_tsv)
-            for rowno, lab, _ in fills:
-                lines[rowno - 1][12] = lab
-            with open(a.sheet_tsv, "w", encoding="utf-8") as fh:
-                for row in lines:
-                    fh.write("\t".join(row) + "\n")
-            print(f"[SHEET-TSV] Disk Label {len(fills)} 칸 채움 -> {a.sheet_tsv}")
-        with open(a.sheet_tsv, "a", encoding="utf-8") as fh:
-            for row in new:
-                fh.write("\t".join(row) + "\n")
-        print(f"[SHEET-TSV] {len(new)} 행 추가 -> {a.sheet_tsv}")
-        return 0
-
-    os.makedirs(a.backup_dir, exist_ok=True)
-    bak = os.path.join(a.backup_dir, time.strftime("sheet-backup-%Y%m%d%H%M%S.tsv"))
-    with open(bak, "w", encoding="utf-8") as fh:
-        for r in grid:
-            fh.write("\t".join(r) + "\n")
-    if fills:
-        ws.batch_update([{"range": f"M{rowno}", "values": [[lab]]} for rowno, lab, _ in fills], value_input_option="RAW")
-        for rowno, lab, _ in fills:                      # 되대조 기준도 같이 고친다 (그 칸만 바뀌어야 한다)
-            grid[rowno - 1][12] = lab
-        print(f"[SHEET] Disk Label {len(fills)} 칸 채움")
-    if new:
-        ws.append_rows(new, value_input_option="RAW")
-    after = ws.get_all_values()
-    kept = [r for r in after[:len(grid)]]
-    if [[c.strip() for c in x] for x in kept] != [[c.strip() for c in x] for x in grid]:
-        sys.exit(f"[FATAL] 되대조 실패 -- 기존 행이 바뀌었다. 백업 {bak}")
-    tail = [[c.strip() for c in r[:len(HEADER)]] for r in after[len(grid):len(grid) + len(new)]]
-    if tail != [[c.strip() for c in r] for r in new]:
-        sys.exit(f"[FATAL] 되대조 실패 -- 쓴 것과 읽은 것이 다르다. 백업 {bak}")
-    print(f"[SHEET] {len(new)} 행 추가 + 되대조 통과 (백업 {bak})")
-    return 0
+    os.environ.setdefault("RENE_SHEET_BACKUP_DIR", a.backup_dir) if not a.sheet_tsv else None
+    lrc, src, n_new, sent, rng = sl.commit_rows(lg, new + [nv for nv, _, _ in fills], ws, grid, mode="upsert")
+    if lrc:
+        return lrc
+    if src == 0 and ws is not None:
+        print(f"[SHEET] {len(new)} 행 추가" + (f" · Disk Label {len(fills)} 칸 채움" if fills else "") + " (원장 경유)")
+    #  망 없음(5)은 보류 = 정상. 시트 쪽 진짜 실패만 종료코드로
+    return 0 if src in (0, sl.RC_NET) else src
 
 
 if __name__ == "__main__":

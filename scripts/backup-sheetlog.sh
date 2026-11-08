@@ -15,6 +15,9 @@
 #     * ssh 가 안 되면 (서버 다운·링크 끊김) 조용히 물러난다. 다음 시각에 다시 한다.
 #     * 실패로 죽지 않는다. 종료코드는 언제나 0.
 #
+#  ★ 로컬 우선 등재 (2026-11-09) : append_backup_rows.py 가 로컬 원장(/Data_ssd/LOG/sheetledger/back_up_hdd_log.tsv)에
+#    먼저 적고(=등재) 시트로 민다. 망이 없으면 원장에만 적고 '[SHEET] 보류' -- 등재 실패가 아니다. 원장의 pending 은
+#    매 회차(등재할 것이 없어도) 도구가 다시 민다.
 #  ★ 이 스크립트의 명령줄과 안의 명령 어디에도 백업 스크립트 이름을 넣지 말 것 —
 #    저장소 서버의 other_backup() 이 pgrep -f 로 그 이름을 찾는다 (§11.183).
 #  ★ 세션이 끝났을 때 '종료 code=' 줄은 그 세션이 시작한 뒤에 찍힌 것만 인용한다 (2026-09-12).
@@ -51,6 +54,7 @@ if [ "$STATUS" -eq 1 ]; then
    echo "  마지막 : $(sed -n 's/^last=//p' "$STATE" 2>/dev/null)"
    echo "  세션   : pid $(sed -n 's/^session_pid=//p' "$STATE" 2>/dev/null)"
    echo "  로그   : $(tail -1 "$LOG" 2>/dev/null)"
+   echo "  원장   : $(cd "$DIR" && python3 tools/sheetlog/sheet_ledger.py --status --tab back_up_hdd_log 2>/dev/null | sed -n '2p' | sed 's/^ *//')"
    exit 0
 fi
 
@@ -110,7 +114,12 @@ if [ "$DRY" -eq 1 ]; then exit 0; fi
 if [ "${n:-0}" -gt 0 ] && [ "$NONOTIFY" -eq 0 ]; then
    D=$(mktemp /tmp/backup-sheetlog-XXXXXX)
    printf '%s\n' "$out" > "$D"
-   "$NOTIFY" --params "$PARAMS" sheetlog --msg "백업 하드 기록 시트에 ${n}행 등재 (back_up_hdd_log)" --detail-file "$D" >/dev/null 2>&1
+   if printf '%s\n' "$out" | grep -q '^\[SHEET\].*보류.*망 없음'; then
+      m="백업 하드 기록 원장에 ${n}행 등재 (back_up_hdd_log) -- 시트 전송은 보류 (망 없음), 망이 돌아오면 원장 값으로 동기화"
+   else
+      m="백업 하드 기록 시트에 ${n}행 등재 (back_up_hdd_log)"
+   fi
+   "$NOTIFY" --params "$PARAMS" sheetlog --msg "$m" --detail-file "$D" >/dev/null 2>&1
    rm -f "$D"
 fi
 exit 0

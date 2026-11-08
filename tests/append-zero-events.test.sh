@@ -3,6 +3,7 @@
 #   GoodRuns 에 실렸다). 구글·운영 DB 무접촉 (가짜 gspread, 가짜 runcatalog)
 set -u
 DIR=$(cd "$(dirname "$0")/.." && pwd); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+export RENE_SHEET_LEDGER_DIR=$T/ledger RENE_SHEET_BACKUP_DIR=$T/ledger-bak DRILL_FLAG=$T/drill.active   # ★ 운영 원장 무접촉 (2026-11-09)
 export RENE_CONFIG_DIRS=$T/none RENE_RAW_ROOTS=$T/noraw THR_TABLE=$T/none.tsv RENE_RUNDB=$T/run.db
 python3 - "$T/run.db" <<'PY'
 import sqlite3, sys

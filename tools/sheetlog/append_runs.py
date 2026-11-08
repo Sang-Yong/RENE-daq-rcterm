@@ -6,6 +6,14 @@
   * 마지막 작성 줄 다음의 빈 줄부터 이어 쓴다
 
 기본은 미리보기다.  실제로 쓰려면 --commit 을 준다.
+
+★ 2026-11-09 (사용자 지시 "로컬을 우선으로 먼저 등재 · 망이 확인될 때 로컬 기준으로 동기화") :
+  런 추가는 로컬 원장(tools/sheetlog/sheet_ledger.py, /Data_ssd/LOG/sheetledger/Y2026B.tsv)이 정본이다.
+  --commit 은 원장에 먼저 적고(=등재) 시트로 민다. 망이 없으면 원장에만 적고 '[SHEET] 보류' (종료 0).
+  마지막 Run · 직전 행 양식 값 · 헤더는 원장에서 정한다 (망이 되면 시트를 읽어 원장 거울을 먼저 갱신).
+  --offline : 시트에 붙어 보지도 않는다 (netsync 가 망 단절이라 했을 때 sheetlog-auto 가 준다).
+  --update-desc · --insert 는 사람이 망이 있을 때 쓰는 손 도구라 예전처럼 시트에 바로 쓴다 (원장은 다음 회차 거울 갱신이 따라간다).
+  종료 : 0 정상(보류 포함) · 3 되대조 어긋남 · 4 인증 · 5 망이 없고 원장도 비었다 · 6 그 밖
 """
 import argparse, glob, os, sqlite3, subprocess, sys, datetime, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -407,12 +415,17 @@ def main():
     ap.add_argument("--full", action="store_true", help="--update-desc · --insert 미리보기에서 Description 을 자르지 않고 보인다")
     ap.add_argument("--sheet-tsv", metavar="FILE",
                     help="시험용 : 구글 대신 이 TSV 를 시트로 읽는다 (--update-desc · --insert 미리보기만. 쓰지 않는다)")
+    ap.add_argument("--offline", action="store_true",
+                    help="시트에 붙어 보지도 않는다 (netsync 가 망 단절이라고 했을 때). 원장만으로 정하고 적는다")
     ap.add_argument("--insert", metavar="RUNS",
                     help="빠진 런을 번호 순서에 맞게 끼워 넣는다 (쉼표로 구분). "
                          "기존 행의 내용은 그대로이고 위치만 아래로 밀린다")
     a = ap.parse_args()
     global ALLOW_SCAN
     ALLOW_SCAN = bool(a.commit)
+
+    if not (a.update_desc or a.insert):
+        return main_ledger(a)        # ★ 런 추가는 로컬 원장 경유 (2026-11-09)
 
     if a.sheet_tsv:
         #  구글 무접촉 시험 경로. 쓰기 동작은 막는다
@@ -454,24 +467,50 @@ def main():
     if a.insert:
         return do_insert(a, ws, grid, hdr_i, hdr, col, run_c)
 
-    # 마지막으로 Run 번호가 적힌 줄
-    last_i = last_run = None
-    for i in range(len(grid) - 1, hdr_i, -1):
-        cell = grid[i][run_c] if run_c < len(grid[i]) else ""
-        if cell.strip().isdigit():
-            last_i, last_run = i, int(cell.strip())
-            break
-    if last_run is None:
-        sys.exit("기존 Run 행을 찾지 못했다")
-    print("마지막 작성 : Run %d (시트 %d행)" % (last_run, last_i + 1))
+    return 0
 
-    # 그 뒤가 정말 비어 있는지 확인한다. 아니면 멈춘다 (덮어쓰기 방지)
-    for i in range(last_i + 1, len(grid)):
-        if any(c.strip() for c in grid[i]):
-            sys.exit("멈춤 : %d행에 내용이 있다. 덮어쓸 수 없다" % (i + 1))
 
-    carry = {c: (grid[last_i][col[norm(c)]] if col.get(norm(c), 99) < len(grid[last_i]) else "")
-             for c in CARRY}
+def main_ledger(a):
+    """런 추가 경로 -- 로컬 원장(tools/sheetlog/sheet_ledger.py, 탭 Y2026B)이 정본이다 (2026-11-09 사용자 지시).
+
+    망이 되면 시트를 읽어 원장 거울을 갱신하고(사람이 시트에서 고친 양식 열이 그대로 이어진다),
+    마지막 Run · 직전 행 양식 값 · 헤더는 원장에서 정한다. --commit 이면 원장에 적고(=등재) 시트로 민다.
+    망이 없으면 원장에만 적고 '[SHEET] 보류' -- 종료 0. 되대조 어긋남 3 · 인증 4 · 시트 오류 6.
+    """
+    import sheet_ledger as sl
+    global ELIGIBLE, ALLOW_SCAN
+    if a.sheet_tsv:
+        print("--sheet-tsv 는 --update-desc · --insert 미리보기에만 쓴다 (런 추가 경로의 시험은 RENE_SHEET_FAKE_DIR)")
+        return 2
+    lg = sl.Ledger("Y2026B", key_cols=["Run"], sheet_id=SHEET_ID, gid=GID)
+    ws, grid, nrc = sl.online(SHEET_ID, GID, "Y2026B", a.creds, offline=a.offline)
+    if grid is not None:
+        try:
+            sl.pull(lg, grid, sl.TABS["Y2026B"])          # 메모리에서만 (미리보기는 원장을 안 바꾼다)
+        except ValueError as e:
+            print("[FATAL] %s" % e); return sl.RC_OTHER
+        print("탭 'Y2026B'  %d행 (시트) · 원장 %d행" % (len(grid), len(lg.rows)))
+    else:
+        print("[SHEET] 시트를 못 읽는다 (rc %d) -- 원장(%s)으로 정한다" % (nrc, lg.path))
+    if not lg.rows or not lg.header:
+        print("[FAIL] 원장이 비어 있고 시트도 못 읽었다 -- 첫 등재는 망이 있을 때 한 번 해야 한다 (%s)" % lg.path)
+        return nrc or sl.RC_NET
+    hdr = lg.header
+    col = {norm(c): j for j, c in enumerate(hdr) if c.strip()}
+    if "run" not in col:
+        print("[FATAL] 원장 헤더에 Run 이 없다"); return sl.RC_OTHER
+    runs = {}
+    for r in lg.rows:
+        if r["key"].isdigit():
+            runs[int(r["key"])] = r
+    if not runs:
+        print("[FAIL] 원장에 Run 행이 없다"); return sl.RC_OTHER
+    #  마지막 Run = 원장에 한 번이라도 오른 런 중 가장 큰 것 (removed 포함 -- 사람이 시트에서 지운 런을 다시 싣지 않는다)
+    last_run = max(runs)
+    live = [k for k, r in runs.items() if r["state"] in ("sent", "pending", "foreign")]
+    src = runs[max(live)] if live else runs[last_run]
+    print("마지막 작성 : Run %d (원장, 상태 %s)" % (last_run, runs[last_run]["state"]))
+    carry = {c: (src["vals"][col[norm(c)]] if col.get(norm(c), 99) < len(src["vals"]) else "") for c in CARRY}
     print("복사해 갈 값 :", {k: v for k, v in carry.items() if v})
 
     pre = {}
@@ -504,11 +543,13 @@ def main():
     if a.limit:
         rows = rows[:a.limit]
     print("추가 대상 : %d 런 (%s ~ %s)" % (len(rows), rows[0][0], rows[-1][0]) if rows else "추가할 런이 없다")
+    pend = [r["key"] for r in lg.pending()]
+    if pend:
+        print("원장 pending (시트에 아직 안 간 것) : %d 행 [%s]" % (len(pend), " ".join(pend[:20])))
     if not rows:
-        return
+        return 0
 
-    global ELIGIBLE
-    ELIGIBLE = sheet_runs(grid, hdr_i, run_c) | {r[0] for r in rows}
+    ELIGIBLE = set(runs) | {r[0] for r in rows}
     out = [make_row(r, pre, hdr, col, carry) for r in rows]
     # 쓰기 전에는 전부 보여 준다. 20행이 넘으면 앞뒤만.
     show = out if len(out) <= 20 else out[:10] + out[-10:]
@@ -516,33 +557,25 @@ def main():
     for l in show:
         print([str(x)[:40] for x in l])
 
-    first = last_i + 2                      # 1-base, 마지막 줄 바로 다음
-    last = first + len(out) - 1
-    #  ★ 범위 쓰기는 그리드 밖이면 400 'exceeds grid limits' 로 거부된다 (2026-10-16 Y2026B 358행).
-    #    미리보기에서는 그리드를 건드리지 않고 늘릴 행 수만 알린다
-    sheet_grid.ensure_rows(ws, last, a.commit)
+    if grid is not None:
+        #  ★ 범위 쓰기는 그리드 밖이면 400 'exceeds grid limits' 로 거부된다 (2026-10-16 Y2026B 358행).
+        #    미리보기에서는 그리드를 건드리지 않고 늘릴 행 수만 알린다 (쓰기는 원장 flush 가 ensure_rows 를 부른다)
+        try:
+            first = sl.anchor_row(grid, sl.find_header(grid, "runmax"), sl.TABS["Y2026B"], lg.key_idx())
+            sheet_grid.ensure_rows(ws, first + len(lg.pending()) + len(out), False)
+        except ValueError as e:
+            print("★ %s" % e)
 
     if not a.commit:
         print("\n미리보기다. 실제로 쓰려면 --commit")
-        return
+        return 0
 
-    before = [r[:] for r in grid[:last_i + 1]]
-    rng = gspread.utils.rowcol_to_a1(first, 1) + ":" + \
-          gspread.utils.rowcol_to_a1(last, len(hdr))
-    ws.update(values=out, range_name=rng, value_input_option="USER_ENTERED")
-    print("기록함 : %s  (%d행)" % (rng, len(out)))
-
-    # ---- 대조 : 기존 행이 그대로이고 새 행의 Run 이 맞는지 (11.5 규칙 4) ----
-    back = ws.get_all_values()
-    bad = sum(1 for x, y in zip(before, back) if [c.strip() for c in x] != [c.strip() for c in y])
-    bad += 0 if len(back) >= len(before) else len(before) - len(back)
-    got = [back[i][run_c].strip() if i < len(back) and run_c < len(back[i]) else "" for i in range(first - 1, last)]
-    miss = [str(r[0]) for r, g in zip(rows, got) if g != str(r[0])]
-    print("대조 : 기존 %d행 중 어긋남 %d건 · 새 행 Run 불일치 %d건%s"
-          % (len(before), bad, len(miss), "" if bad == 0 and not miss else "  ← 확인 필요 " + " ".join(miss)))
-    if bad or miss:
-        sys.exit(3)
+    lrc, src_rc, new, sent, rng = sl.commit_rows(lg, [[str(v) for v in l] for l in out], ws, grid, mode="insert")
+    if lrc:
+        return lrc
+    #  로컬 등재는 됐다. 망 없음(5)은 보류라 성공이고, 시트 쪽 진짜 실패만 종료코드로 알린다
+    return 0 if src_rc in (0, sl.RC_NET) else src_rc
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

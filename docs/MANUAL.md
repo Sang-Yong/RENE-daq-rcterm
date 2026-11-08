@@ -317,6 +317,45 @@ scripts/pdu-power.sh off 1 2 3 / on 2    # 낱개. 채널은 1~3 만
 - 종료코드 0 정상 · 1 사용법/설정/거부 · 2 로그인·HTTP 실패 · 3 되읽은 상태가 기대와 다름. 로그 `/Data_ssd/LOG/pdu-power.log` (비밀번호는 안 남긴다).
 - ★ 전원을 올린 뒤에는 트리거 설정이 없다 : `src/NOTICE_CODE_RUN.sh` → `src/usbreset` 2 회 → 10 s 더미 런 → 확인 런 (TCB 로그 `is aligned` 8 줄, LIBUSB 0).
 
+### 8.2 시트 로컬 원장 — `tools/sheetlog/sheet_ledger.py` (2026-11-09)
+
+구글 시트에 쓰는 도구(`append_runs.py` · `append_backup_rows.py` · `publish_google.py` · `reactor_power_log.py`)는 먼저
+**로컬 원장** `/Data_ssd/LOG/sheetledger/<탭>.tsv` 에 적고(= 등재), 망이 되면 원장의 pending 행을 시트로 민다(flush).
+망 복귀 때는 `netsync.sh` 가 `--flush` 를 부른다. KHNP_daily_power 는 자기 TSV(`reactor_power.tsv`)가 원장이다.
+
+```bash
+python3 tools/sheetlog/sheet_ledger.py --status                  # 탭마다 pending/sent/foreign/removed/failed. 원장 없으면 '씨앗 필요'
+python3 tools/sheetlog/sheet_ledger.py --flush [--tab X] [--dry-run]
+python3 tools/sheetlog/sheet_ledger.py --drop 4460 --tab Y2026B  # pending/failed 행 하나 빼기 (sent 는 거부)
+```
+
+**★ 배포 때 씨앗 (망이 있을 때 한 번, 세 탭)** — 원장이 없으면 망이 끊겼을 때 로컬 등재가 안 된다
+(`append_runs --offline` 이 `[FAIL] 원장이 비어 있고…` rc 5, sheetlog-auto 가 실패 메일 한 번). 씨앗은 시트를 읽기만 한다.
+
+```bash
+cd <저장소>
+python3 tools/sheetlog/sheet_ledger.py --pull --tab Y2026B          --dry-run   # 미리보기 (원장 안 만든다)
+python3 tools/sheetlog/sheet_ledger.py --pull --tab Y2026B                      # GoodRuns gid 0
+python3 tools/sheetlog/sheet_ledger.py --pull --tab back_up_hdd_log             # GoodRuns gid 219954027
+python3 tools/sheetlog/sheet_ledger.py --pull --tab DAQ_runsummary              # GoodRuns gid 511745186 (websummary.params 의 sheet_id/sheet_gid 와 같아야 한다)
+python3 tools/sheetlog/sheet_ledger.py --status                                 # 세 탭 모두 원장이 있고 pending 0
+```
+
+sheet_id · gid 가 기본값(`TABS`)과 다르면 `--sheet-id … --gid …` 를 덧붙인다. 빈 탭은 원장을 만들지 않는다(쓰는 도구의 첫 등재가 헤더부터 쓴다).
+
+**시트 헤더가 바뀌었을 때 (열 추가·이동·이름 변경)** — flush 와 쓰는 도구가 `원장 헤더와 시트 헤더가 다르다` 로 rc 6 을 매 회차 낸다
+(메일은 같은 사유 한 번). 원장은 시트와 열 순서가 같아야 하므로 다시 씨앗을 만든다.
+
+```bash
+python3 tools/sheetlog/sheet_ledger.py --status --tab Y2026B       # pending 이 있는지 먼저 본다
+D=/Data_ssd/LOG/sheetledger; cp -p $D/Y2026B.tsv $D/Y2026B.tsv.bak-$(date +%Y%m%d%H%M)
+#  pending 0 이면 : 원장을 치우고 다시 씨앗
+mv $D/Y2026B.tsv $D/Y2026B.tsv.old-header && python3 tools/sheetlog/sheet_ledger.py --pull --tab Y2026B
+#  pending 이 있으면 : 백업 원장에서 pending 행의 키를 적어 둔 뒤 위와 같이 다시 씨앗을 만들고,
+#  쓰는 도구를 다시 돌려 그 런들을 새 헤더로 등재한다 (append_runs.py --commit 는 원장의 마지막 Run 뒤만 싣는다 —
+#  pending 런이 마지막 Run 뒤에 있으면 그대로 다시 실린다). 원장의 열을 손으로 옮기지 말 것.
+```
+
 ---
 
 ## 9. 상태 수동 점검 명령

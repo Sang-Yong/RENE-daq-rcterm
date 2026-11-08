@@ -397,6 +397,18 @@ class _WS:
             if MODE == "sheetbad":      # 되대조가 어긋나게 한 칸을 일부러 바꿔 쓴다
                 r = r[:1] + ["TAMPERED"] + r[2:]
             self.grid.append(r)
+    row_count = 1000
+    def add_rows(self, n): self.row_count += n
+    def update(self, values=None, range_name="A1", value_input_option=None):
+        #  2026-11-09 원장 flush 는 범위 쓰기('A3:T4')로 붙인다 -- 실물 gspread 의 Worksheet.update 와 같은 인자
+        import re
+        r0 = int(re.match(r"[A-Z]+(\d+)", range_name).group(1)) - 1
+        for k, r in enumerate(values or []):
+            r = [str(c) for c in r]
+            if MODE == "sheetbad":
+                r = r[:1] + ["TAMPERED"] + r[2:]
+            while len(self.grid) <= r0 + k: self.grid.append([""] * 20)
+            self.grid[r0 + k] = r
 class _SH:
     def __init__(self): self.ws = _WS()
     def get_worksheet_by_id(self, gid): return self.ws
@@ -405,6 +417,7 @@ gs = _mod("gspread"); gs.authorize = lambda cr: type("C", (), {"open_by_key": la
 spec = importlib.util.spec_from_file_location("pg", SUT)
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 m.find_creds = lambda: PARAMS        # 있기만 하면 된다 -- 가짜 Credentials 는 읽지 않는다
+GRID[0] = list(m.HEADER)             # 2026-11-09 : 원장이 시트 헤더를 대조한다 -- 실물 탭처럼 진짜 헤더
 
 def fake_drive_update(token, fid, path, dry):
     n = os.path.basename(path)
@@ -435,8 +448,9 @@ sed -e "s|^map_file.*|map_file = $T/drive.map|" -e "s|^webroot.*|webroot = $T/we
     "$T/websummary.params" > "$T/drive.params"
 printf 'sheet_backup_dir = %s\n' "$T/bak" >> "$T/drive.params"
 
-run_harness() {   # $1=params $2=mode
-   env -i PATH="$PATH" HOME="$T/fake-home" TZ=Asia/Seoul \
+run_harness() {   # $1=params $2=mode   (★ 원장은 매번 새 샌드박스 -- 운영 /Data_ssd/LOG/sheetledger 무접촉)
+   rm -rf "$T/hledger"
+   env -i PATH="$PATH" HOME="$T/fake-home" TZ=Asia/Seoul RENE_SHEET_LEDGER_DIR="$T/hledger" RENE_SHEET_BACKUP_DIR="$T/bak" DRILL_FLAG="$T/none" \
       python3 "$T/drive_harness.py" "$SUT" "$1" "$2"
 }
 
