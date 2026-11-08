@@ -80,7 +80,8 @@ chk "Status 빈칸" "$(col "$T/s2.tsv" 4 12)" ""
 
 echo "[6] cron 스크립트 : --status 는 읽기 전용, ssh 가 안 되면 조용히 물러난다"
 mkdir -p "$T/bin"; printf '#!/bin/sh\nexit 255\n' > "$T/bin/ssh"; chmod +x "$T/bin/ssh"
-out=$(PATH="$T/bin:$PATH" BACKUP_SHEETLOG_STORE=nowhere bash "$DIR/scripts/backup-sheetlog.sh" 2>&1); rc=$?
+out=$(PATH="$T/bin:$PATH" BACKUP_SHEETLOG_STORE=nowhere BACKUP_SHEETLOG_LOG="$T/bs6.log" BACKUP_SHEETLOG_LOCK="$T/.bs6.lock" \
+      BACKUP_SHEETLOG_STATE="$T/bs6.state" BACKUP_SHEETLOG_NOTIFY=/bin/true bash "$DIR/scripts/backup-sheetlog.sh" 2>&1); rc=$?   # ★ 운영 로그·잠금 무접촉 (리뷰 참고 ⑨)
 chk "rc=0" "$rc" "0"
 printf '%s' "$out" | grep -q '닿지 않는다' && ok "물러났다" || bad "물러나지 않음" "$out"
 
