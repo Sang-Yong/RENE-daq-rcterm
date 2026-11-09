@@ -1016,7 +1016,7 @@ https://docs.google.com/spreadsheets/d/1-8wPIg-Q-DpgsyBeSiwHezxM6QlcqhZ3qspAFGus
 
 **사용법.** `python3 tools/sheetlog/sheet_ledger.py --status` (읽기 전용) · 첫 설치/헤더 변경 뒤 `--pull --tab X` 씨앗 (망 있을 때 한 번) · 절차 docs/MANUAL.md §8.2.
 
-**남은 것 (리뷰 참고 백로그, 막지 않음).** ① pending 행은 사람이 시트에서 지워도 다시 붙는다 ③ 되대조 정규화가 못 맞추는 USER_ENTERED 값이면 rc 3 무한 반복 ⑤ KHNP sheet_only 가 reactor 래퍼 flock 밖 (netsync 복귀 flush 와 :47 이 겹치면 중복 가능, 추정) ⑥ append_runs ELIGIBLE 에 removed 런 포함 -> thr 접두어 비교 어긋날 수 있음 ⑦ 오프라인 등재의 carry 값은 원장 마지막 행 기준 ⑧ 백업 탭 append 가 range write 로 바뀜 ⑨ 같은 배치 중복 키 둘째는 [WARN] 만. 실제 망 단절 중 오프라인 등재와 복귀 flush 의 실물 첫 동작은 아직 못 봤다.
+**남은 것 (리뷰 참고 백로그, 막지 않음).** ① pending 행은 사람이 시트에서 지워도 다시 붙는다 ③ 되대조 정규화가 못 맞추는 USER_ENTERED 값이면 rc 3 무한 반복 ⑤ KHNP sheet_only 가 reactor 래퍼 flock 밖 (netsync 복귀 flush 와 :47 이 겹치면 중복 가능, 추정) ⑥ append_runs ELIGIBLE 에 removed 런 포함 -> thr 접두어 비교 어긋날 수 있음 ⑦ 오프라인 등재의 carry 값은 원장 마지막 행 기준 ⑧ 백업 탭 append 가 range write 로 바뀜 ⑨ 같은 배치 중복 키 둘째는 [WARN] 만. 실제 망 단절 중 오프라인 등재와 복귀 flush 의 실물 첫 동작은 아직 못 봤다. 머지된 worktree 9 개(auto-* 5 · drill-mode · tail-finish · zero-events · sheet-ledger)와 브랜치는 11-09 03:2x 에 정리했다 (work-web 하나만 남음; `~/DAQ/work-backup2` 는 별개 클론이라 둠).
 
 #### 11.230 ★★ 11-08 전원 재투입 뒤 0 사건 : run 4440~4445 6 h 32 m 공백 → 두 번째 전원 재투입으로 run 4446 재개 · 시트 오염 5 행 · 자율 사슬의 구멍 4 개 (사용자 요청 11-08 15:3x)
 
@@ -1594,7 +1594,7 @@ run 4431 검증 (13:11~13:13 실측) :
 - **총율 +555 Hz 상승의 74 %(+410 Hz)는 빛과 반대 방향**: Type B 판 10·11·13·14 와 판 6 의 같은 판 짝(비트율 밤/낮 1.09~1.60; 판 11 ch20 173→281 Hz, 판 14 ch26 14:50~15:10 에 320→400 Hz 계단). n≥6(뮤온형) 412→413 Hz 그대로. 이 판들은 13~15 시에 낮았다가 18 시 이후 11-02 같은 시각 값으로 수렴. 원인 미확정(추정 후보: 오후 직사로 이득 저하 / 12:5x 판 7 HV OFF 작업 여파 / 직류광) — GECO HV 채널 기록과 텐트 온도로 확인할 것(사용자).
 - **판정**: 총율로는 빛샘 유무를 못 가린다(빛과 무관한 Type B 상승이 덮음). 채널별 비트꺼짐 S_ADC 지표로는 판 7 외 빛샘 징후 없음 — "판 7 이 유일한 의미 있는 빛샘" 이라는 §11.226·§11.227 결론과 맞다.
 - **한계**: 낮 창이 13:10~16:00 뿐이라 4423 에서 판 7 이 폭주한 09~11 시 자료가 없다 → 11-04 오전으로 재확인. 판 7 은 HV OFF 라 판 7 자체는 못 본다. 문턱 100 아래 아주 약한 빛은 언덕 가장자리 변화와 구별 못 한다. 4423 비교는 11-02 이고 날씨가 다르다.
-- 슬라이드 덱 11 장(비공개 아티팩트) `https://claude.ai/artifact/9SpzJdZUQaSwQJpQ3uLVxz`. 세션 보고 cron 예약: 11-04 10:07(4431 일출 뒤 10 분 평균·PRD 판 짝·채널별 비교)·13:37(로테이션 뒤 run 4432, 하루 곡선). 세션이 끊기면 사라지므로 그때는 `ratestop-20261103b.log` 와 PRD 로 직접 볼 것.
+- 슬라이드 덱 11 장(비공개 아티팩트) `https://claude.ai/artifact/9SpzJdZUQaSwQJpQ3uLVxz`. **11-09 종합 점검 덱 14 장 `https://claude.ai/artifact/4owLP1wJ1gy2fggb27FDVk`** — 조명 런 · 태양빛 4416/4417 · 트리거율 4419~4423 · 판 7 OFF 4431 네 갈래를 한 자리에서 (그림 12 장은 lightleak-20261031 의 산출물 그대로). 세션 보고 cron 예약: 11-04 10:07(4431 일출 뒤 10 분 평균·PRD 판 짝·채널별 비교)·13:37(로테이션 뒤 run 4432, 하루 곡선). 세션이 끊기면 사라지므로 그때는 `ratestop-20261103b.log` 와 PRD 로 직접 볼 것.
 
 **이어서 (11-04 10:07) — 판 7 없이 일출 뒤 재상승 없음: run 4431 아침 보고.** 사용자 11-03 20:16 지시 "내일 낮에 판 7 없이 rate 변화 보고해줘"의 10:07 예약 회차. 정본 `/Data_ssd/LOG/harness/20261104_monitor-analyst_morning-4431.md`, 산출물 `/Data_ssd/LOG/lightleak-20261031/daynight_4431/morning/`. 수집·하드웨어 무접촉, 분석만.
 - 상태 (10:07) : run 4431 (`_all30_thr100_m2_p7off`) sub 1260 running, USB 오류 TCB·FADCDAQ·SADCDAQ 0·0·0, 감시자 health OK, chainwatch gate on 카운터 0, postrun·dataflow 생존, PRD 1259 / FADC 1262, 30 kHz 가드 `ratestop-20261103b.sh` pid 1341159 생존 (11-04 18:00 까지), /Data_ssd 1.9 T 여유.
